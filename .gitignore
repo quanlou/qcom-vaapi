@@ -1,0 +1,10 @@
+# Rust build artifacts
+/rust/target/
+
+# Editor / tooling caches
+/.cache/
+**/__pycache__/
+*.pyc
+
+# Claude local settings (keep shared config, drop machine-local)
+.claude/settings.local.json

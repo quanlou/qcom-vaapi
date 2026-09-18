@@ -1,0 +1,13 @@
+[package]
+name = "msm_drv_video_rs"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "msm_drv_video"
+crate-type = ["cdylib"]
+
+[profile.release]
+panic = "abort"
+lto = "thin"
+codegen-units = 1
