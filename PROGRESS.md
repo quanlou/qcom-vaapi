@@ -21,6 +21,87 @@ short and update it whenever a task starts, finishes, or gets blocked.
 
 ## Active task
 
+- Phase 3 dmabuf zero-copy hardening (claude agent, 2026-09-19): STARTED on
+  committed HEAD c15992c+e0ddcd9. Scope per ROADMAP: keep
+  `VIDIOC_EXPBUF`/`vaExportSurfaceHandle` working; importer/export verifier that
+  reaches the driver callback; reference-count exported fds so CAPTURE requeue
+  waits until the last exported handle retires (ROADMAP immediate-next #4, with
+  GStreamer dmabuf import as the first real lifetime test); validate GPU import;
+  exit = browser without CPU-copy fallback. Baseline driver dir:
+  `/tmp/libva-v4l2-rust-driver-phase3-base` (NOTE: dirs under
+  `LIBVA_DRIVERS_PATH` must contain the UNPREFIXED `msm_drv_video.so`; staging
+  cargo's `libmsm_drv_video.so` name makes libva fail with
+  `va_openDriver() returns -1` and gst register 0 features). Browser front stays
+  with claude/opus (see their entry below); I own the export/lifetime lane.
+  **Baseline RESULT + new root-cause evidence (2026-09-19)**: committed-build
+  gl-roundtrip run corroborates the Known blockers entry — 10 exports succeed
+  (incl. the pre-decode Empty-surface bind), **0 sync drains** (the 6-drain
+  wedge audit above is OBSOLETE post-reorder-0), 6 OUTPUT QBUFs then SOURCE_CHANGE
+  + paired markers, `DECODER_CMD START after source-change event` SUCCEEDS, then
+  silence: `OUT DQ=0`, no more CAP DQs, surfaces Dead. NEW: the qcom_iris kernel
+  source is on this host at `/home/mq/oss/linux` (mainline v7.0-rc6 tree; running
+  module is 7.3.0-15-qcom-x1e, treat as strong hypothesis not gospel). Kernel
+  reading explains the wedge shape: iris decoder-cmd START is only allowed when
+  `drc_pending` (DRC+DRC_LAST) or `drain_pending`; the flush's LAST flag sets
+  DRC_LAST (`iris_inst_sub_state_change_drc_last`), our START therefore succeeds
+  and takes `iris_vdec_start_cmd` branch 1 (`session_resume_drc` both planes).
+  But the kernel's DESIGNED mid-stream DRC resume is a CAPTURE
+  STREAMOFF/STREAMON cycle: `iris_process_streamon_output`'s drc branch also
+  requeues the decoder's input-internal buffers
+  (`iris_alloc_and_queue_input_int_bufs`) and re-sets STAGE/PIPE — the bare
+  START path does NEITHER. Stable-capture export sessions stream CAPTURE before
+  the first AU, so the first SPS parse always lands as a real DRC with CAPTURE
+  streaming (unlike native ffmpeg, whose CAPTURE streamon happens after the
+  event and hits the FIRST_IPSC branch). REGISTERED EXPERIMENT (canary-gated,
+  CPU-copy paths untouched): in `stable_capture` mode only, resume the
+  source-change flush with a CAPTURE streamoff -> requeue previously-Queued
+  slots -> streamon cycle instead of the bare START; fall back to START on any
+  cycle failure. No REQBUFS(0), no realloc, mmap + EXPBUF fds stay valid.
+  **EXPERIMENT RESULT — export-lane DRC wedge FIXED, all gates green
+  (claude agent, 2026-09-19 12:26, build
+  `/tmp/libva-v4l2-rust-driver-drc-cycle`, sources `rust/src/v4l2/poll.rs`
+  `drc_resume_mode()` + `nudge_source_change_start` hook and
+  `rust/src/v4l2/capture.rs` `resume_drc_capture_cycle()`; 93 host tests,
+  fmt+clippy clean):**
+  * gl-roundtrip (export lane, gst glupload dmabuf import): driver log line
+    `DRC resumed via CAPTURE cycle queued=3 requeued=3` then REAL frames
+    (`CAP DQ idx=0 bytes=1413120` = stride 1280 x 736 NV12) — 302 CAP DQ (2
+    empty markers), 296 publishes, 300 OUT DQ, 0 recoveries, 0 aborts, vs
+    baseline 0 decoded frames. Comparator `gst_gl_roundtrip.py` needs explicit
+    `--stride/--ref-stride` when it reports ambiguous stride derivation
+    (gl=[(1280,300),(1536,250)] ref=[(1280,30),(1536,25)]) — with both 1280:
+    `gl_roundtrip=pass frames=30` — all 30 frames byte-exact through exported
+    dma-buf -> EGL import. FIRST byte-exact zero-copy export decode.
+  * Required matrix `tools/verify-rust-driver.sh`: rc=0 — framemd5_ok
+    sample-1/sample-30/sample-full byte-exact vs native,
+    `resolution_probe=passed source_changes=7`,
+    `gst_export_probe=reached_driver status=0`; known pre-existing legs
+    unchanged (one-frame-eos = native produces no frames; bframes-240p =
+    known blocker; hwmap export_probe=blocked_before_driver = ffmpeg
+    limitation).
+  * Churn `tools/verify-session-churn.sh`: rc=0, pass=7 fail=0.
+  * One intermittent episode, NOT hidden: the FIRST matrix run on this build
+    died instantly at rust-sample-30 (`error 23` / 0-byte md5) right after
+    sample-1 matched. Investigated, not retried blind: (a) stashed-source
+    control arm (`/tmp/libva-v4l2-rust-driver-committed-ab`) ran the same
+    matrix GREEN in the same device state; (b) instrumented reproduction of
+    the identical chain (gl-roundtrip -> sample-1 -> sample-30 with
+    V4L2_VA_DEBUG=1, artifacts `/tmp/drc-cycle-repro/`) PASSED end-to-end
+    (s30 2616B md5, 47 CAP DQ, cycle resume clean); (c) full matrix re-run
+    on the experiment build GREEN. Class: pre-existing intermittent
+    second-session leg-death family (same shape as the 18:43 0-byte
+    rust-bframes-240p.md5 from another agent's build), not deterministic to
+    this change; watch for recurrence.
+  * Remaining Phase 3 (unchanged scope): export-fd refcounting/lifetime
+    (CAPTURE requeue waits until last exported handle retires — gst dmabuf
+    branch now LIVE for that work), GPU import validation, browser leg.
+- SUPERSEDED-NOTE (claude agent, 2026-09-19): the three codex "Phase 2 ...
+  NOT COMPLETE" entries below describe pre-reorder-0 experiment trees and are
+  CLOSED — Phase 2 is complete via commits c15992c (source-change flag +
+  inflight-16 + bounded sync drain + SPS/PPS/keyframe replay) and e0ddcd9
+  (SPS VUI `max_num_reorder_frames=0`); the two together pass the required
+  matrix byte-exact vs native, churn 7/7, and the gst export probe reaches the
+  driver. Kept for attribution/history only — do not resume those trees.
 - Phase 2 CPU-copy compatibility (codex agent, 2026-09-19 latest loop): NOT COMPLETE. Current tree adds surface ownership to `ReplayChunk`, inserts FIFO before the post-QBUF pump, preserves published timestamps across rebuilds, avoids recording replay QBUFs back into replay history, and makes `vaSyncSurface` pump immediately after starting a sync STOP. Unit tests pass (`cargo test --manifest-path rust/Cargo.toml`, 91 tests). Hardware still fails the focused 30-frame FFmpeg CPU-copy probe with `rc=251`, timing out on `surface=0x40000003`. Latest artifact/log: `/tmp/libva-v4l2-rust-driver-phase2-clean-history-20260919`, `/tmp/phase2-clean-history-30.log`. Latest evidence: same-session STOP/START can publish a later reordered frame (`surface=0x40000008`, timestamp 300000) but loses earlier pending surface `0x40000003`; rebuild/replay no longer duplicates history, but rebuilt sessions still only produce source-change empty CAPTURE/EOS markers and then fill OUTPUT/stall. Delayed rebuild until 16 chunks did not satisfy the phase gate. Phase 2 remains blocked on a way to release the first frames without destroying reference continuity for the pending B-frame at timestamp 66667.
 - Phase 2 CPU-copy compatibility (codex agent, 2026-09-19 current): NOT COMPLETE. Latest experimental tree still fails the required FFmpeg 30-frame CPU-copy decode with `rc=251`; do not run the full verifier/churn and claim success until this is fixed. Unit tests pass (`cargo test --manifest-path rust/Cargo.toml`, 91 tests). New evidence since the 15:47 note: event-time/source-change `DECODER_CMD_START` is not the root fix. In rebuilt replay sessions, accepted START tends either to make OUTPUT reject later QBUFs with EIO, or with a full OUTPUT queue to return only empty CAPTURE markers and then stall. Disabling START avoids EIO but fills all 16 OUTPUT buffers and stalls. Sync STOP is still the only operation that releases the first three frames, but repeated STOP+rebuild/replay loses the surface mapping for later drained frames: after the second STOP the submit path can rebuild before the sync loop publishes CAPTURE, and replay currently queues history without FIFO surface ownership. Current artifacts/logs: `/tmp/libva-v4l2-rust-driver-phase2-fullqueue-start-20260919`, `/tmp/phase2-fullqueue-start-30.log`; rejected earlier artifacts include `phase2-marker-start`, `phase2-no-sourcechange-start-stop`, `phase2-drain-before-rebuild`, and `phase2-no-stop-sourcechange`. Immediate next implementation direction: stop treating sync-drain rebuild as a transparent stateless replay. Either (a) keep the old drained CAPTURE publications alive and defer rebuild until the sync loop consumes them, with explicit state so submit cannot tear down an fd containing unpublished frames, or (b) attach replayed history to the correct VA surfaces/FIFO so a later STOP on the rebuilt session can publish surface 0x40000003+ instead of dropping replay CAPTURE as no-surface. Also remove temporary debug spam (`replay history record`, QBUF failure detail) after the final design is chosen.
 - Phase 2 CPU-copy compatibility (codex agent, 2026-09-19 15:47 +0700): NOT COMPLETE. Required exit remains `tools/verify-rust-driver.sh` + `tools/verify-session-churn.sh` green. Current findings supersede older STOP/replay optimism: native `h264_v4l2m2m` ioctl trace sends `V4L2_DEC_CMD_START` immediately after same-dims `SOURCE_CHANGE`/`G_FMT` and ignores EBUSY, then keeps feeding OUTPUT; the Rust driver now mirrors the event-time START and keeps CAPTURE streaming. Clean no-STOP path still deadlocks FFmpeg VAAPI-copy because FFmpeg submits exactly 3 AUs then syncs the first surface, while iris withholds CAPTURE until a drain-like command. `V4L2_DEC_CMD_FLUSH` was tested and is ignored/failed. Sync `DECODER_CMD STOP` without replay releases the first frames but then either times out on surface `0x40000003` or enters repeated STOP-failed state; with EOS grace, debug log `/tmp/phase2-syncstop-grace-debug-30.log` shows first STOP publishes ts 0/33333/100000, START resumes, later empty CAPTURE/re-source-change appears, second sync STOP starts with pending=9/out_queued=9, then START happens without frames and repeated STOP attempts fail until FFmpeg times out. Earlier STOP+replay got sample-1 byte-exact but corrupted sample-30/full ordering/pixels. Conclusion: normal midstream STOP is not production-safe; a correct fix still needs a frame-preserving way to release the first displayable frames or an architecture change that lets feeding continue while vaSyncSurface waits. Artifacts: `/tmp/libva-v4l2-rust-driver-phase2-nostop-native-start-20260919`, `/tmp/libva-v4l2-rust-driver-phase2-flush-20260919`, `/tmp/libva-v4l2-rust-driver-phase2-syncstop-grace-20260919`, logs under `/tmp/phase2-*`.
@@ -1117,6 +1198,33 @@ short and update it whenever a task starts, finishes, or gets blocked.
   deadlock; shell syntax still passes, with hardware validation pending.
 
 ## Known blockers
+
+- Phase 3 zero-copy export produces ZERO decoded frames (claude/opus agent,
+  2026-09-19, on committed c15992c+e0ddcd9): `verify-resolution-churn.sh` times
+  out (status 124), and root-causing it showed the GStreamer `vah264dec`
+  zero-copy EXPORT path decodes nothing on this driver — for BOTH seq-480p and
+  test_720p, and reproduced identically at pure HEAD, so it is pre-existing and
+  unrelated to the Phase 2 reorder-0 fix. Evidence:
+  * ffmpeg CPU-copy on seq-480p is byte-exact (90 frames) — decode + SPS synth
+    are correct; the failure is specific to the export/`stable_capture` path.
+  * gst-va submits ONE IDR then blocks in `vaSyncSurface`. iris never even
+    consumes that OUTPUT buffer (`OUT DQ=0`, `out=1/16` frozen); it returns only
+    empty CAPTURE/source-change/EOS markers, and the mid-stream `DECODER_CMD
+    STOP` sync drain issued right after the source-change `START` does NOT flush
+    the lone IDR — iris ignores the drain in that state.
+  * Ruled out: NOT reorder/DPB latency (`max_num_reorder_frames=0` shipped;
+    `max_dec_frame_buffering=1/2` kept 720p+480p byte-exact but gst still emits
+    nothing). NOT CAPTURE-buffer starvation (queueing all 20 buffers made
+    `cap=20/20` and only converted the hang into a silent 0-frame completion —
+    same failure mode as the 720p gst run, whose surfaces all go Dead while
+    `gst-launch` still exits 0, which is why session-churn's exit-status-only
+    gst legs falsely "pass").
+  Conclusion: this is Phase 3 (dmabuf zero-copy), NOT a Phase 2 regression.
+  Next step needs root-level `qcom_iris` HFI tracing to see why iris will not
+  drain a single IDR across the initial `SOURCE_CHANGE` for the export path
+  (same tooling gap as the `bframes-240p` blocker). Meanwhile
+  `verify-resolution-churn.sh` should arguably be de-gated from the Phase 2
+  required verifier since it exercises the export path, not CPU-copy.
 
 - Phase 2 re-verification (claude/opus agent, 2026-09-18): with a fresh
   release build `/tmp/libva-v4l2-rust-driver-phase2-20260918` (65 host tests

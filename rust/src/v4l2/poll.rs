@@ -21,6 +21,26 @@ fn source_change_marker_is_expected(source_change_flush: bool, draining: bool) -
     source_change_flush && !draining
 }
 
+/// How a completed source-change flush is resumed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DrcResumeMode {
+    /// CAPTURE streamoff/streamon cycle: the kernel's streamon path re-queues
+    /// the decoder's input-internal buffers and re-applies STAGE/PIPE before
+    /// resuming the DRC.
+    CaptureCycle,
+    /// Bare `DECODER_CMD START`, valid for sessions whose CAPTURE queue was
+    /// not streaming when the source change landed.
+    DecoderStart,
+}
+
+fn drc_resume_mode(stable_capture: bool, cap_streaming: bool) -> DrcResumeMode {
+    if stable_capture && cap_streaming {
+        DrcResumeMode::CaptureCycle
+    } else {
+        DrcResumeMode::DecoderStart
+    }
+}
+
 impl V4l2Session {
     pub(crate) fn pump(&mut self, timeout_ms: i32) -> Vec<ReadyCapture> {
         let mut ready = std::mem::take(&mut self.ready);
@@ -165,6 +185,22 @@ impl V4l2Session {
 
     fn nudge_source_change_start(&mut self) {
         if self.source_change_start_sent {
+            return;
+        }
+        // Stable-capture (export) sessions stream CAPTURE before the first AU,
+        // so the first source change lands as a full DRC while both planes are
+        // streaming. A bare DECODER_CMD START resumes that DRC but skips the
+        // CAPTURE-streamon work (input-internal buffer requeue, STAGE/PIPE),
+        // which leaves the firmware silently unable to consume OUTPUT; run the
+        // streamon-based resume instead and keep the bare START for sessions
+        // that match the native CAPTURE-after-event flow.
+        if drc_resume_mode(self.stable_capture, self.cap.streaming) == DrcResumeMode::CaptureCycle
+            && self.resume_drc_capture_cycle()
+        {
+            self.source_change_start_sent = true;
+            self.source_change_flush = false;
+            self.source_change_empty_seen = false;
+            self.source_change_eos_seen = false;
             return;
         }
         let mut cmd: v4l2_decoder_cmd = zeroed();
@@ -406,5 +442,15 @@ mod tests {
         assert!(source_change_marker_is_expected(true, false));
         assert!(!source_change_marker_is_expected(true, true));
         assert!(!source_change_marker_is_expected(false, false));
+    }
+
+    #[test]
+    fn only_stable_streaming_sessions_resume_drc_via_capture_cycle() {
+        assert_eq!(drc_resume_mode(true, true), DrcResumeMode::CaptureCycle);
+        // Without stable capture the native-shaped CAPTURE-after-event flow
+        // still resumes through the bare START.
+        assert_eq!(drc_resume_mode(true, false), DrcResumeMode::DecoderStart);
+        assert_eq!(drc_resume_mode(false, true), DrcResumeMode::DecoderStart);
+        assert_eq!(drc_resume_mode(false, false), DrcResumeMode::DecoderStart);
     }
 }

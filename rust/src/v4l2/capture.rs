@@ -6,7 +6,7 @@
 //! slot before submission, so an exported dma-buf keeps backing the same
 //! surface. This module owns that split.
 
-use super::{BufferState, V4l2Session};
+use super::{BufferState, V4l2Session, debug_enabled};
 
 impl V4l2Session {
     /// Whether a client-visible CAPTURE index belongs to this active queue
@@ -76,6 +76,49 @@ impl V4l2Session {
             buffer.state = BufferState::Free;
         }
     }
+
+    /// Resume a completed source-change (DRC) flush by cycling CAPTURE
+    /// through STREAMOFF/STREAMON instead of a bare `DECODER_CMD START`. The
+    /// kernel's CAPTURE-streamon path re-queues the decoder's input-internal
+    /// buffers and re-applies STAGE/PIPE before resuming the DRC; the bare
+    /// START path does neither, which leaves the firmware silently unable to
+    /// consume OUTPUT in stable-capture sessions. Only slots that were queued
+    /// before the cycle are requeued, so slot ownership, mapped planes, and
+    /// exported dma-bufs are untouched (no REQBUFS, no realloc). Returns
+    /// false when the queue is not streaming or the cycle fails; the caller
+    /// then falls back to the bare START.
+    pub(super) fn resume_drc_capture_cycle(&mut self) -> bool {
+        if !self.cap.streaming {
+            return false;
+        }
+        let queued: Vec<usize> = (0..self.cap.buffers.len())
+            .filter(|&i| self.cap.buffers[i].state == BufferState::Queued)
+            .collect();
+        Self::stream_off_fd(self.fd, &mut self.cap);
+        for &i in &queued {
+            if let Some(b) = self.cap.buffers.get_mut(i) {
+                b.state = BufferState::Free;
+            }
+        }
+        let requeued = queued
+            .iter()
+            .filter(|&&i| self.qbuf_capture(i).is_ok())
+            .count();
+        if self.stream_on(false).is_err() {
+            if debug_enabled() {
+                eprintln!("msm_drv_video_rs: DRC CAPTURE cycle STREAMON failed");
+            }
+            return false;
+        }
+        if debug_enabled() {
+            eprintln!(
+                "msm_drv_video_rs: DRC resumed via CAPTURE cycle queued={} requeued={}",
+                queued.len(),
+                requeued
+            );
+        }
+        true
+    }
 }
 
 #[cfg(test)]
@@ -140,6 +183,20 @@ mod tests {
         ));
 
         session.release_capture_reservation(1);
+        assert!(matches!(session.cap.buffers[0].state, BufferState::Free));
+    }
+
+    #[test]
+    fn drc_capture_cycle_requires_a_streaming_capture_queue() {
+        let path = CString::new("/dev/null").unwrap();
+        let fd = unsafe { open(path.as_ptr(), O_RDWR, 0) };
+        assert!(fd >= 0, "could not open /dev/null for the DRC cycle test");
+
+        let mut session = session_with_unmapped_capture(fd);
+        assert!(!session.cap.streaming);
+        // Not streaming means the bare START fallback is correct; the cycle
+        // must refuse without touching the queue.
+        assert!(!session.resume_drc_capture_cycle());
         assert!(matches!(session.cap.buffers[0].state, BufferState::Free));
     }
 }
