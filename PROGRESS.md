@@ -310,6 +310,50 @@ short and update it whenever a task starts, finishes, or gets blocked.
   `pass=7 fail=0`). Both commit-gate conditions satisfied → export-fd
   refcounting + bounded sync-drain retry landed together in the commit
   following this entry.
+- NEXT REGISTERED (claude agent, 2026-09-19 21:05 +0700): GL-roundtrip
+  re-run on the committed refcount+bound driver (971ec71, staged
+  `/tmp/libva-v4l2-rust-driver-refcount/msm_drv_video.so`). Target: the
+  Phase 3 open blocker "full 300-frame GL run aborts at ~frame 29"
+  (export-lifetime signature) — refcounting landed specifically so
+  exported dma-bufs keep their CAPTURE slots across requeue, so the
+  roundtrip should now survive past frame 29. Discipline: window-probe
+  first (canary must be 1, box quiet), then ONE
+  `tools/verify-gl-roundtrip.sh` run; no blind retries; result recorded
+  here either way.
+- RESULT — GL-roundtrip on refcount+bound: the ~frame-29 export-lifetime
+  abort is GONE; a NEW export-lane content/order defect replaces it
+  (claude agent, 2026-09-19 21:05–21:12 +0700, one run, window canary=1
+  load 0.36; job a562b2 → `/tmp/refcount-glround.log`).
+  * LIFETIME FIXED: gl.raw = 414,720,000 B = exactly 300 I420 frames
+    (1280x720 stride 1280) — the FULL sample decoded, exported via
+    PRIME, imported by glupload, downloaded, and written through the
+    GL path with clean teardown (`DECODER_CMD STOP drain started
+    (pending=4)` → `teardown flush done pending=0 out_queued=0`).
+    48 `ExportSurfaceHandle succeeded` calls back 300 frames (gst
+    re-exports pooled dmabufs). Prior behavior: hard abort at ~frame 29.
+  * rc=1 is the COMPARATOR GUARD, not a wedge: script exited at its
+    frame-0 stride disambiguation (`ambiguous stride derivation ...
+    frame0_matches=0`) because gl frame 0 no longer equals ref frame 0.
+  * CONTENT/ORDER DEFECT (offline visible-pixel MD5 of gl.raw vs
+    ref.raw, 30 ref frames): (a) gl[0..2] are THREE IDENTICAL frames —
+    log lines 36/42/48 export surface 1073741824 three times BEFORE
+    the first real CAP DQ (line 100), with `retired exports cap_idx=0
+    refs 1 -> 0` between re-exports — i.e. slots exported while their
+    CAPTURE slot still held no content; (b) the next 30 gl frames are a
+    permutation ref→gl = [3,8,5,-,-,4,6,7,-,10,-,9,11,13,18,15,14,16,
+    19,20,24,21,22,25,28,26,33,27,23,31] where ref3/ref4/ref8/ref10
+    pixels appear NOWHERE in the 300-frame dump; (c) CAP DQ completion
+    order ≠ timestamp order (idx=4 ts=0.66667 dequeued before idx=2
+    ts=0.100000; idx=1 ts=0.0 first), 8 CAPTURE slots cycling.
+  * VERDICT: Phase 3 "export-lifetime aborts at ~frame 29" blocker
+    CLOSED by 971ec71 (refcount did its job — requeue now waits for
+    exported fds). Open Phase 3 target is now export-lane CORRECTNESS:
+    (1) pre-content exports (surface exported before its CAPTURE slot
+    is filled — candidates: defer/fail exports of non-ready surfaces,
+    or bind export to slot content-ready), (2) out-of-ts-order CAP DQ
+    publication vs gst slot reuse, (3) 4 pixel-sets missing entirely.
+  * Artifacts: `/tmp/refcount-glround.log`,
+    `/tmp/libva-v4l2-gl-roundtrip/{gl.raw,ref.raw,gst-gl.log}`.
 - SUPERSEDED-NOTE (claude agent, 2026-09-19): the three codex "Phase 2 ...
   NOT COMPLETE" entries below describe pre-reorder-0 experiment trees and are
   CLOSED — Phase 2 is complete via commits c15992c (source-change flag +
