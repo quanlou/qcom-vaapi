@@ -12,6 +12,13 @@ pub(super) enum BufferState {
 
 pub(super) struct V4l2Buffer {
     pub(super) state: BufferState,
+    /// VA surface that owns this slot as a stable-capture reservation.
+    /// Reserved slots never enter the kernel queue: this firmware picks its
+    /// own target buffer for every decoded frame, so the only way an
+    /// exported dma-buf can keep backing the same VA surface is for its
+    /// allocation to be invisible to the decoder until the driver copies the
+    /// completed working-slot frame in at dequeue time.
+    pub(super) reserved_for: Option<u32>,
     pub(super) num_planes: usize,
     pub(super) addr: [*mut c_void; VIDEO_MAX_PLANES_USIZE],
     pub(super) len: [usize; VIDEO_MAX_PLANES_USIZE],
@@ -30,6 +37,7 @@ impl V4l2Buffer {
     pub(super) fn new() -> Self {
         Self {
             state: BufferState::Free,
+            reserved_for: None,
             num_planes: 0,
             addr: [ptr::null_mut(); VIDEO_MAX_PLANES_USIZE],
             len: [0; VIDEO_MAX_PLANES_USIZE],

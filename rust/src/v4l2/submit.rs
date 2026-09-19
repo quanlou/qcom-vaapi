@@ -106,7 +106,14 @@ impl V4l2Session {
             self.ready.extend(ready);
         }
         self.maybe_resume_after_drain()?;
-        if let Some(cap_idx) = cap_idx {
+        if self.stable_capture {
+            // Reserved slots must never enter the kernel queue (the firmware
+            // would write someone else's frame into an exported dma-buf).
+            // Only the unreserved working sub-pool is visible to the decoder;
+            // topping it up here also recycles working slots completed by
+            // earlier frames.
+            self.queue_working_capture()?;
+        } else if let Some(cap_idx) = cap_idx {
             self.queue_capture(cap_idx)?;
         } else if self.cap.streaming {
             self.queue_all_capture()?;

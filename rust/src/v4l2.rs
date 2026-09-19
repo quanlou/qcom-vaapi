@@ -19,7 +19,14 @@ use queue::{BufferState, V4l2Buffer, V4l2Queue};
 const OUT_NUM_BUFFERS: u32 = 16;
 const CAP_NUM_BUFFERS_MIN: u32 = 20;
 const CAP_NUM_BUFFERS_MAX: u32 = 128;
-const CAP_EXTRA_BUFFERS: u32 = 16;
+const CAP_EXTRA_BUFFERS: u32 = 28;
+/// Cap on how many "working" (non-reserved) CAPTURE slots stay in the kernel
+/// queue at once, in stable-capture mode. Chromium exports its whole 22-frame
+/// pool one surface at a time and interleaves exports with decode; if the
+/// first submit queues every Free slot, later exports have nothing left to
+/// reserve. Keeping at most WORKING_QUEUE_MAX slots queued keeps the pipeline
+/// fed while leaving Free slots for future reservations.
+const WORKING_QUEUE_MAX: usize = 6;
 /// Maximum transparent session rebuilds per session. One rebuild rescues a
 /// one-off abort on an otherwise healthy device. If the rebuilt session also
 /// aborts, the device is wedged at the firmware level (repeated aborted

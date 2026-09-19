@@ -85,8 +85,12 @@ pub(crate) unsafe extern "C" fn sync_surface2(
             return err(VA_STATUS_ERROR_INVALID_SURFACE);
         };
         match surf.state {
-            SurfaceState::Ready => return ok(),
-            SurfaceState::Dead | SurfaceState::Empty => return err(VA_STATUS_ERROR_DECODING_ERROR),
+            // Empty means no vaBeginPicture ran yet, so there is nothing to
+            // wait for. Chromium's VaapiVideoDecodeLinuxGL export flow syncs
+            // pool surfaces before their first decode as a validity check;
+            // Mesa/Intel drivers succeed there, so we do too.
+            SurfaceState::Ready | SurfaceState::Empty => return ok(),
+            SurfaceState::Dead => return err(VA_STATUS_ERROR_DECODING_ERROR),
             SurfaceState::InProgress | SurfaceState::Pending => {}
         }
         let owner = surf.owner;

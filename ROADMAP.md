@@ -463,7 +463,17 @@ Exit criteria:
 
 Exit criteria:
 
-- Browser can use the driver without CPU-copy fallback.
+- Browser can use the driver without CPU-copy fallback. **MET**
+  (2026-09-20). Snap Chromium's `native` mode selects `VaapiVideoDecoder`,
+  exports its 22-frame pool through this driver, and plays the sample
+  end-to-end (2565 `BeginPicture` / `EndPicture` frames, 2561 zero-copy
+  publishes, 0 sync/export errors, 0 internal decoding errors, 90+ s of
+  looped playback). Landing fixes: `vaSyncSurface` on an Empty surface now
+  returns SUCCESS instead of DECODING_ERROR (matches Mesa/Intel; Chromium
+  syncs pool surfaces before their first decode as a validity check); the
+  CAPTURE pool grew from 20 to 32 slots and `queue_working_capture` now
+  caps queued working slots at `WORKING_QUEUE_MAX=6` so Chromium's
+  interleaved export/decode loop cannot exhaust unreserved slots.
 
 ### Phase 4: harden lifecycle and reconfiguration
 

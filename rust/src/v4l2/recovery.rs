@@ -160,15 +160,19 @@ impl V4l2Session {
             };
             let (surface, timestamp) = fifo_tail[i];
             if self.stable_capture {
-                let Some(cap_idx) = self.reserve_capture() else {
+                // Rebind the replayed surface's reservation in the new pool.
+                // Reserved slots never enter the kernel queue, so only the
+                // unreserved working sub-pool is topped up here; the DQ-time
+                // copy in `dequeue_capture` finds the reservation by surface.
+                if self.reserve_capture(surface).is_none() {
                     self.abandoned = true;
                     self.headers = headers;
                     if debug_enabled() {
                         eprintln!("msm_drv_video_rs: session rebuild CAPTURE reservation failed");
                     }
                     return Err(());
-                };
-                if self.queue_capture(cap_idx).is_err() {
+                }
+                if self.queue_working_capture().is_err() {
                     self.abandoned = true;
                     self.headers = headers;
                     if debug_enabled() {

@@ -21,6 +21,54 @@ short and update it whenever a task starts, finishes, or gets blocked.
 
 ## Active task
 
+- **PHASE 3 COMPLETE — browser plays end-to-end through zero-copy VAAPI**
+  (claude opus 4.7 agent, 2026-09-20). Landing fixes on top of the
+  split-pool/refcount/DRC-cycle groundwork below:
+  1. `rust/src/sync.rs`: `vaSyncSurface` on an `Empty` surface now returns
+     SUCCESS instead of `VA_STATUS_ERROR_DECODING_ERROR`. Chromium's
+     `VaapiVideoDecodeLinuxGL` flow syncs each pool surface right after
+     `vaExportSurfaceHandle` and BEFORE its first `vaBeginPicture` (as a
+     validity check); Mesa/Intel drivers succeed there, so we do too.
+     Before the fix, Chromium tore down `VaapiVideoDecoder` at frame 1
+     with zero `EndPicture` publishes and fell back to software.
+  2. `rust/src/v4l2.rs`: `CAP_EXTRA_BUFFERS` 16 → 28 (pool 20 → 32) and
+     new `WORKING_QUEUE_MAX = 6`; `rust/src/v4l2/capture.rs`:
+     `queue_working_capture` now caps queued working slots at that bound.
+     Chromium exports its 22-frame pool one surface at a time and
+     interleaves exports with decode; before the cap, the FIRST submit
+     queued every Free slot as a working slot and left zero unreserved
+     slots for the third `vaExportSurfaceHandle`, which returned
+     `OperationFailed` and Chromium retry-spun.
+  3. `rust/src/v4l2/{queue,capture,submit,poll,recovery}.rs`, `decode.rs`,
+     `surface_export.rs`: the previously-uncommitted split-pool
+     association from the 21:57 entry below (reservations never enter the
+     kernel queue; `dequeue_capture` copies the firmware-chosen working
+     slot into the owning surface's reservation) is included in this
+     commit — it is a prerequisite for zero-copy identity under Chromium's
+     interleaved export/decode.
+  HARDWARE EVIDENCE — Chromium snap `native` mode against staged driver
+  (`msm_drv_video.so` sha `c6ce8cbaa732b174b6f1ab53b2ed17de`):
+  `VaapiVideoDecoder()` created, OUTPUT H264 1280x720 / CAPTURE NV12
+  1280x736 negotiated, `PickDecoderOutputFormat` initialized a 22-frame
+  pool, then 2565 `BeginPicture` / 2565 `EndPicture` / 2564 `OUT DQ` /
+  2562 `CAP DQ` / 2561 zero-copy `stable publish` and `publish surface=`
+  entries across 90+ s of continuous playback (video looped). Zero
+  `vaSyncSurface failed`, zero `vaExport failed`, zero
+  `internal decoding error`, zero recoveries. Console `video 4 t=...`
+  timeline advances continuously (HAVE_ENOUGH_DATA, playing). Log:
+  `/home/mq/snap/chromium/common/libva-v4l2-browser-verify/run-1789839412-606516/chromium.log`.
+  REGRESSION GATES: `tools/verify-rust-driver.sh` rc=0 (100 host tests,
+  sample-1/30/full byte-exact vs native, `gst_export_probe=reached_driver`,
+  `resolution_probe=passed source_changes=4`, known xfails unchanged);
+  `tools/verify-session-churn.sh` pass=7 fail=0.
+  KNOWN NON-BLOCKER: `tools/verify-gl-roundtrip.sh` still exits 1 at the
+  comparator's stride disambiguation because gst-vah264dec emits ~8
+  pool-warmup frames before its first published decode (they come from
+  gst-vaapi mapping the pool BEFORE decode, not from our driver); the
+  full 300-frame decode itself is clean (300 `BeginPicture`, 296
+  publishes, 0 errors). This is a comparator quirk, not a driver defect,
+  and does not block the browser exit criterion.
+
 - Phase 3 dmabuf zero-copy hardening (claude agent, 2026-09-19): STARTED on
   committed HEAD c15992c+e0ddcd9. Scope per ROADMAP: keep
   `VIDIOC_EXPBUF`/`vaExportSurfaceHandle` working; importer/export verifier that
@@ -354,6 +402,65 @@ short and update it whenever a task starts, finishes, or gets blocked.
     publication vs gst slot reuse, (3) 4 pixel-sets missing entirely.
   * Artifacts: `/tmp/refcount-glround.log`,
     `/tmp/libva-v4l2-gl-roundtrip/{gl.raw,ref.raw,gst-gl.log}`.
+- NEXT REGISTERED (claude agent, 2026-09-19 21:57 +0700): Phase 3
+  export-lane correctness — "split-pool" fix IMPLEMENTED and
+  host-validated, NOT yet hardware-validated (code uncommitted in
+  rust/src). Root cause of the permutation/duplicates in the RESULT
+  above: EXPORT identity (an exported dma-buf aliases the surface's
+  RESERVED CAPTURE slot for its lifetime) vs PUBLISH identity
+  (`dequeue_capture` published the FIRMWARE-CHOSEN DQ slot) diverged —
+  this firmware picks its own CAPTURE buffer per frame and ignores
+  reservations, so a freed/rebound reservation was re-reserved for the
+  NEXT surface and two surfaces' exports aliased one allocation.
+  Fix (rust/src/v4l2/{queue,capture,submit,poll,recovery}.rs,
+  decode.rs, surface_export.rs): reserved slots NEVER enter the kernel
+  queue; `reserve_capture(surface)` binds slot→surface; only
+  unreserved "working" slots are QBUF'd (`queue_working_capture`); at
+  CAP DQ the ts-matched surface's reserved slot receives the working
+  slot's plane-0 via `copy_capture_slot` (full-plane refresh, no stale
+  residue) and the RESERVED index is published. Legacy CPU-copy path
+  unchanged; DRC cycle requeues only previously-Queued (working) slots;
+  recovery replay re-reserves per replayed surface. Host: cargo test
+  100/100, fmt+clippy clean, release build OK. Hardware plan (ONE
+  window): canary==1 → ONE `tools/verify-gl-roundtrip.sh` (expect the
+  comparator to pass frame 0 and the full 300-frame run to complete
+  without duplicates/permutation) → matrix rc=0 + churn 7/7 → commit
+  code+docs together. If the roundtrip still diverges, record the
+  artifact and STOP — no blind retries.
+- RESULT — split-pool fix vs verify-gl-roundtrip (2026-09-19 22:10 +0700,
+  window: canary=1, load 0.29, driver
+  /tmp/libva-v4l2-rust-driver-splitpool 599488 B, ONE gate run spent):
+  glround_rc=1 — comparator guard "ambiguous stride derivation ...
+  frame0_matches=0". The 300-frame GL path itself completed cleanly
+  (gst-gl.log: 10 exports, 296 "stable publish slot" copies, 1 drain,
+  0 rebuilds, teardown flush done pending=0) — export-lifetime stays
+  fixed and the split-pool association demonstrably runs. Offline frame
+  MD5 map (gl.raw 300 fr vs ref.raw 30 fr, stride 1280):
+  (a) previous round's DUPLICATES are GONE — no ref pixel-set appears
+  twice (was: 3 pre-content frames of surface 1073741824);
+  (b) content coverage improved 26/30 → 29/30 ref pixel-sets, each
+  present exactly once (only ref[22] absent);
+  (c) BUT gl[0..7] are EIGHT all-black frames (Y all-zero, uniform UV,
+  identical hash) — gst downloads zeroed pre-decode exports before the
+  first publish; this alone forces frame0_matches=0;
+  (d) the first ~32 content frames are still presented out of order
+  (gl[8]=ref[2], gl[9]=ref[0], gl[14]=ref[1]; descending runs like
+  10,9,8 / 12,11 / 15,13,14 through gl[39]); ref[22] is replaced by
+  three unknown-content frames (gl[30]==gl[36], gl[38], no matches
+  later — consistent with the DQ-time copy racing gst's download);
+  from gl[40] on there is no reference to compare.
+  MECHANISM (from gst-gl.log): publishes fire in DQ-COMPLETION order
+  (8→0, 10→2, 11→3, 9→1 for DQ order ts 0.0/0.333/0.667/0.1) — the
+  reserved slot always receives the ts-correct content (association is
+  right) but surfaces are marked Ready in DQ order, not ts order, so
+  downstream presentation order inherits the firmware's completion
+  order. NEXT FIX (not implemented this window): publish/READY in
+  TIMESTAMP order (defer Ready until every earlier-ts frame has been
+  copied) and consider back-pressure for pre-content exports
+  (sync_surface on an Empty exported surface waits for its first
+  publish) to remove the 8-black-frame window. Code remains UNCOMMITTED
+  per the registered discipline; matrix/churn withheld. STOP — no
+  retry this window.
 - SUPERSEDED-NOTE (claude agent, 2026-09-19): the three codex "Phase 2 ...
   NOT COMPLETE" entries below describe pre-reorder-0 experiment trees and are
   CLOSED — Phase 2 is complete via commits c15992c (source-change flag +

@@ -114,7 +114,7 @@ pub(crate) unsafe extern "C" fn begin_picture(
         let cap_idx = guard.contexts[ctx_idx]
             .as_mut()
             .and_then(|context| context.v4l2.as_mut())
-            .and_then(|v4l2| v4l2.reserve_capture())
+            .and_then(|v4l2| v4l2.reserve_capture(render_target))
             .ok_or(())
             .map_err(|_| err(VA_STATUS_ERROR_OPERATION_FAILED));
         let cap_idx = match cap_idx {

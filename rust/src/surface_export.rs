@@ -195,7 +195,7 @@ pub(crate) fn export_ready_surface(
         let Some(cap_idx) = guard.contexts[ctx_idx]
             .as_mut()
             .and_then(|context| context.v4l2.as_mut())
-            .and_then(|v4l2| v4l2.reserve_capture())
+            .and_then(|v4l2| v4l2.reserve_capture(surface_id))
         else {
             return Err(SurfaceExportError::OperationFailed);
         };

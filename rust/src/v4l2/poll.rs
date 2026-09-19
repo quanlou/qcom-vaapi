@@ -12,6 +12,7 @@ use super::{
 };
 use crate::bindings::*;
 use std::ffi::c_void;
+use std::ptr;
 
 fn should_ack_source_change_flush(capture_streaming: bool) -> bool {
     capture_streaming
@@ -109,6 +110,7 @@ impl V4l2Session {
         {
             if let Some(buffer) = self.cap.buffers.get_mut(live_idx) {
                 buffer.state = BufferState::Free;
+                buffer.reserved_for = None;
             }
         } else if self
             .cap
@@ -173,6 +175,36 @@ impl V4l2Session {
         let bytes =
             unsafe { std::slice::from_raw_parts(b.addr[0] as *const u8, b.len[0]) }.to_vec();
         Some((bytes, stride, height))
+    }
+
+    /// Copy a completed live CAPTURE slot's mapped plane into another live
+    /// slot and mark the destination plane used. This is the stable-capture
+    /// publish step: the firmware-chosen working slot's frame must land in
+    /// the surface's reserved slot, whose allocation backs the surface's
+    /// exported dma-bufs.
+    fn copy_capture_slot(&mut self, from_live: usize, to_live: usize) {
+        if from_live == to_live {
+            return;
+        }
+        let (src, len) = match self.cap.buffers.get(from_live) {
+            Some(b) if !b.addr[0].is_null() => (b.addr[0], b.len[0]),
+            _ => return,
+        };
+        let Some(dst) = self.cap.buffers.get_mut(to_live) else {
+            return;
+        };
+        if dst.addr[0].is_null() || len == 0 {
+            return;
+        }
+        let bytes = len.min(dst.len[0]);
+        unsafe { ptr::copy_nonoverlapping(src as *const u8, dst.addr[0] as *mut u8, bytes) };
+        dst.planes[0].bytesused = bytes as u32;
+        if debug_enabled() {
+            eprintln!(
+                "msm_drv_video_rs: stable publish slot {} -> {} bytes={}",
+                from_live, to_live, bytes
+            );
+        }
     }
 
     pub(crate) fn export_capture(&mut self, idx: usize) -> Option<CaptureExport> {
@@ -453,7 +485,23 @@ impl V4l2Session {
         self.source_change_eos_seen = false;
         self.source_change_start_sent = false;
         self.drain_eos_grace = false;
-        let cap_idx = self.legacy_len() + idx;
+        // Stable-capture publish: the firmware decoded into its own working
+        // slot (`idx`), but this surface's exported dma-bufs alias its
+        // reserved slot. Copy the completed frame into the reservation and
+        // publish the reservation index so export identity and publish
+        // identity agree. Legacy CPU-copy sessions keep publishing the
+        // dequeued slot itself.
+        let dq_cap_idx = self.legacy_len() + idx;
+        let cap_idx = if self.stable_capture
+            && let Some(reserved) = self.reserved_capture_for(surface)
+        {
+            if reserved != dq_cap_idx {
+                self.copy_capture_slot(idx, reserved - self.legacy_len());
+            }
+            reserved
+        } else {
+            dq_cap_idx
+        };
         let frame =
             self.capture_copy(cap_idx)
                 .map(|(data, stride, height)| crate::state::SurfaceFrame {
@@ -471,7 +519,11 @@ impl V4l2Session {
 
 #[cfg(test)]
 mod tests {
+    use super::super::{LegacyPool, O_RDWR, V4l2Buffer, V4l2Queue, open};
     use super::*;
+    use crate::bindings::v4l2_buf_type;
+    use std::collections::VecDeque;
+    use std::ffi::CString;
 
     #[test]
     fn streaming_source_change_is_acknowledged() {
@@ -494,5 +546,113 @@ mod tests {
         assert_eq!(drc_resume_mode(true, false), DrcResumeMode::DecoderStart);
         assert_eq!(drc_resume_mode(false, true), DrcResumeMode::DecoderStart);
         assert_eq!(drc_resume_mode(false, false), DrcResumeMode::DecoderStart);
+    }
+
+    /// A synthetic session with one legacy slot and two backed live CAPTURE
+    /// slots. The backing memory is heap-allocated and handed to the session
+    /// as a raw pointer; the test must clear `addr`/`len` before dropping the
+    /// session so teardown never unmaps it.
+    fn session_with_backed_capture(fd: i32) -> (V4l2Session, Vec<Vec<u8>>) {
+        let mut session = V4l2Session {
+            fd,
+            devnode: "/dev/null".to_string(),
+            out: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE as u32),
+            cap: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE as u32),
+            legacy: Vec::new(),
+            fifo: Vec::new(),
+            ready: Vec::new(),
+            eos: false,
+            draining: false,
+            out_order: VecDeque::new(),
+            aborted: false,
+            source_change_flush: false,
+            source_change_empty_seen: false,
+            source_change_eos_seen: false,
+            source_change_start_sent: false,
+            drain_eos_grace: false,
+            abandoned: false,
+            sync_drain_failures: 0,
+            stable_capture: false,
+            in_recover: false,
+            recoveries: 0,
+            headers: Vec::new(),
+            replay_history: Vec::new(),
+            published_timestamps: VecDeque::new(),
+        };
+        session.legacy.push(LegacyPool {
+            buffers: vec![V4l2Buffer::new()],
+            width: 320,
+            height: 240,
+            stride: 320,
+        });
+        let mut backing = Vec::new();
+        for _ in 0..2 {
+            let mut b = V4l2Buffer::new();
+            let mut mem = vec![0u8; 64];
+            b.addr[0] = mem.as_mut_ptr() as *mut c_void;
+            b.len[0] = 64;
+            b.num_planes = 1;
+            session.cap.buffers.push(b);
+            // Moving the Vec header into `backing` does not move the heap
+            // bytes, so the raw pointer stays valid for the test's lifetime.
+            backing.push(mem);
+        }
+        (session, backing)
+    }
+
+    #[test]
+    fn stable_publish_copies_working_slot_into_the_reserved_slot() {
+        let path = CString::new("/dev/null").unwrap();
+        let fd = unsafe { open(path.as_ptr(), O_RDWR, 0) };
+        assert!(fd >= 0, "could not open /dev/null for the publish test");
+
+        let (mut session, _backing) = session_with_backed_capture(fd);
+        session.stable_capture = true;
+        // Legacy pool occupies client index zero; live slot zero becomes
+        // surface 7's reservation (client index one).
+        assert_eq!(session.reserve_capture(7), Some(1));
+
+        // Stale reservation content; a completed firmware frame filling the
+        // whole working-slot plane (live index one).
+        unsafe {
+            ptr::write_bytes(session.cap.buffers[0].addr[0] as *mut u8, 0x11, 64);
+            ptr::write_bytes(session.cap.buffers[1].addr[0] as *mut u8, 0xAA, 64);
+        }
+        session.cap.buffers[1].planes[0].bytesused = 40;
+
+        // The dequeued working slot (client index 2) publishes through
+        // surface 7's reservation (client index 1). The copy refreshes the
+        // whole mapped plane (min of the two lengths) so stale reservation
+        // content cannot leak past the frame boundary.
+        let dq_live = 1;
+        let dq_cap_idx = session.legacy_len() + dq_live;
+        let reserved = session.reserved_capture_for(7).unwrap();
+        assert_ne!(reserved, dq_cap_idx);
+        session.copy_capture_slot(dq_live, reserved - session.legacy_len());
+
+        // Read every observable result into locals before handing the heap
+        // backing back, so a failed assert can never leave raw heap pointers
+        // in the session for Drop to "unmap".
+        let (used, copied) = {
+            let b = &session.cap.buffers[0];
+            let data = unsafe { std::slice::from_raw_parts(b.addr[0] as *const u8, 64) };
+            (b.planes[0].bytesused, data.to_vec())
+        };
+        let working_owned = session.cap.buffers[1].reserved_for;
+        let working_free = matches!(session.cap.buffers[1].state, BufferState::Free);
+
+        // Hand the heap backing back before Drop so teardown never unmaps it.
+        for b in session.cap.buffers.iter_mut() {
+            b.addr[0] = ptr::null_mut();
+            b.len[0] = 0;
+            b.num_planes = 0;
+        }
+
+        assert_eq!(used, 64);
+        assert!(copied.iter().all(|&x| x == 0xAA));
+        // The working slot keeps no owner and stays Free so the next working
+        // top-up can requeue it.
+        assert_eq!(working_owned, None);
+        assert!(working_free);
     }
 }

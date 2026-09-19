@@ -5,8 +5,15 @@
 //! PRIME export needs a stricter model where one VA surface owns one CAPTURE
 //! slot before submission, so an exported dma-buf keeps backing the same
 //! surface. This module owns that split.
+//!
+//! Stable-capture slots are a reservation pool, not decoder targets. This
+//! firmware chooses its own CAPTURE buffer for every decoded frame, so a
+//! queued reservation receives someone else's frame. Export identity therefore
+//! requires that reserved slots never be queued: the firmware decodes into
+//! unreserved "working" slots, and `dequeue_capture` copies the completed
+//! working slot into the owning surface's reservation before publishing it.
 
-use super::{BufferState, V4l2Session, debug_enabled};
+use super::{BufferState, V4l2Session, WORKING_QUEUE_MAX, debug_enabled};
 
 impl V4l2Session {
     /// Whether a client-visible CAPTURE index belongs to this active queue
@@ -21,10 +28,11 @@ impl V4l2Session {
         self.stable_capture
     }
 
-    /// Return a live CAPTURE slot before it is queued. The caller can export
-    /// this slot immediately; `queue_capture` later puts the same slot in the
-    /// kernel queue for the VA surface that owns it.
-    pub(crate) fn reserve_capture(&mut self) -> Option<usize> {
+    /// Return a live CAPTURE slot as the stable reservation of `surface`.
+    /// The slot never enters the kernel queue; the client may export it
+    /// immediately, and `dequeue_capture` later copies the completed working
+    /// slot into it before publishing.
+    pub(crate) fn reserve_capture(&mut self, surface: u32) -> Option<usize> {
         if self.cap.buffers.is_empty() && self.capture_pool_setup().is_err() {
             return None;
         }
@@ -32,10 +40,24 @@ impl V4l2Session {
             .cap
             .buffers
             .iter()
-            .position(|b| b.state == BufferState::Free)?;
+            .position(|b| b.state == BufferState::Free && b.reserved_for.is_none())?;
         self.stable_capture = true;
-        self.cap.buffers[idx].state = BufferState::Reserved;
+        if let Some(buffer) = self.cap.buffers.get_mut(idx) {
+            buffer.state = BufferState::Reserved;
+            buffer.reserved_for = Some(surface);
+        }
         Some(self.legacy_len() + idx)
+    }
+
+    /// The client-visible reservation slot owned by `surface`, if it is
+    /// still live and reserved.
+    pub(crate) fn reserved_capture_for(&self, surface: u32) -> Option<usize> {
+        let base = self.legacy_len();
+        self.cap
+            .buffers
+            .iter()
+            .position(|b| b.reserved_for == Some(surface) && b.state == BufferState::Reserved)
+            .map(|idx| base + idx)
     }
 
     /// Queue every currently free CAPTURE buffer for the legacy CPU-copy
@@ -53,8 +75,41 @@ impl V4l2Session {
         Ok(())
     }
 
-    /// Queue the reserved CAPTURE slot identified by the client-visible
-    /// index. Indices from legacy pools cannot be queued after a rebuild.
+    /// Queue free unreserved ("working") CAPTURE buffers up to
+    /// `WORKING_QUEUE_MAX`. This is the stable-capture counterpart of
+    /// `queue_all_capture`: reserved slots must stay out of the kernel queue
+    /// so the firmware cannot write over an exported dma-buf, while completed
+    /// working slots are recycled here. Chromium exports its whole 22-frame
+    /// pool one surface at a time and interleaves exports with decode; if
+    /// every Free slot were queued after the first submit, later exports
+    /// would have nothing left to reserve.
+    pub(super) fn queue_working_capture(&mut self) -> Result<(), ()> {
+        let mut queued = self
+            .cap
+            .buffers
+            .iter()
+            .filter(|b| b.state == BufferState::Queued)
+            .count();
+        if queued >= WORKING_QUEUE_MAX {
+            return Ok(());
+        }
+        for idx in 0..self.cap.buffers.len() {
+            if queued >= WORKING_QUEUE_MAX {
+                break;
+            }
+            let workable = self.cap.buffers[idx].state == BufferState::Free
+                && self.cap.buffers[idx].reserved_for.is_none();
+            if workable {
+                self.qbuf_capture(idx)?;
+                queued += 1;
+            }
+        }
+        Ok(())
+    }
+
+    /// Queue the CAPTURE slot identified by the client-visible index
+    /// (legacy CPU-copy mode only; stable reservations are never queued).
+    /// Indices from legacy pools cannot be queued after a rebuild.
     pub(super) fn queue_capture(&mut self, idx: usize) -> Result<(), ()> {
         let base = self.legacy_len();
         if idx < base {
@@ -74,6 +129,7 @@ impl V4l2Session {
             && buffer.state == BufferState::Reserved
         {
             buffer.state = BufferState::Free;
+            buffer.reserved_for = None;
         }
     }
 
@@ -176,15 +232,53 @@ mod tests {
         assert!(!session.stable_capture_mode());
         // The synthetic legacy pool occupies client-visible index zero, so
         // the first live slot must be returned at index one.
-        assert_eq!(session.reserve_capture(), Some(1));
+        assert_eq!(session.reserve_capture(7), Some(1));
         assert!(session.stable_capture_mode());
         assert!(matches!(
             session.cap.buffers[0].state,
             BufferState::Reserved
         ));
+        assert_eq!(session.cap.buffers[0].reserved_for, Some(7));
+        // The owner is resolvable, and other surfaces cannot see the slot.
+        assert_eq!(session.reserved_capture_for(7), Some(1));
+        assert_eq!(session.reserved_capture_for(9), None);
 
         session.release_capture_reservation(1);
         assert!(matches!(session.cap.buffers[0].state, BufferState::Free));
+        assert_eq!(session.cap.buffers[0].reserved_for, None);
+    }
+
+    #[test]
+    fn stable_queue_topup_feeds_only_unreserved_working_slots() {
+        let path = CString::new("/dev/null").unwrap();
+        let fd = unsafe { open(path.as_ptr(), O_RDWR, 0) };
+        assert!(
+            fd >= 0,
+            "could not open /dev/null for the working-pool test"
+        );
+
+        let mut session = session_with_unmapped_capture(fd);
+        // The builder leaves one live slot; add a second so a reservation
+        // and a working slot can coexist.
+        session.cap.buffers.push(V4l2Buffer::new());
+        // Live slot one (first free) becomes surface 7's reservation; live
+        // slot two stays a working slot.
+        assert_eq!(session.reserve_capture(7), Some(1));
+
+        // The top-up only ever offers the free working slot to the kernel;
+        // /dev/null rejects QBUF, which surfaces as an error while the
+        // reservation itself must remain untouched and unqueued (queued
+        // reservations are what let the firmware overwrite exported
+        // dma-bufs).
+        assert!(session.queue_working_capture().is_err());
+        assert!(matches!(
+            session.cap.buffers[0].state,
+            BufferState::Reserved
+        ));
+        assert_eq!(session.cap.buffers[0].reserved_for, Some(7));
+        assert_eq!(session.reserved_capture_for(7), Some(1));
+        // The rejected QBUF leaves the working slot Free for the next top-up.
+        assert!(matches!(session.cap.buffers[1].state, BufferState::Free));
     }
 
     #[test]
@@ -240,6 +334,9 @@ mod tests {
         session.cap.buffers[0].state = BufferState::Reserved;
         session.requeue_capture(1);
         assert!(matches!(session.cap.buffers[0].state, BufferState::Free));
+        // Releasing the reservation drops its owner too: a freed slot must
+        // never stay bound to a surface that no longer exists.
+        assert_eq!(session.cap.buffers[0].reserved_for, None);
         // The requeue itself never mutates the counter; retirement is
         // explicit via `retire_slot_exports` on the release path.
         assert_eq!(session.cap.buffers[0].export_refs, 2);
