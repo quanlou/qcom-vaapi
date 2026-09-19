@@ -17,10 +17,6 @@ fn should_ack_source_change_flush(capture_streaming: bool) -> bool {
     capture_streaming
 }
 
-fn should_resume_after_source_change(capture_streaming: bool) -> bool {
-    capture_streaming
-}
-
 fn source_change_marker_is_expected(source_change_flush: bool, draining: bool) -> bool {
     source_change_flush && !draining
 }
@@ -160,6 +156,36 @@ impl V4l2Session {
         })
     }
 
+    fn maybe_resume_source_change(&mut self) {
+        if self.source_change_flush && self.source_change_empty_seen && self.source_change_eos_seen
+        {
+            self.nudge_source_change_start();
+        }
+    }
+
+    fn nudge_source_change_start(&mut self) {
+        if self.source_change_start_sent {
+            return;
+        }
+        let mut cmd: v4l2_decoder_cmd = zeroed();
+        cmd.cmd = V4L2_DEC_CMD_START;
+        let res = xioctl(
+            self.fd,
+            VIDIOC_DECODER_CMD,
+            &mut cmd as *mut _ as *mut c_void,
+        );
+        if debug_enabled() {
+            if res.is_ok() {
+                eprintln!("msm_drv_video_rs: DECODER_CMD START after source-change event");
+            } else {
+                eprintln!(
+                    "msm_drv_video_rs: DECODER_CMD START after source-change event failed/ignored"
+                );
+            }
+        }
+        self.source_change_start_sent = true;
+    }
+
     fn dequeue_events(&mut self) {
         loop {
             let mut evt: v4l2_event = zeroed();
@@ -176,13 +202,24 @@ impl V4l2Session {
                 // pending work outside those two handshakes is the firmware
                 // abort signature: the session is dead and must be rebuilt.
                 let pending = self.fifo.len() + self.out_queued();
-                if source_change_marker_is_expected(self.source_change_flush, self.draining) {
+                if self.drain_eos_grace {
+                    self.drain_eos_grace = false;
+                    if debug_enabled() {
+                        eprintln!(
+                            "msm_drv_video_rs: EOS paired with prior drain (pending={}); continuing",
+                            pending
+                        );
+                    }
+                } else if source_change_marker_is_expected(self.source_change_flush, self.draining)
+                {
+                    self.source_change_eos_seen = true;
                     if debug_enabled() {
                         eprintln!(
                             "msm_drv_video_rs: EOS paired with source change (pending={}); continuing",
                             pending
                         );
                     }
+                    self.maybe_resume_source_change();
                 } else if !self.draining && pending > 0 {
                     self.aborted = true;
                     if debug_enabled() {
@@ -218,19 +255,12 @@ impl V4l2Session {
                         // firmware recovery; the next real decoded frame clears
                         // it.
                         self.source_change_flush = true;
-                    }
-                    if should_resume_after_source_change(self.cap.streaming) {
-                        // Without an explicit START this driver can remain
-                        // silent after the marker pair with OUTPUT still queued.
-                        // The marker handling above prevents the old false
-                        // abort, so START is now only a resume nudge.
-                        let mut cmd: v4l2_decoder_cmd = zeroed();
-                        cmd.cmd = V4L2_DEC_CMD_START;
-                        let _ = xioctl(
-                            self.fd,
-                            VIDIOC_DECODER_CMD,
-                            &mut cmd as *mut _ as *mut c_void,
-                        );
+                        self.source_change_empty_seen = false;
+                        self.source_change_eos_seen = false;
+                        self.source_change_start_sent = false;
+                        // Keep CAPTURE streaming and treat the following empty
+                        // CAPTURE/EOS pair as a marker. This firmware accepts
+                        // START in rebuilt sessions but then rejects OUTPUT.
                     }
                 }
             }
@@ -296,12 +326,14 @@ impl V4l2Session {
             // fatal session abort.
             let pending = self.fifo.len() + self.out_queued();
             if source_change_marker_is_expected(self.source_change_flush, self.draining) {
+                self.source_change_empty_seen = true;
                 if debug_enabled() {
                     eprintln!(
                         "msm_drv_video_rs: empty CAPTURE paired with source change (pending={}); requeueing",
                         pending
                     );
                 }
+                self.maybe_resume_source_change();
             } else if !self.draining && pending > 0 {
                 self.aborted = true;
                 if debug_enabled() {
@@ -320,18 +352,41 @@ impl V4l2Session {
         }
         let ts_usec = (buf.timestamp.tv_sec as u64).saturating_mul(1_000_000)
             + (buf.timestamp.tv_usec as u64);
-        let hit = self
-            .fifo
-            .iter()
-            .position(|(_, ts)| *ts == ts_usec)
-            .unwrap_or(0);
+        let Some(hit) = self.fifo.iter().position(|(_, ts)| *ts == ts_usec) else {
+            if debug_enabled() {
+                eprintln!(
+                    "msm_drv_video_rs: CAP timestamp {} has no pending surface; dropping replay output",
+                    ts_usec
+                );
+            }
+            let _ = self.qbuf_capture(idx);
+            return None;
+        };
         let (surface, _) = self.fifo.remove(hit);
+        self.published_timestamps.push_back(ts_usec);
+        const MAX_PUBLISHED_TIMESTAMPS: usize = 128;
+        if self.published_timestamps.len() > MAX_PUBLISHED_TIMESTAMPS {
+            self.published_timestamps.pop_front();
+        }
         // A real decoded frame means the decoder has resumed after any
         // source-change flush; stop suppressing abort detection.
         self.source_change_flush = false;
+        self.source_change_empty_seen = false;
+        self.source_change_eos_seen = false;
+        self.source_change_start_sent = false;
+        self.drain_eos_grace = false;
+        let cap_idx = self.legacy_len() + idx;
+        let frame =
+            self.capture_copy(cap_idx)
+                .map(|(data, stride, height)| crate::state::SurfaceFrame {
+                    data,
+                    stride,
+                    height,
+                });
         Some(ReadyCapture {
             surface,
-            cap_idx: self.legacy_len() + idx,
+            cap_idx,
+            frame,
         })
     }
 }
@@ -341,11 +396,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn streaming_source_change_is_acknowledged_and_resumed() {
+    fn streaming_source_change_is_acknowledged() {
         assert!(should_ack_source_change_flush(true));
         assert!(!should_ack_source_change_flush(false));
-        assert!(should_resume_after_source_change(true));
-        assert!(!should_resume_after_source_change(false));
     }
 
     #[test]

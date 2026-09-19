@@ -102,6 +102,7 @@ mod tests {
             height: 16,
             state,
             cap_idx: None,
+            frame: None,
             owner: VA_INVALID_ID,
             exported: false,
             export_count: 0,

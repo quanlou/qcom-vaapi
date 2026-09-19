@@ -17,9 +17,9 @@ pub(crate) use abi::{V4L2_PIX_FMT_AV1, V4L2_PIX_FMT_H264, V4L2_PIX_FMT_HEVC, V4L
 use queue::{BufferState, V4l2Buffer, V4l2Queue};
 
 const OUT_NUM_BUFFERS: u32 = 16;
-const CAP_NUM_BUFFERS_MIN: u32 = 32;
+const CAP_NUM_BUFFERS_MIN: u32 = 20;
 const CAP_NUM_BUFFERS_MAX: u32 = 128;
-const CAP_EXTRA_BUFFERS: u32 = 64;
+const CAP_EXTRA_BUFFERS: u32 = 16;
 /// Maximum transparent session rebuilds per session. One rebuild rescues a
 /// one-off abort on an otherwise healthy device. If the rebuilt session also
 /// aborts, the device is wedged at the firmware level (repeated aborted
@@ -38,10 +38,22 @@ fn release_mapping(addr: *mut c_void, length: usize) {
 #[cfg(test)]
 static UNMAPPED_PLANES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct ReadyCapture {
     pub(crate) surface: u32,
     pub(crate) cap_idx: usize,
+    /// Pixels copied at dequeue time. CAPTURE slots are recycled as soon as
+    /// they are requeued, so late surface reads must use this snapshot rather
+    /// than the slot's live mapping.
+    pub(crate) frame: Option<crate::state::SurfaceFrame>,
+}
+
+#[derive(Clone)]
+struct ReplayChunk {
+    data: Vec<u8>,
+    timestamp: u64,
+    keyframe: bool,
+    surface: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -90,6 +102,13 @@ pub(crate) struct V4l2Session {
     /// V4L2_BUF_FLAG_LAST) and raises a paired V4L2_EVENT_EOS, neither of which
     /// is the firmware abort.
     source_change_flush: bool,
+    /// Empty CAPTURE marker observed for the active source-change boundary.
+    source_change_empty_seen: bool,
+    /// Paired EOS event observed for the active source-change boundary.
+    source_change_eos_seen: bool,
+    /// START was already sent for this source-change boundary.
+    source_change_start_sent: bool,
+    drain_eos_grace: bool,
     /// Set when recovery is impossible or exhausted; sessions then fail like
     /// they did before recovery existed.
     abandoned: bool,
@@ -102,8 +121,10 @@ pub(crate) struct V4l2Session {
     in_recover: bool,
     recoveries: u32,
     /// Last SPS/PPS bytes seen by the session, prepended to the first replayed
-    /// chunk so the rebuilt decoder session sees parameter sets again.
+    /// chunk during recovery so the rebuilt decoder sees parameter sets again.
     headers: Vec<u8>,
+    replay_history: Vec<ReplayChunk>,
+    published_timestamps: VecDeque<u64>,
 }
 
 impl V4l2Session {
@@ -131,17 +152,22 @@ impl V4l2Session {
             out_order: VecDeque::new(),
             aborted: false,
             source_change_flush: false,
+            source_change_empty_seen: false,
+            source_change_eos_seen: false,
+            source_change_start_sent: false,
+            drain_eos_grace: false,
             abandoned: false,
             stable_capture: false,
             in_recover: false,
             recoveries: 0,
             headers: Vec::new(),
+            replay_history: Vec::new(),
+            published_timestamps: VecDeque::new(),
         };
 
         if this.query_cap().is_err()
             || this.subscribe_events().is_err()
             || this.setup_output(width, height).is_err()
-            || this.capture_pool_setup().is_err()
         {
             return Err(());
         }
@@ -173,11 +199,21 @@ impl V4l2Session {
     fn stream_on(&mut self, output: bool) -> Result<(), ()> {
         let q = if output { &mut self.out } else { &mut self.cap };
         let mut type_ = q.type_ as c_int;
-        xioctl(
+        let res = xioctl(
             self.fd,
             VIDIOC_STREAMON,
             &mut type_ as *mut _ as *mut c_void,
-        )?;
+        );
+        if res.is_err() {
+            if debug_enabled() {
+                eprintln!(
+                    "msm_drv_video_rs: STREAMON {} failed: {}",
+                    if output { "OUTPUT" } else { "CAPTURE" },
+                    std::io::Error::last_os_error()
+                );
+            }
+            return Err(());
+        }
         q.streaming = true;
         Ok(())
     }
@@ -187,7 +223,17 @@ impl V4l2Session {
         req.type_ = type_;
         req.memory = v4l2_memory::V4L2_MEMORY_MMAP as u32;
         req.count = count;
-        xioctl(self.fd, VIDIOC_REQBUFS, &mut req as *mut _ as *mut c_void)?;
+        if xioctl(self.fd, VIDIOC_REQBUFS, &mut req as *mut _ as *mut c_void).is_err() {
+            if debug_enabled() {
+                eprintln!(
+                    "msm_drv_video_rs: REQBUFS type={} count={} failed: {}",
+                    type_,
+                    count,
+                    std::io::Error::last_os_error()
+                );
+            }
+            return Err(());
+        }
         Ok(req.count)
     }
 
@@ -322,11 +368,17 @@ mod tests {
             out_order: VecDeque::new(),
             aborted: false,
             source_change_flush: false,
+            source_change_empty_seen: false,
+            source_change_eos_seen: false,
+            source_change_start_sent: false,
+            drain_eos_grace: false,
             abandoned: false,
             stable_capture: false,
             in_recover: false,
             recoveries: 0,
             headers: Vec::new(),
+            replay_history: Vec::new(),
+            published_timestamps: VecDeque::new(),
         };
         for q in [&mut s.out, &mut s.cap] {
             for _ in 0..2 {

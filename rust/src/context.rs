@@ -97,6 +97,9 @@ pub(crate) unsafe extern "C" fn create_context(
             slices: Vec::new(),
             syn: H264Synth::new(cfg.profile),
             out_seq: 0,
+            first_poc: None,
+            poc_epoch_usec: 0,
+            max_timestamp_usec: 0,
             v4l2: Some(v4l2),
         });
         unsafe { *context = context_id };
@@ -194,6 +197,9 @@ mod tests {
             slices: Vec::new(),
             syn: H264Synth::new(VAProfile::VAProfileH264Main),
             out_seq: 0,
+            first_poc: None,
+            poc_epoch_usec: 0,
+            max_timestamp_usec: 0,
             v4l2: None,
         }
     }
@@ -212,6 +218,7 @@ mod tests {
             height: 240,
             state: SurfaceState::Pending,
             cap_idx: Some(4),
+            frame: None,
             owner: context_id,
             exported: false,
             export_count: 0,

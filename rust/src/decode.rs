@@ -17,6 +17,27 @@ use crate::{err, ok, state_from_ctx};
 use std::ffi::c_int;
 use std::ptr;
 
+fn normalized_h264_timestamp_usec(
+    poc: i32,
+    keyframe: bool,
+    first_poc: &mut Option<i32>,
+    epoch_usec: &mut u64,
+    max_timestamp_usec: &mut u64,
+) -> u64 {
+    if poc < 0 {
+        return *epoch_usec;
+    }
+    if keyframe && first_poc.is_some() {
+        *epoch_usec = max_timestamp_usec.saturating_add(33_333);
+        *first_poc = Some(poc);
+    }
+    let base = *first_poc.get_or_insert(poc);
+    let relative_poc = i64::from(poc).saturating_sub(i64::from(base)).max(0) as u64;
+    let timestamp = epoch_usec.saturating_add((relative_poc * 100_000 + 3) / 6);
+    *max_timestamp_usec = (*max_timestamp_usec).max(timestamp);
+    timestamp
+}
+
 pub(crate) unsafe extern "C" fn begin_picture(
     ctx: VADriverContextP,
     context: VAContextID,
@@ -296,13 +317,15 @@ pub(crate) unsafe extern "C" fn end_picture(
         let _ = std::fs::write(path, &frame.bytes);
     }
     let _ = frame.emitted_headers;
-    let poc = c.syn.pp.CurrPic.TopFieldOrderCnt;
-    let timestamp_usec = if poc >= 0 {
-        ((poc as u64) * 100_000 + 3) / 6
-    } else {
-        0
-    };
     let keyframe = frame.bytes.windows(5).any(|w| w == [0, 0, 0, 1, 0x65]);
+    let poc = c.syn.pp.CurrPic.TopFieldOrderCnt;
+    let timestamp_usec = normalized_h264_timestamp_usec(
+        poc,
+        keyframe,
+        &mut c.first_poc,
+        &mut c.poc_epoch_usec,
+        &mut c.max_timestamp_usec,
+    );
     if std::env::var_os("V4L2_VA_DEBUG").is_some() {
         eprintln!(
             "msm_drv_video_rs: EndPicture context={} surface={} seq={} bytes={} ts={} keyframe={}",
@@ -354,6 +377,31 @@ pub(crate) unsafe extern "C" fn end_picture(
 
 #[cfg(test)]
 mod tests {
+    use super::normalized_h264_timestamp_usec;
+
+    #[test]
+    fn h264_timestamps_are_relative_to_first_poc() {
+        let mut first = None;
+        let mut epoch = 0;
+        let mut max_ts = 0;
+        assert_eq!(
+            normalized_h264_timestamp_usec(65_536, true, &mut first, &mut epoch, &mut max_ts),
+            0
+        );
+        assert_eq!(
+            normalized_h264_timestamp_usec(65_542, false, &mut first, &mut epoch, &mut max_ts),
+            100_000
+        );
+        assert_eq!(
+            normalized_h264_timestamp_usec(65_538, false, &mut first, &mut epoch, &mut max_ts),
+            33_333
+        );
+        assert_eq!(
+            normalized_h264_timestamp_usec(65_536, true, &mut first, &mut epoch, &mut max_ts),
+            133_333
+        );
+    }
+
     use super::*;
     use crate::state::{DRV_ID_BASE_CONTEXT, DRV_ID_BASE_SURFACE, DriverBox, Surface};
     use std::ffi::c_void;
@@ -369,6 +417,7 @@ mod tests {
             height: 240,
             state: SurfaceState::Pending,
             cap_idx: Some(2),
+            frame: None,
             owner: DRV_ID_BASE_CONTEXT,
             exported: false,
             export_count: 0,
@@ -409,6 +458,9 @@ mod tests {
                 slices: Vec::new(),
                 syn: crate::h264::H264Synth::new(VAProfile::VAProfileH264Main),
                 out_seq: 0,
+                first_poc: None,
+                poc_epoch_usec: 0,
+                max_timestamp_usec: 0,
                 v4l2: None,
             });
             guard.surfaces[0] = Some(Surface {
@@ -416,6 +468,7 @@ mod tests {
                 height: 240,
                 state: SurfaceState::Pending,
                 cap_idx: Some(2),
+                frame: None,
                 owner: DRV_ID_BASE_CONTEXT,
                 exported: true,
                 export_count: 1,

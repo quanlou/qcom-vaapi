@@ -192,6 +192,12 @@ impl V4l2Session {
             }
             return Err(e);
         }
+        if !self.stable_capture && self.queue_all_capture().is_err() {
+            if debug_enabled() {
+                eprintln!("msm_drv_video_rs: CAPTURE QBUF failed before STREAMON");
+            }
+            return Err(());
+        }
         // A failed STREAMON can leave the queue in an error state; retrying
         // STREAMON on the same buffers never clears it. Reinitialize the whole
         // CAPTURE queue (STREAMOFF, REQBUFS(0), realloc, requeue) between

@@ -33,6 +33,7 @@ pub(crate) fn apply_ready_captures(guard: &mut DriverState, ready: Vec<ReadyCapt
                 );
             }
             s.cap_idx = Some(r.cap_idx);
+            s.frame = r.frame;
             // A PRIME export is a handle to the CAPTURE allocation, not a
             // one-frame lease. Keep the bookkeeping live while the same VA
             // surface is reused so importers can retain the fd across frames.
@@ -74,6 +75,7 @@ pub(crate) unsafe extern "C" fn sync_surface2(
     };
     let start = std::time::Instant::now();
     let deadline = start + std::time::Duration::from_nanos(timeout_ns.max(1));
+    let mut compatibility_drain_started = false;
     loop {
         let mut guard = match state.lock.lock() {
             Ok(g) => g,
@@ -94,11 +96,24 @@ pub(crate) unsafe extern "C" fn sync_surface2(
         let Some(c) = guard.contexts[ctx_idx].as_mut() else {
             return err(VA_STATUS_ERROR_INVALID_CONTEXT);
         };
-        // A sync call can be made while the client is still feeding the same
-        // context. Let the queue drain naturally; issuing DECODER_CMD STOP
-        // here would race a later vaEndPicture and strand its OUTPUT packet.
+        // FFmpeg can sync an early display-order surface on one thread while
+        // its decode thread is still submitting the following access units.
+        // Only pump while holding the state lock; issuing a midstream STOP
+        // breaks reference continuity, and retaining/reacquiring the lock in
+        // a tight loop can starve the submitter that will make this surface
+        // ready.
         let ready = if let Some(v4l2) = c.v4l2.as_mut() {
-            v4l2.pump(5)
+            let mut ready = v4l2.pump(2);
+            if ready.is_empty()
+                && !compatibility_drain_started
+                && start.elapsed() >= std::time::Duration::from_millis(20)
+            {
+                compatibility_drain_started = v4l2.maybe_start_sync_drain();
+                if compatibility_drain_started {
+                    ready.extend(v4l2.pump(2));
+                }
+            }
+            ready
         } else {
             Vec::new()
         };
@@ -159,6 +174,9 @@ pub(crate) unsafe extern "C" fn sync_surface2(
         if timed_out {
             return err(VA_STATUS_ERROR_TIMEDOUT);
         }
+        // Give a concurrent BeginPicture/RenderPicture/EndPicture sequence a
+        // chance to acquire the state lock before the next polling iteration.
+        std::thread::yield_now();
     }
 }
 
@@ -174,6 +192,7 @@ mod tests {
             height: 64,
             state,
             cap_idx,
+            frame: None,
             owner: VA_INVALID_ID,
             exported: false,
             export_count: 0,
@@ -192,6 +211,7 @@ mod tests {
             vec![ReadyCapture {
                 surface: surf_id,
                 cap_idx: 3,
+                frame: None,
             }],
         );
 
@@ -212,10 +232,12 @@ mod tests {
                 ReadyCapture {
                     surface: DRV_ID_BASE_SURFACE + 9_999,
                     cap_idx: 0,
+                    frame: None,
                 },
                 ReadyCapture {
                     surface: VA_INVALID_ID,
                     cap_idx: 1,
+                    frame: None,
                 },
             ],
         );
@@ -235,6 +257,7 @@ mod tests {
             vec![ReadyCapture {
                 surface: DRV_ID_BASE_SURFACE,
                 cap_idx: 11,
+                frame: None,
             }],
         );
 
@@ -251,6 +274,7 @@ mod tests {
             height: 64,
             state: SurfaceState::Pending,
             cap_idx: Some(4),
+            frame: None,
             owner: VA_INVALID_ID,
             exported: true,
             export_count: 1,
@@ -262,6 +286,7 @@ mod tests {
             vec![ReadyCapture {
                 surface: DRV_ID_BASE_SURFACE,
                 cap_idx: 4,
+                frame: None,
             }],
         );
 

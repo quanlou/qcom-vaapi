@@ -249,6 +249,9 @@ mod tests {
             slices: Vec::new(),
             syn: H264Synth::new(VAProfile::VAProfileH264Main),
             out_seq: 0,
+            first_poc: None,
+            poc_epoch_usec: 0,
+            max_timestamp_usec: 0,
             v4l2: None,
         }
     }

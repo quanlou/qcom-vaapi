@@ -15,7 +15,7 @@ pub(crate) use layout::{
 use crate::bindings::*;
 use crate::state::{
     Buffer, DRV_ID_BASE_BUFFER, DRV_ID_BASE_IMAGE, DRV_MAX_DIM, DRV_MIN_DIM, Image, SurfaceState,
-    buffer_index, context_index, image_index, surface_index,
+    buffer_index, image_index, surface_index,
 };
 use crate::sync::sync_surface;
 use crate::{err, ok, state_from_ctx};
@@ -157,10 +157,9 @@ pub(crate) unsafe extern "C" fn get_image(
         Ok(g) => g,
         Err(_) => return err(VA_STATUS_ERROR_OPERATION_FAILED),
     };
-    let Some((surf_width, surf_height, surf_state, surf_cap_idx, surf_owner)) = guard.surfaces
-        [surf_idx]
+    let Some((surf_width, surf_height, surf_state, surf_frame)) = guard.surfaces[surf_idx]
         .as_ref()
-        .map(|s| (s.width, s.height, s.state, s.cap_idx, s.owner))
+        .map(|s| (s.width, s.height, s.state, s.frame.clone()))
     else {
         return err(VA_STATUS_ERROR_INVALID_SURFACE);
     };
@@ -178,19 +177,12 @@ pub(crate) unsafe extern "C" fn get_image(
     if surf_state != SurfaceState::Ready {
         return err(VA_STATUS_ERROR_DECODING_ERROR);
     }
-    let Some(cap_idx) = surf_cap_idx else {
+    // Read the snapshot taken when the frame was dequeued. The CAPTURE slot
+    // itself may already have been requeued and overwritten by the decoder.
+    let Some(frame) = surf_frame else {
         return err(VA_STATUS_ERROR_DECODING_ERROR);
     };
-    let Some(ctx_idx) = context_index(surf_owner) else {
-        return err(VA_STATUS_ERROR_INVALID_CONTEXT);
-    };
-    let Some(c) = guard.contexts[ctx_idx].as_ref() else {
-        return err(VA_STATUS_ERROR_INVALID_CONTEXT);
-    };
-    let Some((cap, cap_stride, cap_h)) = c.v4l2.as_ref().and_then(|v| v.capture_copy(cap_idx))
-    else {
-        return err(VA_STATUS_ERROR_DECODING_ERROR);
-    };
+    let (cap, cap_stride, cap_h) = (frame.data, frame.stride, frame.height);
     let Some(buf_idx) = buffer_index(img.image.buf) else {
         return err(VA_STATUS_ERROR_INVALID_BUFFER);
     };
@@ -239,10 +231,9 @@ pub(crate) unsafe extern "C" fn derive_image(
         Ok(g) => g,
         Err(_) => return err(VA_STATUS_ERROR_OPERATION_FAILED),
     };
-    let Some((surf_width, surf_height, surf_state, surf_cap_idx, surf_owner)) = guard.surfaces
-        [surf_idx]
+    let Some((surf_width, surf_height, surf_state, surf_frame)) = guard.surfaces[surf_idx]
         .as_ref()
-        .map(|s| (s.width, s.height, s.state, s.cap_idx, s.owner))
+        .map(|s| (s.width, s.height, s.state, s.frame.clone()))
     else {
         return err(VA_STATUS_ERROR_INVALID_SURFACE);
     };
@@ -251,16 +242,15 @@ pub(crate) unsafe extern "C" fn derive_image(
     let mut cap_h = surf_height as u32;
     let mut data: Vec<u8> = Vec::new();
 
+    // Read the snapshot taken when the frame was dequeued; the CAPTURE slot
+    // itself may already have been requeued and overwritten by the decoder.
     if surf_state == SurfaceState::Ready
-        && let (Some(cap_idx), Some(ctx_idx)) = (surf_cap_idx, context_index(surf_owner))
-        && let Some(c) = guard.contexts[ctx_idx].as_ref()
-        && let Some((cap, cap_stride, cap_height)) =
-            c.v4l2.as_ref().and_then(|v| v.capture_copy(cap_idx))
+        && let Some(frame) = surf_frame
     {
-        pitch = cap_stride;
-        cap_h = cap_height;
+        pitch = frame.stride;
+        cap_h = frame.height;
         let data_size = nv12_data_size(pitch, cap_h);
-        data = cap.into_iter().take(data_size as usize).collect();
+        data = frame.data.into_iter().take(data_size as usize).collect();
     }
 
     let data_size = nv12_data_size(pitch, cap_h);

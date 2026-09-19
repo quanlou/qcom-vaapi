@@ -5,7 +5,7 @@
 //! parent session runtime so submission and completion paths stay distinct.
 
 use super::{
-    BufferState, OUT_NUM_BUFFERS, V4L2_BUF_FLAG_KEYFRAME, V4L2_DEC_CMD_START, V4L2_DEC_CMD_STOP,
+    BufferState, OUT_NUM_BUFFERS, ReplayChunk, V4L2_BUF_FLAG_KEYFRAME, V4L2_DEC_CMD_STOP,
     V4l2Session, VIDIOC_DECODER_CMD, VIDIOC_QBUF, debug_enabled, xioctl, zeroed,
 };
 use crate::bindings::*;
@@ -21,24 +21,26 @@ fn output_inflight_limit(source_change_flush: bool) -> usize {
 }
 
 impl V4l2Session {
-    fn resume_source_change_decode(&mut self) {
-        if !self.source_change_flush || !self.out.streaming {
-            return;
+    fn remember_replay_chunk(
+        &mut self,
+        data: &[u8],
+        timestamp_usec: u64,
+        keyframe: bool,
+        surface: Option<u32>,
+    ) {
+        if keyframe {
+            self.replay_history.clear();
         }
-        let mut cmd: v4l2_decoder_cmd = zeroed();
-        cmd.cmd = V4L2_DEC_CMD_START;
-        if xioctl(
-            self.fd,
-            VIDIOC_DECODER_CMD,
-            &mut cmd as *mut _ as *mut c_void,
-        )
-        .is_ok()
-        {
-            if debug_enabled() {
-                eprintln!("msm_drv_video_rs: DECODER_CMD START after source-change submission");
-            }
-        } else if debug_enabled() {
-            eprintln!("msm_drv_video_rs: DECODER_CMD START after source-change submission failed");
+        self.replay_history.push(ReplayChunk {
+            data: data.to_vec(),
+            timestamp: timestamp_usec,
+            keyframe,
+            surface,
+        });
+        const MAX_REPLAY_HISTORY: usize = 64;
+        if self.replay_history.len() > MAX_REPLAY_HISTORY {
+            let drop_count = self.replay_history.len() - MAX_REPLAY_HISTORY;
+            self.replay_history.drain(..drop_count);
         }
     }
 
@@ -97,13 +99,14 @@ impl V4l2Session {
             let ready = self.pump(2);
             self.ready.extend(ready);
         }
+        self.maybe_resume_after_drain()?;
         if let Some(cap_idx) = cap_idx {
             self.queue_capture(cap_idx)?;
-        } else {
+        } else if self.cap.streaming {
             self.queue_all_capture()?;
         }
         let idx = self
-            .qbuf_output_bytes(data, keyframe, timestamp_usec)
+            .qbuf_output_bytes(data, keyframe, timestamp_usec, Some(surface), true)
             .map_err(|_| {
                 if debug_enabled() {
                     eprintln!("msm_drv_video_rs: output buffer invalid or QBUF failed");
@@ -125,8 +128,9 @@ impl V4l2Session {
             }
             return Err(e);
         }
-        self.resume_source_change_decode();
         self.fifo.push((surface, timestamp_usec));
+        let ready = self.pump(0);
+        self.ready.extend(ready);
         Ok(())
     }
 
@@ -137,6 +141,8 @@ impl V4l2Session {
         data: &[u8],
         keyframe: bool,
         timestamp_usec: u64,
+        surface: Option<u32>,
+        remember: bool,
     ) -> Result<usize, ()> {
         let idx = self
             .out
@@ -167,13 +173,119 @@ impl V4l2Session {
         if res.is_ok() {
             b.state = BufferState::Queued;
             self.out_order.push_back(idx);
+            if remember {
+                self.remember_replay_chunk(data, timestamp_usec, keyframe, surface);
+            }
+        } else if debug_enabled() {
+            eprintln!(
+                "msm_drv_video_rs: OUTPUT QBUF ioctl failed idx={} bytes={} queued_before={} err={}",
+                idx,
+                data.len(),
+                self.out_order.len(),
+                std::io::Error::last_os_error()
+            );
         }
         res.map(|_| idx)
     }
 
-    pub(crate) fn maybe_start_drain(&mut self) {
+    fn maybe_resume_after_drain(&mut self) -> Result<(), ()> {
+        if !self.eos && !self.draining {
+            return Ok(());
+        }
+        let mut cmd: v4l2_decoder_cmd = zeroed();
+        cmd.cmd = V4L2_DEC_CMD_START;
+        if xioctl(
+            self.fd,
+            VIDIOC_DECODER_CMD,
+            &mut cmd as *mut _ as *mut c_void,
+        )
+        .is_ok()
+        {
+            self.eos = false;
+            self.draining = false;
+            self.drain_eos_grace = true;
+            if debug_enabled() {
+                eprintln!("msm_drv_video_rs: DECODER_CMD START after drain");
+            }
+        } else {
+            if debug_enabled() {
+                eprintln!("msm_drv_video_rs: DECODER_CMD START after drain failed");
+            }
+            return Err(());
+        }
+
+        // STOP releases frames that the stateful decoder withheld while a
+        // synchronous VA client had no more access units to submit. START
+        // resumes an empty decode sequence on this hardware, so restore the
+        // already-published prefix before accepting the next client frame.
+        // Replayed frames have no FIFO owner and are discarded at dequeue;
+        // their only purpose is to reconstruct the decoder reference state.
+        let replay: Vec<ReplayChunk> = self
+            .replay_history
+            .iter()
+            .filter(|chunk| self.published_timestamps.contains(&chunk.timestamp))
+            .cloned()
+            .collect();
+        for chunk in &replay {
+            let mut attempts = 0;
+            while self
+                .out
+                .buffers
+                .iter()
+                .all(|buffer| buffer.state != BufferState::Free)
+            {
+                attempts += 1;
+                if attempts > 2500 {
+                    return Err(());
+                }
+                let ready = self.pump(2);
+                self.ready.extend(ready);
+            }
+            self.qbuf_output_bytes(&chunk.data, chunk.keyframe, chunk.timestamp, None, false)?;
+        }
+        if debug_enabled() && !replay.is_empty() {
+            eprintln!(
+                "msm_drv_video_rs: replayed {} published access units after drain",
+                replay.len()
+            );
+        }
+        Ok(())
+    }
+
+    pub(crate) fn maybe_start_sync_drain(&mut self) -> bool {
+        if self.draining || self.fifo.is_empty() || !self.out.streaming {
+            return false;
+        }
+        let mut cmd: v4l2_decoder_cmd = zeroed();
+        cmd.cmd = V4L2_DEC_CMD_STOP;
+        if xioctl(
+            self.fd,
+            VIDIOC_DECODER_CMD,
+            &mut cmd as *mut _ as *mut c_void,
+        )
+        .is_ok()
+        {
+            self.draining = true;
+            if debug_enabled() {
+                eprintln!(
+                    "msm_drv_video_rs: DECODER_CMD STOP sync drain started (pending={} out_queued={} history={})",
+                    self.fifo.len(),
+                    self.out_queued(),
+                    self.replay_history.len()
+                );
+            }
+            true
+        } else {
+            if debug_enabled() {
+                eprintln!("msm_drv_video_rs: DECODER_CMD STOP sync drain failed");
+            }
+            false
+        }
+    }
+
+    pub(crate) fn maybe_start_drain(&mut self) -> bool {
         if self.draining || self.fifo.is_empty() || self.out_queued() != 0 || !self.out.streaming {
-            return;
+            return false;
         }
         let mut cmd: v4l2_decoder_cmd = zeroed();
         cmd.cmd = V4L2_DEC_CMD_STOP;
@@ -191,8 +303,12 @@ impl V4l2Session {
                     self.fifo.len()
                 );
             }
-        } else if debug_enabled() {
-            eprintln!("msm_drv_video_rs: DECODER_CMD STOP drain failed");
+            true
+        } else {
+            if debug_enabled() {
+                eprintln!("msm_drv_video_rs: DECODER_CMD STOP drain failed");
+            }
+            false
         }
     }
 }

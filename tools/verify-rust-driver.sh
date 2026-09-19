@@ -101,8 +101,36 @@ verify_framemd5() {
     local native_frames
     native_frames="$(awk '($0 ~ /^[0-9]+,/) { count++ } END { print count + 0 }' "$native_md5")"
     if [[ "$native_frames" -eq 0 ]]; then
-        echo "framemd5_skip label=$label reason=native-produced-no-frames sample=$input frames=${frames:-all}"
-        return 0
+        # FFmpeg's native h264_v4l2m2m wrapper can exit successfully without
+        # flushing a frame when stopped at exactly one output frame. Decode a
+        # longer prefix and retain its first checksum so sample-1 remains a
+        # required byte-for-byte comparison instead of silently becoming a
+        # skip.
+        if [[ "$label" == "sample-1" && "$mode" == "required" ]]; then
+            local fallback_md5="$work_dir/native-$label-fallback.md5"
+            local fallback_log="$work_dir/native-$label-fallback.log"
+            set +e
+            run_native_framemd5 "$label-fallback" "$input" "$fallback_md5" "$fallback_log" 2 -frames:v 30
+            local fallback_status=$?
+            set -e
+            local fallback_frames=0
+            if [[ "$fallback_status" -eq 0 && -f "$fallback_md5" ]]; then
+                fallback_frames="$(awk '($0 ~ /^[0-9]+,/) { count++ } END { print count + 0 }' "$fallback_md5")"
+            fi
+            if [[ "$fallback_frames" -gt 0 ]]; then
+                awk '/^#/ { print; next } /^[0-9]+,/ { print; exit }' "$fallback_md5" > "$native_md5"
+                native_frames=1
+                echo "native_reference_fallback label=$label decoded=30 retained=1 log=$fallback_log"
+            fi
+        fi
+        if [[ "$native_frames" -eq 0 ]]; then
+            if [[ "$mode" == "optional" ]]; then
+                echo "framemd5_xfail label=$label reason=native-produced-no-frames sample=$input frames=${frames:-all}"
+                return 0
+            fi
+            echo "framemd5_fail label=$label reason=native-produced-no-frames sample=$input frames=${frames:-all}"
+            return 1
+        fi
     fi
 
     if [[ "$mode" == "optional" ]]; then

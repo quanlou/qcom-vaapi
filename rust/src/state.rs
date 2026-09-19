@@ -55,11 +55,25 @@ pub(crate) enum SurfaceState {
     Dead,
 }
 
+/// Pixel snapshot a published surface reads from. CAPTURE slots are recycled
+/// by the decoder as soon as they are requeued, so a client that reads a
+/// surface late must observe the frame as it was at dequeue time, not
+/// whatever the recycled slot holds by then.
+#[derive(Clone)]
+pub(crate) struct SurfaceFrame {
+    pub(crate) data: Vec<u8>,
+    pub(crate) stride: u32,
+    pub(crate) height: u32,
+}
+
 pub(crate) struct Surface {
     pub(crate) width: i32,
     pub(crate) height: i32,
     pub(crate) state: SurfaceState,
     pub(crate) cap_idx: Option<usize>,
+    /// Dequeued frame bytes backing the CPU-copy read path (vaGetImage /
+    /// vaDeriveImage). Replaced on every publish.
+    pub(crate) frame: Option<SurfaceFrame>,
     pub(crate) owner: VAContextID,
     pub(crate) exported: bool,
     pub(crate) export_count: u64,
@@ -83,6 +97,9 @@ pub(crate) struct Context {
     pub(crate) slices: Vec<H264Slice>,
     pub(crate) syn: H264Synth,
     pub(crate) out_seq: u64,
+    pub(crate) first_poc: Option<i32>,
+    pub(crate) poc_epoch_usec: u64,
+    pub(crate) max_timestamp_usec: u64,
     pub(crate) v4l2: Option<V4l2Session>,
 }
 

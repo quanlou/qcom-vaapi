@@ -16,11 +16,12 @@ Validated locally on `/home/mq/tmp/vaatest/test_720p.mp4`:
   queue the CAPTURE pool and match completed buffers by timestamp, while
   pre-decode PRIME export clients reserve a fixed CAPTURE slot per surface.
   Host validation covers the current split with 90 Rust tests. The current
-  Phase 2 source-change fix prevents false abort recovery on the empty
-  CAPTURE/EOS marker pair, matches the sample's original SPS/VUI bytes, and
-  improves churn to `pass=4 fail=3`; required `sample-1` still times out after
-  three OUTPUT QBUFs with no ready CAPTURE, so repeated playback is not yet
-  production-grade.
+  Phase 2 source-change work now prevents false abort recovery on the empty
+  CAPTURE/EOS marker pair, matches the sample's original SPS/VUI bytes, aligns
+  startup order and timestamps with native, and can publish the first frame
+  byte-exactly. Required `sample-1` still exits nonzero because the current
+  STOP/START drain used to flush that frame breaks later reference continuity
+  when FFmpeg decodes ahead, so repeated playback is not yet production-grade.
 - The last clean baseline passed `tools/verify-rust-driver.sh`, including Rust
   unit tests, isolated-driver build, `vainfo`, and the required H.264 framemd5
   matrix: one decoded frame, 30 decoded frames, and the full 300-frame 720p
@@ -482,7 +483,19 @@ Exit criteria:
 
 1. `bframes-240p` `framemd5_xfail`: the bounded session-recovery path is now covered, but the probe still fails often enough to remain an expected failure. Userspace triggers were exonerated. Firmware-side evidence is now captured unprivileged with `tools/capture-iris-kernel-log.sh` (see `docs/08-iris-firmware-errors.md`): the abort is a `qcom-iris` session-fatal `0x4000003`; when it escalates to a device-wide `0x5000003` the node power-cycles (~90s poison) and even native decode fails. Remaining step needs root: enable `qcom_iris` dynamic_debug and diff the HFI sequence of a failing small session vs a passing 720p session. The required 720p matrix in the verifier stays as is.
 2. Keep the runtime GStreamer export and resolution verifiers (`tools/verify-gst-export.sh` and `tools/verify-resolution-churn.sh`) in the main verification loop. The standalone C export verifier (`tools/verify-export-prime.sh`) still exits 77 with a package hint until `libva-dev libavcodec-dev libavformat-dev libavutil-dev` headers are installed.
-3. Finish the same-dimension `SOURCE_CHANGE` resume path for short FFmpeg copy decodes: current driver handles the empty CAPTURE/EOS marker pair without false recovery, queues three OUTPUT buffers, then `sample-1` times out with no ready CAPTURE. Compare native ioctl flow after the marker and determine whether a minimal CAPTURE cycle, drain handshake, or missing non-VCL NAL is required.
+3. Finish the same-dimension `SOURCE_CHANGE` resume path for short FFmpeg copy decodes: current driver handles the empty CAPTURE/EOS marker pair without false recovery, queues/drains OUTPUT, and can publish the first frame with a native-matching MD5, but the STOP/START drain workaround loses later H.264 reference continuity and FFmpeg still exits nonzero after decoding ahead. Replace the midstream STOP workaround with a frame-preserving resume: mirror native's OUTPUT-first/CAPTURE-later sequence without ending the decode stream, or make rebuild/replay preserve enough reference state to continue after the first published surfaces.
+   [2026-09-18 diagnosis (offline strace analysis, PROGRESS.md "SOURCE_CHANGE resume DIAGNOSIS RESULT"): native receives the same-dims SOURCE_CHANGE EVERY session and its only handling is G_FMT + one EBUSY-ignored DECODER_CMD + keep pumping — NO successful STOP, NO START, NO queue cycle, and FLAG_LAST/EOS never appear mid-stream. The marker pair on our side means iris self-drained into the V4L2 Stopped state; per spec only V4L2_DEC_CMD_START resumes it, but the current code can never send one there (the START helper is gated on `eos||draining`, and the suppressed paired-EOS never sets `eos`). Recipe: never STOP for same-dims source change; START immediately at marker-pair completion; pump CAPTURE continuously (no deferral); keep false-abort suppression. If references still break, audit whether SPS/PPS are re-prepended onto every AU (iris may re-parse + auto-drain mid-stream).]
+   [2026-09-19 DONE (claude agent): the required H.264 matrix is byte-exact vs
+   native on hardware — sample-1/30/full rc=0 with `cmp`-equal framemd5s, churn
+   7/7, resolution-churn pass (6 SOURCE_CHANGEs). The landing fix differs from
+   the 2026-09-18 recipe: the same-dims marker path already worked; the actual
+   short-decode blocker was a vaSyncSurface input-starvation deadlock (iris
+   defers frame release until the next AU, which a syncing client never sends),
+   broken with a bounded STOP drain whose resume replays SPS/PPS + keyframe
+   history (iris drops its reference chain across STOP), plus dequeue-time
+   pixel snapshots to fix CAPTURE-slot aliasing on late vaGetImage/
+   vaDeriveImage reads. Evidence in PROGRESS.md Completed recently; the
+   remaining gst-gl failure is the separate Phase 3 export wedge.]
 4. Reference-count exported fds so CAPTURE requeue waits until the last exported handle is retired; add GStreamer dmabuf import as the first real lifetime test.
 5. mpv `--hwdec=vaapi-copy` and GStreamer `vah264dec` pass for the three mpv-cut churn legs after the Phase 2 source-change fix. Still open: forced-kill/SIGTERM parity and a non-copy mpv/GStreamer GL path.
 6. Keep `tools/verify-browser-vaapi.sh` as the browser diagnostic. Chromium's

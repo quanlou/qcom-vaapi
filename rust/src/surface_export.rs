@@ -11,7 +11,8 @@ use std::os::fd::{FromRawFd, OwnedFd};
 
 use crate::bindings::*;
 use crate::state::{
-    DRV_MAX_SURFACE_EXPORTS, DriverState, Surface, SurfaceState, context_index, surface_index,
+    DRV_ID_BASE_CONTEXT, DRV_MAX_SURFACE_EXPORTS, DriverState, Surface, SurfaceState,
+    context_index, surface_index,
 };
 use crate::sync::sync_surface;
 use crate::va_drm::{DrmPrimeDescriptor, DrmPrimeLayout, VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2};
@@ -154,7 +155,31 @@ pub(crate) fn export_ready_surface(
     {
         return Err(SurfaceExportError::TooManyExports);
     }
-    let Some(ctx_idx) = context_index(owner) else {
+    let ctx_idx = if let Some(ctx_idx) = context_index(owner)
+        && guard.contexts.get(ctx_idx).is_some_and(Option::is_some)
+    {
+        ctx_idx
+    } else if surface_state == SurfaceState::Empty {
+        // GStreamer creates its VA surface pool without render targets, then
+        // exports those surfaces before the first BeginPicture associates one
+        // with the sole decoder context. Bind that pre-decode export here so
+        // the reserved CAPTURE allocation is the one later queued for decode.
+        let mut live_contexts = guard
+            .contexts
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, context)| context.as_ref().map(|_| idx));
+        let Some(ctx_idx) = live_contexts.next() else {
+            return Err(SurfaceExportError::InvalidContext);
+        };
+        if live_contexts.next().is_some() {
+            return Err(SurfaceExportError::InvalidContext);
+        }
+        if let Some(surface) = guard.surfaces[surf_idx].as_mut() {
+            surface.owner = DRV_ID_BASE_CONTEXT + ctx_idx as u32;
+        }
+        ctx_idx
+    } else {
         return Err(SurfaceExportError::InvalidContext);
     };
     let stable_capture = guard.contexts[ctx_idx]
@@ -233,6 +258,7 @@ mod tests {
             height: 64,
             state,
             cap_idx,
+            frame: None,
             owner: VA_INVALID_ID,
             exported: false,
             export_count: 0,

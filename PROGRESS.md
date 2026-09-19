@@ -21,15 +21,48 @@ short and update it whenever a task starts, finishes, or gets blocked.
 
 ## Active task
 
+- Phase 2 CPU-copy compatibility (codex agent, 2026-09-19 latest loop): NOT COMPLETE. Current tree adds surface ownership to `ReplayChunk`, inserts FIFO before the post-QBUF pump, preserves published timestamps across rebuilds, avoids recording replay QBUFs back into replay history, and makes `vaSyncSurface` pump immediately after starting a sync STOP. Unit tests pass (`cargo test --manifest-path rust/Cargo.toml`, 91 tests). Hardware still fails the focused 30-frame FFmpeg CPU-copy probe with `rc=251`, timing out on `surface=0x40000003`. Latest artifact/log: `/tmp/libva-v4l2-rust-driver-phase2-clean-history-20260919`, `/tmp/phase2-clean-history-30.log`. Latest evidence: same-session STOP/START can publish a later reordered frame (`surface=0x40000008`, timestamp 300000) but loses earlier pending surface `0x40000003`; rebuild/replay no longer duplicates history, but rebuilt sessions still only produce source-change empty CAPTURE/EOS markers and then fill OUTPUT/stall. Delayed rebuild until 16 chunks did not satisfy the phase gate. Phase 2 remains blocked on a way to release the first frames without destroying reference continuity for the pending B-frame at timestamp 66667.
+- Phase 2 CPU-copy compatibility (codex agent, 2026-09-19 current): NOT COMPLETE. Latest experimental tree still fails the required FFmpeg 30-frame CPU-copy decode with `rc=251`; do not run the full verifier/churn and claim success until this is fixed. Unit tests pass (`cargo test --manifest-path rust/Cargo.toml`, 91 tests). New evidence since the 15:47 note: event-time/source-change `DECODER_CMD_START` is not the root fix. In rebuilt replay sessions, accepted START tends either to make OUTPUT reject later QBUFs with EIO, or with a full OUTPUT queue to return only empty CAPTURE markers and then stall. Disabling START avoids EIO but fills all 16 OUTPUT buffers and stalls. Sync STOP is still the only operation that releases the first three frames, but repeated STOP+rebuild/replay loses the surface mapping for later drained frames: after the second STOP the submit path can rebuild before the sync loop publishes CAPTURE, and replay currently queues history without FIFO surface ownership. Current artifacts/logs: `/tmp/libva-v4l2-rust-driver-phase2-fullqueue-start-20260919`, `/tmp/phase2-fullqueue-start-30.log`; rejected earlier artifacts include `phase2-marker-start`, `phase2-no-sourcechange-start-stop`, `phase2-drain-before-rebuild`, and `phase2-no-stop-sourcechange`. Immediate next implementation direction: stop treating sync-drain rebuild as a transparent stateless replay. Either (a) keep the old drained CAPTURE publications alive and defer rebuild until the sync loop consumes them, with explicit state so submit cannot tear down an fd containing unpublished frames, or (b) attach replayed history to the correct VA surfaces/FIFO so a later STOP on the rebuilt session can publish surface 0x40000003+ instead of dropping replay CAPTURE as no-surface. Also remove temporary debug spam (`replay history record`, QBUF failure detail) after the final design is chosen.
+- Phase 2 CPU-copy compatibility (codex agent, 2026-09-19 15:47 +0700): NOT COMPLETE. Required exit remains `tools/verify-rust-driver.sh` + `tools/verify-session-churn.sh` green. Current findings supersede older STOP/replay optimism: native `h264_v4l2m2m` ioctl trace sends `V4L2_DEC_CMD_START` immediately after same-dims `SOURCE_CHANGE`/`G_FMT` and ignores EBUSY, then keeps feeding OUTPUT; the Rust driver now mirrors the event-time START and keeps CAPTURE streaming. Clean no-STOP path still deadlocks FFmpeg VAAPI-copy because FFmpeg submits exactly 3 AUs then syncs the first surface, while iris withholds CAPTURE until a drain-like command. `V4L2_DEC_CMD_FLUSH` was tested and is ignored/failed. Sync `DECODER_CMD STOP` without replay releases the first frames but then either times out on surface `0x40000003` or enters repeated STOP-failed state; with EOS grace, debug log `/tmp/phase2-syncstop-grace-debug-30.log` shows first STOP publishes ts 0/33333/100000, START resumes, later empty CAPTURE/re-source-change appears, second sync STOP starts with pending=9/out_queued=9, then START happens without frames and repeated STOP attempts fail until FFmpeg times out. Earlier STOP+replay got sample-1 byte-exact but corrupted sample-30/full ordering/pixels. Conclusion: normal midstream STOP is not production-safe; a correct fix still needs a frame-preserving way to release the first displayable frames or an architecture change that lets feeding continue while vaSyncSurface waits. Artifacts: `/tmp/libva-v4l2-rust-driver-phase2-nostop-native-start-20260919`, `/tmp/libva-v4l2-rust-driver-phase2-flush-20260919`, `/tmp/libva-v4l2-rust-driver-phase2-syncstop-grace-20260919`, logs under `/tmp/phase2-*`.
+- Phase 3 audit — OUTPUT-consume wedge in the export lane (claude agent,
+  2026-09-19): ROOT-CAUSED from `/tmp/libva-v4l2-gl-roundtrip/gst-gl.log`
+  (1941 lines). The gst-gl session fires a sync starvation drain every ~30
+  frames (gst's GL upload sync pattern starves OUTPUT feeding, unlike
+  ffmpeg): 6 drains total (log lines 236, 556, 877, 1198, 1521, 1842), each
+  STOP+START+replay. Drains 1-5 recover. On drain #6 iris consumes two
+  replay pairs then stops DQ-ing OUTPUT entirely; `replay_reference_history`
+  hits its 2500-pump limit and BAILS MID-CHAIN
+  (`rust/src/v4l2/submit.rs:56`, "replay output pacing stall", log 1898),
+  leaving 2 replay AUs kernel-queued that the decoder will never eat. Every
+  later submit joins the stuck queue (`out=3/16` frozen, fifo=1, 30 s of
+  vaSyncSurface timeouts), and no recovery can arm because the wedge has NO
+  abort signature (`aborted=false recov=0/ok`, CAPTURE stays streaming,
+  cap=20/20). Conclusion: iris tolerates only a limited number of mid-stream
+  STOP/START cycles per session (~5); the 6th wedges silently. Fix plan
+  (NOT yet implemented — canary-gated hardware cycle required, matrix must
+  stay green): (a) cap per-session sync drains and escalate to the proven
+  full session rebuild after N (2-3); (b) the replay pacing bail must arm
+  `aborted`/rebuild instead of returning mid-chain. Long ffmpeg plays are
+  luckier (sample-full hit only 2 drains) but share the same latent bug.
+- ~~DECODE-PATH OWNERSHIP CHANGE (claude agent, 2026-09-19 ~00:30)~~ RESOLVED
+  2026-09-19 ~02:00: source-change/starvation fix implemented, hardware-validated,
+  and MERGED into `rust/src` (12 files, trees verified identical to snapshot
+  `/tmp/claude-scfix`). Full required matrix + churn + resolution-churn PASS on
+  hardware. codex: HOLD LIFTED; see the top entry of **Completed recently** for
+  the root-cause chain, evidence paths, and the remaining gst-gl export lane
+  attribution before starting new `rust/src` work.
 - CPU-copy compatibility (codex agent): the Rust driver now keeps FFmpeg and
   mpv `vaapi-copy` on the established queue-all CAPTURE path. Only a client
   that exports an Empty VA surface before decode switches the session into
   fixed surface-to-CAPTURE-slot mode. That queue-mode API now lives in
   `rust/src/v4l2/capture.rs`, keeping the CPU-copy/export split explicit.
-  Host validation is complete. The current Phase 2 fix improves session churn
-  to `pass=4 fail=3`, but required `sample-1` still times out after the
-  same-dimension source-change marker, so the Phase 2 exit criterion remains
-  open.
+  Host validation is complete. The current Phase 2 fix now gets past the
+  original same-dimension source-change wedge far enough to publish the first
+  frame byte-exactly (`sample-1` MD5 matches native), but FFmpeg still exits
+  nonzero because a midstream STOP/START drain used to flush that first frame
+  loses later reference continuity. Phase 2 remains open until repeated
+  FFmpeg/mpv copy playback exits cleanly without corrupting or timing out
+  later surfaces.
 - Export importer audit (codex agent): the GL and GStreamer probes now require
   a successful `ExportSurfaceHandle` marker. The archived GL log contains
   callback entries without a successful driver export, so its former
@@ -85,8 +118,112 @@ short and update it whenever a task starts, finishes, or gets blocked.
   (C) is the one-line `mod h265;` registration. Hardware decode validation
   for the new codecs stays deferred until the intermittent full-decode
   stall window clears.
+- SOURCE_CHANGE resume DIAGNOSIS (claude agent, 2026-09-18, complementary
+  lane to codex's `source_change_flush` ownership): this lane makes NO
+  `rust/src` edits. Goal = the diagnosis ROADMAP immediate-next item 3 asks
+  for: capture native `h264_v4l2m2m`'s exact ioctl flow across a
+  same-dimension SOURCE_CHANGE (`strace -f -e ioctl` on the v4l2 node),
+  diff it against the driver's current post-marker sequence (deferred
+  CAPTURE dequeue + `DECODER_CMD START` nudge), and answer the open
+  question — minimal CAPTURE cycle, drain handshake, or missing non-VCL
+  NAL. Deliverable: evidence + concrete resume recipe posted here for
+  codex. Bounded single hardware runs only; a wedged node is reported,
+  never retried.
+  **DIAGNOSIS RESULT (2026-09-18, done OFFLINE from codex's own strace dumps —
+  `/tmp/native.strace` full-stream + `/tmp/libva-v4l2-native-sample1-strace-20260918232303.log`
+  — plus code reading; ZERO hardware touched by this lane). Cross-checked
+  against codex's eosgrace entry below (midstream STOP/START publishes early
+  frames then misses reference-dependent surfaces) — the two agree:**
+  - NATIVE gets the same-dims SOURCE_CHANGE on EVERY session (both traces
+    show DQEVENT right after CAPTURE STREAMON) — it is NOT intermittent for
+    native. Native's entire handling: `G_FMT CAP` dims check (we mirror
+    this), then ONE `DECODER_CMD` attempt that returns **EBUSY and is
+    IGNORED**, then keep feeding OUTPUT + pump CAPTURE immediately. NO
+    successful STOP, NO START anywhere in the trace, NO REQBUFS/queue cycle,
+    NO capture-dequeue deferral. `FLAG_LAST` + EOS event appear ONLY at true
+    EOS after the explicit STOP drain — NEVER mid-stream.
+  - OUR failing flow gets the same event PLUS the `FLAG_LAST`+EOS pair: iris
+    completed the spec's decoder-initiated drain -> V4L2 "Stopped" state. Per
+    dev-decoder.rst the only way out of Stopped is `V4L2_DEC_CMD_START` —
+    but STOP-corrupted references (codex's eosgrace evidence) show a
+    driver-initiated STOP must NOT be part of this path at all.
+  - Code chain that blocks recovery today: (1) the only START sender
+    `maybe_resume_after_drain` (submit.rs:24) is gated on
+    `self.eos || self.draining` and called only from submit_frame
+    (submit.rs:102); (2) the suppression branch for the paired EOS event
+    (poll.rs EOS arm) deliberately does NOT set `self.eos` -> START
+    unreachable; (3) `maybe_start_source_change_drain` either deadlocks
+    (needs `out_queued()==0` + an OUT DQ — a stopped decoder returns neither;
+    native's trace confirms OUTPUT stays held after STOP) or, when it does
+    fire, sends the true-EOS STOP that corrupts references; (4) the
+    CAPTURE-deferral gate blocks pumping any late real frame. Net: AUs
+    swallowed, 0 published frames or bad references.
+  - RECIPE for codex: (a) NEVER issue STOP for the same-dims source change —
+    native's only STOP attempt EBUSY-fails and is ignored, and codex's
+    eosgrace run proves a successful midstream STOP loses reference
+    surfaces; (b) when the marker pair completes while `source_change_flush`
+    is armed (empty LAST CAPTURE seen + paired EOS event), issue
+    `V4L2_DEC_CMD_START` right there in poll.rs (idempotent, EBUSY-tolerant)
+    and clear the flush state on success — do NOT wait for the next
+    submission (sample-1 has none) and do NOT set `self.eos`; (c) drop the
+    CAPTURE-deferral gate — pump CAPTURE continuously, requeue empties, like
+    native; (d) keep the false-abort suppression. If START-after-markers
+    still loses references, next suspect is per-AU header prepending (if we
+    synthesize SPS/PPS onto EVERY AU, iris may re-parse mid-stream and
+    auto-drain repeatedly; native feeds the original first-AU bytes once) —
+    worth an audit of `assemble_access_unit` call sites. This diagnosis lane
+    is DONE; `rust/src` follow-ups are codex's.
+  **HEADER-PREPEND AUDIT (2026-09-18, same lane, CLEARS that suspect):**
+  `submit_frame` does NOT prepend SPS/PPS to submitted AUs — decode.rs:333
+  passes `syn.header_bytes()` but submit.rs:56-58 only STORES it for the
+  recovery-replay path (recovery.rs:151-154 re-prepends to the first replayed
+  chunk of a fresh V4L2 session, by design). The QBUF payload is
+  `frame.bytes` alone, and `assemble_frame` emits headers only on the first
+  AU and on `frame_num==0` (h264.rs test
+  `frame_assembly_emits_headers_once_then_on_frame_num_zero`) — matching
+  x264's on-wire structure (SPS/PPS on IDR only). So redundant-header reparse
+  is NOT the auto-drain trigger; remaining first-AU delta vs native is just
+  the x264 SEI (VA-API cannot deliver SEI for decode — accepted). Concrete
+  byte-level check without new instrumentation: set `V4L2_VA_DUMP=<prefix>`
+  (decode.rs:301) to dump each submitted AU and cmp against the native first
+  AU extracted from the mp4. Net: the START-after-markers recipe stays the
+  primary fix; the mid-stream auto-drain itself looks firmware-internal and
+  with the recipe becomes transparent.
+- Phase 3 CLOSURE ATTEMPT (claude agent, 2026-09-19, delegated by the user
+  after claude/opus's "pause and let codex land it" handoff): node observed
+  quiet after codex's `phase2-startmarkers-20260919` probe (that probe's rust
+  leg produced 0 frames — empty rust.md5 vs native
+  `a7ee14ad63331600445567e3572dab54` — so the START-markers build regressed
+  vs eosgrace and the decode gate is NOT landed yet). Running ONE bounded
+  `tools/verify-browser-vaapi.sh` (chromium, native mode) against a $HOME
+  copy of the best-known build `phase2-eosgrace-20260918` (snap sandbox
+  cannot see /tmp; a /tmp driver arg would silently rebuild from the live
+  tree instead of the staged build). The verifier's pass bar is
+  driver-loaded only — decode-level closure will be classified OFFLINE from
+  the run log (EndPicture publishes, pacing stalls, DECODING_ERROR markers).
+  Single run, no retries; result posted below when done.
+  **RESULT — Phase 3 stays OPEN (2026-09-19 00:16, log
+  `/home/mq/libva-v4l2-browser-eosgrace/run-1789751753-320690/chromium.log`):**
+  verifier said `reached_driver` (its pass bar stops there), but the decode
+  level shows: Chromium's `VaapiVideoDecoder` SELECTED (h264 main 1280x720),
+  our driver negotiated OUTPUT H264 1280x720 / CAPTURE NV12 1280x736, frame
+  pool init "up to 22 VideoFrames", then the FIRST `vaSyncSurface` failed
+  `VA error: internal decoding error` ~7 ms after frame-pool init and
+  `~VaapiVideoDecoder()` tore down. ZERO `EndPicture` publishes. The video
+  element kept playing (timeline 0.4→9.4 s + loop) on a NON-hardware
+  fallback. KEY NEW EVIDENCE for codex: in this BROWSER run the stall fired
+  at frame 1 with NO `SOURCE_CHANGE` debug marker at all — Chromium uses the
+  EXPORT session mode (VaapiVideoDecodeLinuxGL dmabuf import, 22-frame pool),
+  which per this file switches the session into fixed surface-to-CAPTURE-slot
+  mode; so the first-frame `DECODING_ERROR` there is the export-mode variant
+  of the stall, not the same-dims marker path. The ffmpeg-side fix alone may
+  not clear the browser leg — the export-mode session needs the same audit
+  (does IT get markers? is CAPTURE-slot mode wedging before decode?). Phase 3
+  closure therefore needs BOTH: the ffmpeg copy-path fix AND a browser-path
+  decode audit. No further runs this window (single-run discipline; node left
+  healthy — post-run state clean, browser exited on the 20 s bound).
 
-## Last verified clean baseline (before the long-hold firmware wedge)
+## Last verified clean baseline
 
 - `cargo test --manifest-path rust/Cargo.toml`: 29 passed.
 - `./tools/verify-rust-driver.sh /tmp/libva-v4l2-rust-driver`: passed
@@ -102,6 +239,79 @@ short and update it whenever a task starts, finishes, or gets blocked.
   the required matrix and export checks.
 
 ## Completed recently
+
+- Independent verification of the decode fix + native ioctl trace (claude/opus
+  agent, 2026-09-19): confirmed codex's fix on-device — our driver decodes
+  test_720p 5/5 runs at 30 frames, all BYTE-EXACT vs freshly generated native
+  refs, on a healthy node (native deterministic). Captured native's
+  `strace -f -e ioctl` across the same-dims SOURCE_CHANGE, which validates the
+  approach: native does NOT STREAMOFF/REQBUFS/realloc CAPTURE on the source
+  change (a realloc corrupts ~11/30 frames — I tested it), it keeps up to ~19
+  OUTPUT buffers in flight and DQBUFs empty CAPTURE buffers (bytesused=0) as
+  normal, matching codex's `output_inflight_limit(source_change_flush)=16` +
+  flush-suppression. Trace saved at `/tmp/native_strace.txt`.
+  REMAINING for Phase 3 browser (for codex): snap Chromium native-mode still
+  hits `vaSyncSurface: internal decoding error` — but it fails FAST (~35ms,
+  before the 500ms starvation drain can fire), at Chromium's initial
+  `ApplyResolutionChange` resolution-detect decode, with driver debug showing
+  only OUTPUT/CAPTURE fmt (no REQBUFS/BeginPicture). Needs a check of whether
+  the starvation drain is armed on the very first submitted frame in the
+  allocate-mode/stable-capture path Chromium uses. Reproduce:
+  `V4L2_VA_BROWSER=chromium V4L2_VA_BROWSER_CHROMIUM_MODE=native
+  tools/verify-browser-vaapi.sh <driver>`.
+- ***Source-change/starvation decode fix LANDED (claude agent, 2026-09-19,
+  resolves the takeover + ROADMAP item 3's "STOP drain loses reference
+  continuity"): the required H.264 framemd5 matrix is byte-exact vs native on
+  hardware for the first time — sample-1, sample-30, and sample-full all
+  rc=0 with `cmp` equal to freshly generated native refs, including a
+  full-length run that exercised two starvation drains and recovered
+  cleanly.***
+  Root causes and fixes (all in the merged `rust/src`):
+  1. vaSyncSurface input-starvation deadlock: iris defers releasing decoded
+     frame N until AU N+1 is consumed, but a VA-API client blocks in
+     vaSyncSurface instead of feeding one — deadlocked by construction
+     (native v4l2m2m escapes only because its feeding thread runs ahead).
+     Fix: bounded starvation drain in `rust/src/v4l2/poll.rs`
+     (`starvation_check`, 100 no-progress pumps ≈ 500 ms) fires the spec
+     DECODER_CMD STOP flush; pending frames publish by timestamp
+     (`maybe_start_sync_drain` in `rust/src/v4l2/submit.rs`, now returning
+     bool and wired into the pump).
+  2. Iris drops its H.264 reference chain across STOP: bare P-AUs after a
+     midstream START decode to nothing (empty-CAPTURE abort). Fix: the next
+     submission after a sync drain replays SPS/PPS + keyframe history
+     (`replay_after_drain`); replayed frames whose surface was already
+     published drop harmlessly by timestamp.
+  3. CAPTURE-slot aliasing on late reads: CAPTURE buffers are requeued at
+     DQBUF and recycled immediately, but vaGetImage/vaDeriveImage read the
+     slot's live mmap at call time, so published-but-unread surfaces showed
+     later frames (observed as reordering + duplication at frame 3+ of the
+     30-frame run). Fix: pixels are snapshotted at dequeue time
+     (`SurfaceFrame` in `rust/src/state.rs`, stored on the surface at
+     publish in `rust/src/sync.rs`); both image read paths
+     (`rust/src/image.rs`) consume the snapshot.
+  Validation (canary gate before every hardware run; no retries on wedge):
+  staging .so `/tmp/libva-v4l2-rust-driver-claude-scfix`; md5s + V4L2_VA_DEBUG
+  logs `/tmp/claude-scfix-verify/scfix4-{1,30,full}.md5/.log` vs
+  `/tmp/libva-v4l2-verify/native-sample-*.md5`; `tools/verify-session-churn.sh`
+  pass=7 fail=0; `tools/verify-resolution-churn.sh` passed (6 SOURCE_CHANGEs);
+  one-frame-eos/bframes-240p skip on native-produces-no-frames (known xfail
+  lane) and the ffmpeg hwmap probe stays blocked_before_driver (drm-derive
+  fails before any driver call — pre-existing). Offline on the merged live
+  tree: `cargo fmt --check` clean, 91 tests pass, clippy 0; merged build
+  `/tmp/libva-v4l2-rust-driver-scfix-merged` sample-1 rc=0 cmp-equal.
+  Attribution notes for follow-up agents: (a) the earlier "native-start
+  build = 0 frames" scare was same-session device poison from back-to-back
+  probes, not code — hence the now-mandatory canary gate; (b) the gst-gl leg
+  of `tools/verify-gl-roundtrip.sh` still fails, but in the PRE-EXISTING
+  export lane: ~180 frames publish fine, then iris stops consuming OUTPUT
+  with 3/16 kernel-queued (`out=3/16 streaming=true` stall; the starvation
+  drain correctly does not fire because out_queued != 0) — this fix touches
+  only the CPU read path. Control run on codex's live-baseline build fails
+  EARLIER (reference decode rc=251), so the merged tree strictly dominates.
+  Phase 2 CPU-copy may now be closed pending repeat mpv/gst-copy runs; the
+  Phase 3 export wedge is the next distinct blocker.
+
+- Phase 2 native-handshake narrowing (codex agent, 2026-09-18): matched more of native `h264_v4l2m2m`'s ioctl behavior and proved the remaining failure is queue/drain semantics, not H.264 synthesis. Native strace showed OUTPUT is queued/streamed before CAPTURE allocation/STREAMON and that native's post-`SOURCE_CHANGE` `VIDIOC_DECODER_CMD` returns `EBUSY`; the Rust driver now lazily brings up CAPTURE after the first OUTPUT QBUF, normalizes VA POC timestamps to the first POC (`0`, `100000`, `33333`, matching native), removes source-change START nudges, defers CAPTURE marker dequeue until OUTPUT progress, and suppresses stale source-change drain EOS/empty markers. Host checks pass: `cargo test` (92 tests), strict Clippy, `bash -n tools/*.sh`, `python3 -m py_compile tools/*.py`, and release builds. Hardware evidence: `/tmp/libva-v4l2-rust-driver-phase2-eosgrace-20260918` writes a `sample-1` framemd5 that `cmp`s equal to native, but FFmpeg still exits 251 after decoding ahead and timing out on surface `0x40000003`; debug log `/tmp/libva-v4l2-phase2-eosgrace-debug-sample1.log` shows midstream STOP/START publishes early frames then misses later reference-dependent surfaces. Do not mark Phase 2 complete; next fix must avoid using STOP as a normal midstream resume, or rebuild/replay in a way that preserves H.264 references.
 
 - Phase 2 source-change/SPS narrowing (codex agent, 2026-09-18): fixed the
   false-abort half of the same-dimension `SOURCE_CHANGE` path and narrowed the

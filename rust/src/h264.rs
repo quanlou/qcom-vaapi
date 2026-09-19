@@ -257,7 +257,17 @@ fn write_sps_rbsp(
     bw.put_ue(0); // max_bits_per_mb_denom
     bw.put_ue(11); // log2_max_mv_length_horizontal
     bw.put_ue(11); // log2_max_mv_length_vertical
-    bw.put_ue(u32::from(pp.num_ref_frames.saturating_sub(2))); // max_num_reorder_frames
+    // Force decode-order output. iris is a stateful decoder with an internal
+    // reorder buffer; a non-zero max_num_reorder_frames makes it withhold the
+    // first displayable frames until its reorder window fills or a drain is
+    // issued. FFmpeg's VAAPI-copy hwaccel only pipelines reorder_depth+1 frames
+    // before it blocks in vaSyncSurface on the first surface, so any reorder
+    // delay deadlocks the session (and the drain/rebuild used to break it
+    // corrupts reference continuity). Declaring 0 makes iris emit every frame
+    // as soon as it is decoded; the driver maps each CAPTURE buffer back to its
+    // surface by timestamp, and the client (FFmpeg/mpv/GStreamer) reorders to
+    // display order by PTS, so output stays correct without any mid-stream drain.
+    bw.put_ue(0); // max_num_reorder_frames
     bw.put_ue(u32::from(pp.num_ref_frames)); // max_dec_frame_buffering
 
     bw.rbsp_trailing()
@@ -391,11 +401,14 @@ mod tests {
         let sp = slice();
         let mut out = synth_sps(&pp, VAProfile::VAProfileH264Main).unwrap();
         out.extend_from_slice(&synth_pps(&pp, &sp, VAProfile::VAProfileH264Main).unwrap());
+        // Matches the C prototype except VUI max_num_reorder_frames, which is
+        // now forced to 0 (decode-order output) to avoid the iris reorder-delay
+        // deadlock on the VAAPI-copy path; see write_sps_rbsp.
         assert_eq!(
             out,
             bytes_from_array([
                 0, 0, 0, 1, 103, 77, 64, 31, 242, 128, 160, 11, 118, 2, 32, 0, 0, 3, 0, 32, 0, 0,
-                7, 129, 227, 6, 50, 192, 0, 0, 0, 1, 104, 235, 143, 32
+                7, 129, 227, 6, 75, 0, 0, 0, 1, 104, 235, 143, 32
             ])
         );
     }
@@ -414,7 +427,7 @@ mod tests {
             out,
             bytes_from_array([
                 0, 0, 0, 1, 103, 100, 0, 31, 172, 229, 1, 64, 22, 236, 4, 64, 0, 0, 3, 0, 64, 0, 0,
-                15, 3, 198, 12, 101, 128, 0, 0, 0, 1, 104, 235, 207, 44
+                15, 3, 198, 12, 150, 0, 0, 0, 1, 104, 235, 207, 44
             ])
         );
     }
@@ -434,7 +447,7 @@ mod tests {
             out,
             bytes_from_array([
                 0, 0, 0, 1, 103, 66, 192, 31, 242, 128, 160, 11, 118, 2, 32, 0, 0, 3, 0, 32, 0, 0,
-                7, 129, 227, 6, 50, 192, 0, 0, 0, 1, 104, 203, 143, 32
+                7, 129, 227, 6, 75, 0, 0, 0, 1, 104, 203, 143, 32
             ])
         );
     }
@@ -459,7 +472,7 @@ mod tests {
             out,
             bytes_from_array([
                 0, 0, 0, 1, 103, 77, 64, 51, 242, 128, 32, 0, 33, 246, 2, 32, 0, 0, 3, 0, 32, 0, 0,
-                7, 129, 227, 6, 50, 192, 0, 0, 0, 1, 104, 235, 143, 32
+                7, 129, 227, 6, 75, 0, 0, 0, 1, 104, 235, 143, 32
             ])
         );
     }

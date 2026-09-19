@@ -184,7 +184,7 @@ impl V4l2Session {
                 }
                 return Err(());
             }
-            match self.qbuf_output_bytes(&payload, false, timestamp) {
+            match self.qbuf_output_bytes(&payload, false, timestamp, Some(surface), false) {
                 Ok(idx) => {
                     if debug_enabled() {
                         eprintln!(

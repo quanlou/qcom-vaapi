@@ -25,6 +25,9 @@ impl V4l2Session {
     /// this slot immediately; `queue_capture` later puts the same slot in the
     /// kernel queue for the VA surface that owns it.
     pub(crate) fn reserve_capture(&mut self) -> Option<usize> {
+        if self.cap.buffers.is_empty() && self.capture_pool_setup().is_err() {
+            return None;
+        }
         let idx = self
             .cap
             .buffers
@@ -97,11 +100,17 @@ mod tests {
             out_order: VecDeque::new(),
             aborted: false,
             source_change_flush: false,
+            source_change_empty_seen: false,
+            source_change_eos_seen: false,
+            source_change_start_sent: false,
+            drain_eos_grace: false,
             abandoned: false,
             stable_capture: false,
             in_recover: false,
             recoveries: 0,
             headers: Vec::new(),
+            replay_history: Vec::new(),
+            published_timestamps: VecDeque::new(),
         };
         session.cap.buffers.push(V4l2Buffer::new());
         session.legacy.push(super::super::LegacyPool {

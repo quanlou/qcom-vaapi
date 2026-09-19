@@ -59,6 +59,7 @@ fn create_surfaces_common(
             height,
             state: SurfaceState::Empty,
             cap_idx: None,
+            frame: None,
             owner: VA_INVALID_ID,
             exported: false,
             export_count: 0,
@@ -72,6 +73,18 @@ fn create_surfaces_common(
 fn validate_surface_creation_attributes(attributes: &[VASurfaceAttrib]) -> VAStatus {
     for attribute in attributes {
         if attribute.flags & VA_SURFACE_ATTRIB_SETTABLE == 0 {
+            continue;
+        }
+        if attribute.type_ == VASurfaceAttribType::VASurfaceAttribDRMFormatModifiers {
+            if attribute.value.type_ != VAGenericValueType::VAGenericValueTypePointer
+                || unsafe { attribute.value.value.p }.is_null()
+            {
+                return err(VA_STATUS_ERROR_INVALID_PARAMETER);
+            }
+            // The V4L2 CAPTURE allocation is exported as linear NV12. The
+            // modifier list is an allocation preference, so accepting it here
+            // lets clients negotiate against the explicit modifier returned
+            // later in VADRMPRIMESurfaceDescriptor.
             continue;
         }
         if attribute.value.type_ != VAGenericValueType::VAGenericValueTypeInteger {
@@ -295,6 +308,7 @@ mod tests {
             height: 16,
             state,
             cap_idx: None,
+            frame: None,
             owner: VA_INVALID_ID,
             exported: false,
             export_count: 0,
