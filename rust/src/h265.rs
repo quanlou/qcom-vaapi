@@ -1,11 +1,8 @@
-//! H.265 (HEVC) bitstream plumbing skeleton — Phase 5 track C.
+//! H.265 (HEVC) bitstream parsing and Annex-B assembly.
 //!
-//! Scope is deliberately narrow: NAL unit header parsing/classification,
-//! minimal VPS/SPS/PPS parsing, and Annex-B access-unit assembly. Nothing
-//! here is wired into a VA callback or V4L2 format setup yet (profile
-//! advertisement lives in `config.rs` and is owned by another track); this
-//! module only owns bitstream parsing/assembly and is validated by
-//! synthetic-bitstream unit tests.
+//! The parser validates NAL units and parameter sets used by tests and
+//! diagnostics. `synth` rebuilds VPS/SPS/PPS headers from VA picture
+//! parameters for the stateful V4L2 decoder.
 //!
 //! Syntax reference: ITU-T H.265 v6+, clauses 7.3.2.1-7.3.2.3 and Annex B.
 
@@ -16,6 +13,9 @@ use bitstream::{BitReader, BitWriter, START_CODE, ebsp_to_rbsp, rbsp_to_ebsp};
 /// 64 MiB ceiling on one assembled access unit, mirroring the H.264 frame
 /// assembly guard in `h264.rs`.
 const MAX_ASSEMBLED_ACCESS_UNIT_BYTES: usize = 64 * 1024 * 1024;
+
+mod synth;
+pub(crate) use synth::{slice_pps_id, synthesize_parameter_sets};
 
 /// Parse/assembly failure. Every variant is a value error: malformed or
 /// truncated input never panics.
@@ -688,6 +688,7 @@ pub(crate) fn parse_pps(rbsp: &[u8]) -> Result<PpsInfo, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bindings::VAPictureParameterBufferHEVC;
 
     fn bytes(hex: &str) -> Vec<u8> {
         (0..hex.len())
@@ -1129,5 +1130,73 @@ mod tests {
                 "SPS truncated at {cut} bytes must not parse"
             );
         }
+    }
+
+    #[test]
+    fn va_picture_parameters_produce_parseable_main_parameter_sets() {
+        let mut pp: VAPictureParameterBufferHEVC = unsafe { std::mem::zeroed() };
+        pp.pic_width_in_luma_samples = 1280;
+        pp.pic_height_in_luma_samples = 720;
+        pp.sps_max_dec_pic_buffering_minus1 = 4;
+        pp.log2_max_pic_order_cnt_lsb_minus4 = 4;
+        pp.log2_min_luma_coding_block_size_minus3 = 1;
+        pp.log2_diff_max_min_luma_coding_block_size = 1;
+        pp.log2_diff_max_min_transform_block_size = 3;
+        unsafe {
+            pp.pic_fields.bits.set_chroma_format_idc(1);
+            pp.slice_parsing_fields
+                .bits
+                .set_sps_temporal_mvp_enabled_flag(1);
+        }
+
+        let headers = synthesize_parameter_sets(&pp, 3).unwrap();
+        let nals = split_annex_b(&headers);
+        assert_eq!(nals.len(), 3);
+        let vps = Nal::parse(&nals[0]).unwrap();
+        let sps = Nal::parse(&nals[1]).unwrap();
+        let pps = Nal::parse(&nals[2]).unwrap();
+        assert_eq!(vps.kind(), NalKind::Vps);
+        assert_eq!(sps.kind(), NalKind::Sps);
+        assert_eq!(pps.kind(), NalKind::Pps);
+        assert_eq!(
+            parse_vps(&vps.rbsp().unwrap())
+                .unwrap()
+                .vps_max_dec_pic_buffering_minus1,
+            4
+        );
+        assert_eq!(
+            parse_sps(&sps.rbsp().unwrap())
+                .unwrap()
+                .pic_width_in_luma_samples,
+            1280
+        );
+        assert_eq!(
+            parse_pps(&pps.rbsp().unwrap())
+                .unwrap()
+                .pps_pic_parameter_set_id,
+            3
+        );
+    }
+
+    #[test]
+    fn slice_pps_id_reads_original_irap_header() {
+        let mut writer = BitWriter::new();
+        writer.put(1, 1); // first_slice_segment_in_pic_flag
+        writer.put(0, 1); // no_output_of_prior_pics_flag
+        writer.put_ue(7);
+        writer.rbsp_trailing();
+        let slice = Nal::build(19, 0, 1, &writer.into_bytes());
+        let raw = [&slice.header_bytes()[..], &slice.payload_ebsp[..]].concat();
+        assert_eq!(slice_pps_id(&raw), Ok(7));
+    }
+
+    #[test]
+    fn synthesis_rejects_unrepresentable_sps_reference_sets() {
+        let mut pp: VAPictureParameterBufferHEVC = unsafe { std::mem::zeroed() };
+        pp.num_short_term_ref_pic_sets = 1;
+        assert_eq!(
+            synthesize_parameter_sets(&pp, 0),
+            Err(Error::OutOfRange("SPS short-term reference picture sets"))
+        );
     }
 }

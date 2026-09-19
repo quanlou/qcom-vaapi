@@ -13,7 +13,7 @@ use crate::bindings::*;
 use crate::state::{
     Config, DRV_ID_BASE_CONFIG, DRV_MAX_ATTRIBUTE_LIST, DRV_MAX_DIM, SUPPORTED_PROFILES,
 };
-use crate::v4l2::{V4L2_PIX_FMT_AV1, V4L2_PIX_FMT_H264, V4L2_PIX_FMT_HEVC, V4L2_PIX_FMT_VP9};
+use crate::v4l2::{V4L2_PIX_FMT_H264, V4L2_PIX_FMT_HEVC, V4L2_PIX_FMT_VP9};
 use crate::{err, ok, state_from_ctx};
 use std::ffi::c_int;
 use std::ptr;
@@ -24,20 +24,15 @@ use std::sync::OnceLock;
 /// in fixed advertisement order. A codec's profiles are advertised only when
 /// the V4L2 OUTPUT queue actually enumerated its coded format.
 ///
-/// VP9 10-bit (`VAProfileVP9Profile2`) is deliberately out of scope: the
-/// driver negotiates only YUV420 (8-bit) render targets and NV12 CAPTURE
-/// today, so Profile0 is the only honest VP9 report. HEVC Main10 is reported
-/// because the device also exposes a P010 CAPTURE format, but render-target
-/// negotiation below still rejects non-YUV420 targets until 10-bit surfaces
-/// are implemented.
+/// Only profiles with a complete userspace translation path belong here.
+/// HEVC Main10 remains hidden until P010 surfaces are implemented, and AV1
+/// remains hidden until VA tile buffers can be rebuilt into complete OBUs.
+/// Kernel format enumeration is necessary capability evidence, but by itself
+/// is not enough to promise a working VA profile.
 const CODEC_PROFILES: &[(u32, &[VAProfile])] = &[
     (V4L2_PIX_FMT_H264, &SUPPORTED_PROFILES),
-    (
-        V4L2_PIX_FMT_HEVC,
-        &[VAProfile::VAProfileHEVCMain, VAProfile::VAProfileHEVCMain10],
-    ),
+    (V4L2_PIX_FMT_HEVC, &[VAProfile::VAProfileHEVCMain]),
     (V4L2_PIX_FMT_VP9, &[VAProfile::VAProfileVP9Profile0]),
-    (V4L2_PIX_FMT_AV1, &[VAProfile::VAProfileAV1Profile0]),
 ];
 
 static ADVERTISED_PROFILES: OnceLock<&'static [VAProfile]> = OnceLock::new();
@@ -389,16 +384,16 @@ mod tests {
             V4L2_PIX_FMT_H264,
             V4L2_PIX_FMT_HEVC,
             V4L2_PIX_FMT_VP9,
-            V4L2_PIX_FMT_AV1,
+            crate::v4l2::V4L2_PIX_FMT_AV1,
         ];
         let profiles = advertised_profiles_from(&all);
-        assert_eq!(profiles.len(), 7);
-        // H.264 stays first and unchanged; HEVC, VP9, AV1 follow in table order.
+        assert_eq!(profiles.len(), 5);
+        // H.264 stays first and unchanged; validated HEVC and VP9 follow.
         assert_eq!(&profiles[..3], &SUPPORTED_PROFILES);
         assert_eq!(profiles[3], VAProfile::VAProfileHEVCMain);
-        assert_eq!(profiles[4], VAProfile::VAProfileHEVCMain10);
-        assert_eq!(profiles[5], VAProfile::VAProfileVP9Profile0);
-        assert_eq!(profiles[6], VAProfile::VAProfileAV1Profile0);
+        assert_eq!(profiles[4], VAProfile::VAProfileVP9Profile0);
+        assert!(!profiles.contains(&VAProfile::VAProfileHEVCMain10));
+        assert!(!profiles.contains(&VAProfile::VAProfileAV1Profile0));
     }
 
     #[test]
@@ -437,7 +432,7 @@ mod tests {
             V4L2_PIX_FMT_H264,
             V4L2_PIX_FMT_HEVC,
             V4L2_PIX_FMT_VP9,
-            V4L2_PIX_FMT_AV1,
+            crate::v4l2::V4L2_PIX_FMT_AV1,
         ];
         let table = advertised_profiles_from(&all);
         for profile in never {

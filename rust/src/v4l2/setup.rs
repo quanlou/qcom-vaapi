@@ -6,8 +6,8 @@
 
 use super::{
     BufferState, CAP_EXTRA_BUFFERS, CAP_NUM_BUFFERS_MAX, CAP_NUM_BUFFERS_MIN, OUT_NUM_BUFFERS,
-    V4L2_PIX_FMT_H264, V4L2_PIX_FMT_NV12, V4l2Buffer, V4l2Session, VIDIOC_ENUM_FMT, VIDIOC_G_FMT,
-    VIDIOC_QBUF, VIDIOC_QUERYCAP, VIDIOC_S_FMT, debug_enabled, xioctl, zeroed,
+    V4L2_PIX_FMT_NV12, V4l2Buffer, V4l2Session, VIDIOC_ENUM_FMT, VIDIOC_G_FMT, VIDIOC_QBUF,
+    VIDIOC_QUERYCAP, VIDIOC_S_FMT, debug_enabled, xioctl, zeroed,
 };
 use crate::bindings::*;
 use std::ffi::c_void;
@@ -46,8 +46,13 @@ impl V4l2Session {
         Ok(())
     }
 
-    pub(super) fn setup_output(&mut self, width: i32, height: i32) -> Result<(), ()> {
-        if !self.enum_formats_contains(self.out.type_, V4L2_PIX_FMT_H264) {
+    pub(super) fn setup_output(
+        &mut self,
+        width: i32,
+        height: i32,
+        coded_fourcc: u32,
+    ) -> Result<(), ()> {
+        if !self.enum_formats_contains(self.out.type_, coded_fourcc) {
             return Err(());
         }
 
@@ -55,7 +60,7 @@ impl V4l2Session {
         out_fmt.type_ = self.out.type_;
         xioctl(self.fd, VIDIOC_G_FMT, &mut out_fmt as *mut _ as *mut c_void)?;
         let mut pix = unsafe { out_fmt.fmt.pix_mp };
-        pix.pixelformat = V4L2_PIX_FMT_H264;
+        pix.pixelformat = coded_fourcc;
         pix.width = width.max(0) as u32;
         pix.height = height.max(0) as u32;
         pix.field = v4l2_field::V4L2_FIELD_NONE as u32;

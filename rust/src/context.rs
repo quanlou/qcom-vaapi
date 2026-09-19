@@ -1,16 +1,18 @@
 //! VA decode-context lifecycle.
 //!
-//! A context owns the H.264 assembler and one stateful V4L2 session. The
+//! A context owns one codec-specific access-unit assembler and one stateful
+//! V4L2 session. The
 //! callbacks here only validate VA handles and construct or retire that owner;
 //! picture submission remains in `decode.rs`.
 
 use crate::bindings::*;
-use crate::h264::H264Synth;
+use crate::codec::{Codec, Decoder};
 use crate::state::{
     Context, DRV_ID_BASE_CONTEXT, DRV_MAX_DIM, DRV_MAX_SURFACES, DRV_MIN_DIM, SurfaceState,
     config_index, context_index, surface_index,
 };
 use crate::surface::release_surface_capture;
+use crate::sync::apply_ready_captures;
 use crate::v4l2::V4l2Session;
 use crate::{err, ok, state_from_ctx};
 use std::ffi::c_int;
@@ -73,7 +75,14 @@ pub(crate) unsafe extern "C" fn create_context(
     } else {
         Vec::new()
     };
-    let Ok(v4l2) = V4l2Session::open_and_setup(picture_width, picture_height) else {
+    let Some(codec) = Codec::from_profile(cfg.profile) else {
+        return err(VA_STATUS_ERROR_UNSUPPORTED_PROFILE);
+    };
+    let Some(decoder) = Decoder::new(cfg.profile) else {
+        return err(VA_STATUS_ERROR_UNSUPPORTED_PROFILE);
+    };
+    let Ok(v4l2) = V4l2Session::open_and_setup(picture_width, picture_height, codec.fourcc())
+    else {
         return err(VA_STATUS_ERROR_OPERATION_FAILED);
     };
     if let Some(idx) = guard.contexts.iter().position(Option::is_none) {
@@ -94,12 +103,8 @@ pub(crate) unsafe extern "C" fn create_context(
             render_targets,
             frame_open: false,
             render_target: VA_INVALID_ID,
-            slices: Vec::new(),
-            syn: H264Synth::new(cfg.profile),
+            decoder,
             out_seq: 0,
-            first_poc: None,
-            poc_epoch_usec: 0,
-            max_timestamp_usec: 0,
             v4l2: Some(v4l2),
         });
         unsafe { *context = context_id };
@@ -141,10 +146,20 @@ pub(crate) unsafe extern "C" fn destroy_context(
         return err(VA_STATUS_ERROR_OPERATION_FAILED);
     }
 
+    // Flush before detaching. FFmpeg can destroy a context at a resolution
+    // boundary while display-order surfaces from that context are still
+    // pending; publish their CPU snapshots while the CAPTURE mappings exist.
+    let ready = guard.contexts[idx]
+        .as_mut()
+        .and_then(|context| context.v4l2.as_mut())
+        .map(V4l2Session::drain_for_context_destroy)
+        .unwrap_or_default();
+    apply_ready_captures(&mut guard, ready);
+
     // A surface can outlive its decode context. Detach every owned surface
     // before dropping the V4L2 session, otherwise its cap_idx would point at
-    // an mmap region released by V4l2Session::Drop and a later vaGetImage could
-    // read through a stale pointer.
+    // an mmap region released by V4l2Session::Drop. A ready CPU snapshot is
+    // self-contained and remains readable; every other surface becomes dead.
     let owned_surfaces: Vec<usize> = guard
         .surfaces
         .iter()
@@ -161,7 +176,9 @@ pub(crate) unsafe extern "C" fn destroy_context(
         if let Some(surface) = guard.surfaces[surface_idx].as_mut() {
             surface.owner = VA_INVALID_ID;
             surface.cap_idx = None;
-            surface.state = SurfaceState::Dead;
+            if surface.state != SurfaceState::Ready || surface.frame.is_none() {
+                surface.state = SurfaceState::Dead;
+            }
         }
     }
     for buffer in &mut guard.buffers {
@@ -180,7 +197,7 @@ pub(crate) unsafe extern "C" fn destroy_context(
 mod tests {
     use super::*;
     use crate::state::{
-        Buffer, Config, DRV_ID_BASE_CONFIG, DRV_ID_BASE_SURFACE, DriverBox, Surface,
+        Buffer, Config, DRV_ID_BASE_CONFIG, DRV_ID_BASE_SURFACE, DriverBox, Surface, SurfaceFrame,
     };
     use std::ffi::c_void;
 
@@ -194,12 +211,8 @@ mod tests {
             render_targets: Vec::new(),
             frame_open: false,
             render_target: VA_INVALID_ID,
-            slices: Vec::new(),
-            syn: H264Synth::new(VAProfile::VAProfileH264Main),
+            decoder: Decoder::new(VAProfile::VAProfileH264Main).unwrap(),
             out_seq: 0,
-            first_poc: None,
-            poc_epoch_usec: 0,
-            max_timestamp_usec: 0,
             v4l2: None,
         }
     }
@@ -236,6 +249,47 @@ mod tests {
         assert_eq!(surface.owner, VA_INVALID_ID);
         assert_eq!(surface.cap_idx, None);
         assert_eq!(surface.state, SurfaceState::Dead);
+        drop(guard);
+        unsafe { drop(Box::from_raw(raw)) };
+    }
+
+    #[test]
+    fn destroying_context_preserves_ready_cpu_snapshot() {
+        let raw = Box::into_raw(Box::new(DriverBox::new()));
+        let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
+        ctx.pDriverData = raw as *mut c_void;
+        let state = unsafe { &*raw };
+        let context_id = DRV_ID_BASE_CONTEXT;
+        state.lock.lock().unwrap().contexts[0] = Some(context_for_test(DRV_ID_BASE_CONFIG));
+        state.lock.lock().unwrap().surfaces[0] = Some(Surface {
+            width: 320,
+            height: 240,
+            state: SurfaceState::Ready,
+            cap_idx: Some(4),
+            frame: Some(SurfaceFrame {
+                data: vec![1, 2, 3, 4],
+                stride: 2,
+                height: 2,
+            }),
+            owner: context_id,
+            exported: false,
+            export_count: 0,
+            export_fds: Vec::new(),
+        });
+
+        assert_eq!(
+            unsafe { destroy_context(&mut ctx, context_id) },
+            VA_STATUS_SUCCESS as VAStatus
+        );
+        let guard = state.lock.lock().unwrap();
+        let surface = guard.surfaces[0].as_ref().unwrap();
+        assert_eq!(surface.owner, VA_INVALID_ID);
+        assert_eq!(surface.cap_idx, None);
+        assert_eq!(surface.state, SurfaceState::Ready);
+        let frame = surface.frame.as_ref().unwrap();
+        assert_eq!(frame.data, [1, 2, 3, 4]);
+        assert_eq!(frame.stride, 2);
+        assert_eq!(frame.height, 2);
         drop(guard);
         unsafe { drop(Box::from_raw(raw)) };
     }

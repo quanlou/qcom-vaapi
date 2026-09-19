@@ -8,7 +8,7 @@ set -uo pipefail
 # surface sync/drop cycles and continuous re-submission, so the probe drives
 # REAL seeks through mpv's JSON IPC socket with --hwdec=vaapi-copy:
 #   phase 720p   N seeks on the 720p sample
-#   phase mixed  M seeks on a 720x480 + 1280x720 mpegts concat, so seeks
+#   phase mixed  M seeks on a 960x640 + 1280x720 mpegts concat, so seeks
 #                cross resolution boundaries (context reconfiguration)
 # Each phase is wrapped in tools/capture-iris-kernel-log.sh so any iris
 # firmware session/system error raised during the storm is attributed to it,
@@ -20,7 +20,7 @@ set -uo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 driver_dir="${1:-/tmp/libva-v4l2-rust-driver}"
 sample="${V4L2_VA_SAMPLE:-/home/mq/tmp/vaatest/test_720p.mp4}"
-low_sample="${V4L2_VA_RESOLUTION_LOW_SAMPLE:-/home/mq/tmp/vaatest/seq-480p.mp4}"
+low_sample="${V4L2_VA_RESOLUTION_LOW_SAMPLE:-}"
 drm_device="${V4L2_VA_DRM_DEVICE:-/dev/dri/renderD128}"
 work_dir="${V4L2_VA_SEEK_DIR:-/tmp/libva-v4l2-seek}"
 seeks720="${V4L2_VA_SEEK_COUNT_720:-24}"
@@ -55,7 +55,21 @@ export LIBVA_DRIVERS_PATH="$driver_dir"
 
 mixed_ts="$work_dir/mixed.ts"
 build_mixed=0
-if [[ -f "$low_sample" ]]; then
+if [[ -z "$low_sample" ]]; then
+    low_sample="$work_dir/low-960x640.mp4"
+    set +e
+    timeout 90s ffmpeg -y -nostdin -hide_banner -v error \
+        -i "$sample" -map 0:v:0 -t 3 \
+        -vf scale=960:640 -an -c:v libx264 -pix_fmt yuv420p \
+        -profile:v high -level:v 4.1 -g 30 -keyint_min 30 -sc_threshold 0 -bf 0 \
+        "$low_sample" > "$work_dir/low-build.log" 2>&1
+    low_status=$?
+    set -e
+    if (( low_status != 0 )); then
+        low_sample=""
+    fi
+fi
+if [[ -n "$low_sample" && -f "$low_sample" ]]; then
     printf "file '%s'\nfile '%s'\n" "$low_sample" "$sample" \
         > "$work_dir/concat.txt"
     set +e

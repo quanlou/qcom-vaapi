@@ -229,7 +229,7 @@ pub(crate) unsafe extern "C" fn unmap_buffer(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::h264::H264Synth;
+    use crate::codec::Decoder;
     use crate::state::{
         Context, DRV_ID_BASE_BUFFER, DRV_ID_BASE_CONFIG, DRV_ID_BASE_CONTEXT, DRV_MAX_BUFFER_BYTES,
         DriverBox,
@@ -246,12 +246,8 @@ mod tests {
             render_targets: Vec::new(),
             frame_open: false,
             render_target: VA_INVALID_ID,
-            slices: Vec::new(),
-            syn: H264Synth::new(VAProfile::VAProfileH264Main),
+            decoder: Decoder::new(VAProfile::VAProfileH264Main).unwrap(),
             out_seq: 0,
-            first_poc: None,
-            poc_epoch_usec: 0,
-            max_timestamp_usec: 0,
             v4l2: None,
         }
     }

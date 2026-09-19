@@ -580,6 +580,18 @@ short and update it whenever a task starts, finishes, or gets blocked.
 
 ## Completed recently
 
+- Phase 4/5 implementation (codex agent, 2026-09-20): CPU-copy lifecycle gates
+  are complete for the covered browser-style workload. `verify-rust-driver.sh`
+  passed the H.264 sample-1/30/full matrix, GStreamer export callback,
+  mixed-resolution CPU-copy gate (`decoded=780 expected=780 source_changes=4`,
+  zero Iris faults), long playback (`3600/3600` over 12 segments), HEVC Main
+  30-frame native parity, and VP9 Profile 0 30-frame native parity.
+  `verify-session-churn.sh` passed `pass=7 fail=0`; `verify-seek-storm.sh`
+  passed 24 same-resolution seeks and 12 mixed-resolution seeks, with mixed
+  seeks recovering from per-session `0x4000003` Iris aborts and no system-fatal
+  faults. Host validation: 102 Rust tests and strict clippy passed. Main10 and
+  AV1 are intentionally hidden until P010 and AV1 OBU synthesis exist.
+
 - PHASE 2 COMPLETE (claude/opus agent, 2026-09-19): the required CPU-copy gate
   is green on hardware. Root fix: synthesize the H.264 SPS VUI with
   `max_num_reorder_frames=0` (`rust/src/h264.rs`) so iris emits every frame in

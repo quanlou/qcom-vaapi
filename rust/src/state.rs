@@ -9,7 +9,7 @@ use std::os::fd::OwnedFd;
 use std::sync::Mutex;
 
 use crate::bindings::*;
-use crate::h264::{H264Slice, H264Synth};
+use crate::codec::Decoder;
 use crate::v4l2::V4l2Session;
 
 pub(crate) const DRV_ID_BASE_CONFIG: u32 = 0x0100_0000;
@@ -94,12 +94,8 @@ pub(crate) struct Context {
     pub(crate) render_targets: Vec<VASurfaceID>,
     pub(crate) frame_open: bool,
     pub(crate) render_target: VASurfaceID,
-    pub(crate) slices: Vec<H264Slice>,
-    pub(crate) syn: H264Synth,
+    pub(crate) decoder: Decoder,
     pub(crate) out_seq: u64,
-    pub(crate) first_poc: Option<i32>,
-    pub(crate) poc_epoch_usec: u64,
-    pub(crate) max_timestamp_usec: u64,
     pub(crate) v4l2: Option<V4l2Session>,
 }
 
