@@ -148,6 +148,7 @@ mod tests {
             source_change_start_sent: false,
             drain_eos_grace: false,
             abandoned: false,
+            sync_drain_failures: 0,
             stable_capture: false,
             in_recover: false,
             recoveries: 0,
@@ -198,5 +199,51 @@ mod tests {
         // must refuse without touching the queue.
         assert!(!session.resume_drc_capture_cycle());
         assert!(matches!(session.cap.buffers[0].state, BufferState::Free));
+    }
+
+    #[test]
+    fn export_refcount_accounts_only_live_slots() {
+        let path = CString::new("/dev/null").unwrap();
+        let fd = unsafe { open(path.as_ptr(), O_RDWR, 0) };
+        assert!(fd >= 0, "could not open /dev/null for the refcount test");
+
+        let mut session = session_with_unmapped_capture(fd);
+        // Legacy indices are ignored: their kernel queue is gone and no
+        // future requeue will observe their counters.
+        session.retire_slot_exports(0, 3);
+        assert_eq!(session.cap.buffers[0].export_refs, 0);
+        // Zero-retire and out-of-range indices are no-ops.
+        session.retire_slot_exports(1, 0);
+        session.retire_slot_exports(99, 2);
+        assert_eq!(session.cap.buffers[0].export_refs, 0);
+        // Driver-side retire decrements by the number of closed dups.
+        session.cap.buffers[0].export_refs = 5;
+        session.retire_slot_exports(1, 2);
+        assert_eq!(session.cap.buffers[0].export_refs, 3);
+        // The decrement saturates: a rebound surface may carry dups counted
+        // against an older slot incarnation.
+        session.retire_slot_exports(1, 10);
+        assert_eq!(session.cap.buffers[0].export_refs, 0);
+    }
+
+    #[test]
+    fn requeue_keeps_export_accounting_and_frees_reserved_slots() {
+        let path = CString::new("/dev/null").unwrap();
+        let fd = unsafe { open(path.as_ptr(), O_RDWR, 0) };
+        assert!(fd >= 0, "could not open /dev/null for the requeue test");
+
+        let mut session = session_with_unmapped_capture(fd);
+        // A reserved slot returns to Free without a kernel QBUF, even with
+        // outstanding exports (the stable-recycle contract allows overwrite
+        // once the surface is released).
+        session.cap.buffers[0].export_refs = 2;
+        session.cap.buffers[0].state = BufferState::Reserved;
+        session.requeue_capture(1);
+        assert!(matches!(session.cap.buffers[0].state, BufferState::Free));
+        // The requeue itself never mutates the counter; retirement is
+        // explicit via `retire_slot_exports` on the release path.
+        assert_eq!(session.cap.buffers[0].export_refs, 2);
+        session.retire_slot_exports(1, 2);
+        assert_eq!(session.cap.buffers[0].export_refs, 0);
     }
 }

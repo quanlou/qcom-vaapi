@@ -89,6 +89,18 @@ impl V4l2Session {
             return;
         }
         let live_idx = idx - self.legacy_len();
+        if debug_enabled()
+            && self
+                .cap
+                .buffers
+                .get(live_idx)
+                .is_some_and(|b| b.export_refs > 0)
+        {
+            eprintln!(
+                "msm_drv_video_rs: requeueing cap_idx={} with outstanding export refs={}",
+                idx, self.cap.buffers[live_idx].export_refs
+            );
+        }
         if self
             .cap
             .buffers
@@ -105,6 +117,29 @@ impl V4l2Session {
             .is_some_and(|b| b.state == BufferState::Free)
         {
             let _ = self.qbuf_capture(live_idx);
+        }
+    }
+
+    /// Retire per-slot export accounting after the surface's tracked dups
+    /// were closed. Called from the surface-release path before
+    /// `requeue_capture`, so the requeue always follows the retire; the
+    /// decrement saturates because a rebound surface may carry dups that
+    /// were counted against an older slot incarnation.
+    pub(crate) fn retire_slot_exports(&mut self, idx: usize, retired: usize) {
+        if idx < self.legacy_len() || retired == 0 {
+            return;
+        }
+        let live_idx = idx - self.legacy_len();
+        let Some(buffer) = self.cap.buffers.get_mut(live_idx) else {
+            return;
+        };
+        let before = buffer.export_refs;
+        buffer.export_refs = before.saturating_sub(retired as u32);
+        if debug_enabled() && before != buffer.export_refs {
+            eprintln!(
+                "msm_drv_video_rs: retired exports cap_idx={} refs {} -> {}",
+                idx, before, buffer.export_refs
+            );
         }
     }
 
@@ -140,7 +175,7 @@ impl V4l2Session {
         Some((bytes, stride, height))
     }
 
-    pub(crate) fn export_capture(&self, idx: usize) -> Option<CaptureExport> {
+    pub(crate) fn export_capture(&mut self, idx: usize) -> Option<CaptureExport> {
         // Exporting from a legacy pool is impossible: its kernel queue and
         // device fd are gone. Already-exported legacy frames keep working
         // through the fds handed out before the rebuild.
@@ -156,6 +191,7 @@ impl V4l2Session {
         let stride = cap_pix.plane_fmt[0].bytesperline;
         let height = cap_pix.height;
         let uv_offset = stride.checked_mul(height)?;
+        let size = b.len[0] as u32;
         let mut exp: v4l2_exportbuffer = zeroed();
         exp.type_ = self.cap.type_;
         exp.index = live_idx as u32;
@@ -165,9 +201,15 @@ impl V4l2Session {
         {
             return None;
         }
+        // Account the export against the slot while the driver-side dup is
+        // alive; callers retire it via `retire_slot_exports` when that dup
+        // closes (surface release) or when the client dup fails (unwind).
+        if let Some(b) = self.cap.buffers.get_mut(live_idx) {
+            b.export_refs = b.export_refs.saturating_add(1);
+        }
         Some(CaptureExport {
             fd: exp.fd,
-            size: b.len[0] as u32,
+            size,
             width: cap_pix.width,
             height,
             stride,

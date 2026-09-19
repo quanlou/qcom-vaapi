@@ -207,8 +207,8 @@ pub(crate) fn export_ready_surface(
         return Err(SurfaceExportError::Decoding);
     };
     let Some(capture) = guard.contexts[ctx_idx]
-        .as_ref()
-        .and_then(|c| c.v4l2.as_ref())
+        .as_mut()
+        .and_then(|c| c.v4l2.as_mut())
         .and_then(|v| v.export_capture(cap_idx))
     else {
         return Err(SurfaceExportError::OperationFailed);
@@ -218,6 +218,15 @@ pub(crate) fn export_ready_surface(
         Ok(fd) => fd,
         Err(()) => {
             close_export_fd(capture.fd);
+            // Unwind the slot's export accounting: the EXPBUF fd was closed
+            // and no client dup exists, so this call leaves the slot with no
+            // outstanding exports.
+            if let Some(v4l2) = guard.contexts[ctx_idx]
+                .as_mut()
+                .and_then(|c| c.v4l2.as_mut())
+            {
+                v4l2.retire_slot_exports(cap_idx, 1);
+            }
             return Err(SurfaceExportError::OperationFailed);
         }
     };

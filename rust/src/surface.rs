@@ -228,6 +228,10 @@ pub(crate) fn release_surface_capture(guard: &mut DriverState, surf_idx: usize) 
         && let Some(c) = guard.contexts[ctx_idx].as_mut()
         && let Some(v4l2) = c.v4l2.as_mut()
     {
+        // Retire the surface's tracked dups from the slot's export
+        // accounting before the slot returns to the kernel queue, so the
+        // requeue always follows the retire.
+        v4l2.retire_slot_exports(cap_idx, exported_fds);
         v4l2.requeue_capture(cap_idx);
     }
     if let Some(surf) = guard.surfaces[surf_idx].as_mut() {

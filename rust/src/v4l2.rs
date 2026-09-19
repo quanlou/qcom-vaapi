@@ -112,6 +112,9 @@ pub(crate) struct V4l2Session {
     /// Set when recovery is impossible or exhausted; sessions then fail like
     /// they did before recovery existed.
     abandoned: bool,
+    /// Consecutive failed DECODER_CMD STOP attempts from the sync-path
+    /// compatibility drain; crossing the budget abandons the session.
+    sync_drain_failures: u32,
     /// Whether a client has requested pre-decode PRIME exports. CPU-copy
     /// clients keep the traditional queue-all CAPTURE behavior; export users
     /// bind one CAPTURE slot to each VA surface before submission.
@@ -157,6 +160,7 @@ impl V4l2Session {
             source_change_start_sent: false,
             drain_eos_grace: false,
             abandoned: false,
+            sync_drain_failures: 0,
             stable_capture: false,
             in_recover: false,
             recoveries: 0,
@@ -373,6 +377,7 @@ mod tests {
             source_change_start_sent: false,
             drain_eos_grace: false,
             abandoned: false,
+            sync_drain_failures: 0,
             stable_capture: false,
             in_recover: false,
             recoveries: 0,

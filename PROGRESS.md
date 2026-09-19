@@ -95,6 +95,221 @@ short and update it whenever a task starts, finishes, or gets blocked.
   * Remaining Phase 3 (unchanged scope): export-fd refcounting/lifetime
     (CAPTURE requeue waits until last exported handle retires — gst dmabuf
     branch now LIVE for that work), GPU import validation, browser leg.
+  NEXT REGISTERED (claude agent, 2026-09-19 12:35): ROADMAP #4 lifetime test
+  FIRST. Rerun `tools/verify-gst-export.sh` multi-buffer hold stress
+  (leaky-tee side branch holding imported dmabufs while decode continues:
+  `V4L2_VA_GST_EXPORT_BUFFERS` x `V4L2_VA_GST_EXPORT_HOLD_MS`) on the
+  drc-cycle build; the prior 16-buffer hold stalled pre-decode and the
+  ROADMAP says to rerun this version before attributing a stall to CAPTURE
+  ownership — the dmabuf import branch only decodes since the CAPTURE-cycle
+  fix above. Evidence from the run (exports / held buffers / reuse
+  overwrites / completion) drives the per-slot export-refcount design; no
+  rust/src change before that evidence is on file.
+  LIFETIME TEST RESULT (claude agent, 2026-09-19 12:52): the multi-buffer
+  hold stress now PASSES in all shapes on the drc-cycle build (1fdd978),
+  canary=1 first. `verify-gst-export.sh` leaky-tee hold matrix —
+  1x0ms: rc=0, 10 successful exports, 9 CAP DQ; 8x50ms: rc=0, 15 exports,
+  15 CAP DQ; 16x100ms (the previously-stalling shape): rc=0, 22 exports,
+  22 CAP DQ — slots were re-exported after reuse (stable-mode
+  recycle-overwrite flowed end to end), decode never starved, EOS drain and
+  teardown clean (`retiring exported surface=... fds_closed=1` at release).
+  Logs: `/tmp/gst-export-hold-{1-0,8-50,16-100}/gst-glupload-export.log`.
+  Startup `ExportSurfaceHandle failed reason=InvalidContext` lines are the
+  known pre-decode probes on Empty surfaces (expected rejections).
+  DESIGN CONSEQUENCES for the per-slot export refcount (ROADMAP #4):
+  (1) the driver cannot observe importer fd close (it holds its own dups),
+  so a literal "requeue waits for the last importer handle" is unimplementable,
+  and a literal "requeue waits for driver-dup retirement" would pin every
+  exported slot and starve the pool — the hold run proves the
+  recycle-overwrite flow (same stable fd, new content per frame) is the
+  designed zero-copy path and must keep flowing; (2) what IS implementable
+  and testable: per-capture-slot export_refs accounting (increment on EXPBUF
+  success bound to the slot, decrement on driver-side retire), the existing
+  retire-before-requeue ordering on the destroy/release path gets the
+  accounting, and the DQBUF fallback requeues (empty marker / no fifo /
+  unmatched timestamp) must never touch a published+exported slot — assert
+  that invariant with a host test. Kernel dmabuf refcounting (driver dups +
+  importer dups) already prevents UAF after destroy; this work makes
+  lifetime observable and enforced at the driver layer.
+  NEXT REGISTERED (claude agent, 2026-09-19 12:55): implement the per-slot
+  export refcount per the design consequences above: state on the capture
+  queue (`export_refs` per slot), increment in `export_capture`, decrement
+  where driver dups retire (`release_export_fds` call sites), host tests for
+  (a) accounting increments/decrements and (b) the fallback-requeue
+  never-touches-exported-slot invariant; then fmt/clippy/release build and
+  canary-gated hardware validation (gl-roundtrip + hold stress 16x100 +
+  matrix + churn) before commit.
+  IMPLEMENTED (claude agent, 2026-09-19 20:10 +0700, uncommitted on
+  1fdd978): per-slot export refcount landed — `export_refs: u32` on
+  V4l2Buffer, increment after EXPBUF success in `export_capture`, explicit
+  retire via `retire_slot_exports(idx, n)` on the surface-release path
+  (retire BEFORE requeue in `release_surface_capture`) and on the
+  dup-failure unwind in `export_ready_surface`; requeue itself never
+  mutates the counter (debug-log only); saturating_sub absorbs
+  rebound-skew from surfaces rebounded across slot incarnations. Host:
+  cargo test 95/95 (new: `export_refcount_accounts_only_live_slots`,
+  `requeue_keeps_export_accounting_and_frees_reserved_slots`), fmt/clippy
+  -D warnings clean, release build ok. Artifact:
+  `/tmp/libva-v4l2-rust-driver-refcount/msm_drv_video.so`.
+  HARDWARE (canary=1): hold matrix GREEN all shapes with full accounting
+  symmetry — retired == exports (1x0: 10/10 warn=0; 8x50: 15/15 warn=5;
+  16x100: 22/22 warn=12; warns only in hold shapes = the documented
+  rebound-skew case); churn 7/7; matrix framemd5 sample-1/30/full all
+  byte-exact vs native. BUT matrix_rc=1: the resolution-probe leg timed
+  out (status=124; driver log livelocked 1.1 GB of "DECODER_CMD STOP sync
+  drain failed" at out=9/16 cap=1/20 recov=1/ok with an early kernel-level
+  `OUTPUT QBUF err=Input/output error`) and the gl-roundtrip leg refused
+  with "ambiguous stride derivation ... pass --stride/--ref-stride"
+  (harness disambiguation refusal, not a decode failure).
+  A/B RESULT (2026-09-19 20:04 +0700, job against the COMMITTED drc-cycle
+  driver 1fdd978, `/tmp/ab-resolution-committed.log`): both failures
+  reproduce IDENTICALLY on the committed driver — same ambiguous-stride
+  refusal, `resolution_probe=failed status=124`. The refcount diff is
+  exonerated (it is also functionally inert for decode paths: counters
+  only read under debug_enabled()). Box verified quiet at retry time
+  (no ffmpeg/gst procs, /dev/video16 idle, load 0.36).
+  NEXT REGISTERED (claude agent, 2026-09-19 20:11 +0700): (a) pull the
+  commit-time drc-cycle matrix/churn results (`/tmp/drc-cycle-matrix2.log`,
+  `/tmp/drc-cycle-churn.log`) to confirm the resolution probe was green at
+  commit time on this box; (b) canary-gated re-run of
+  `verify-resolution-churn.sh` on the refcount driver on the now-quiet box
+  — if matrix rc=0 + churn 7/7, commit the refcount with this entry;
+  (c) if the probe still livelocks on both drivers, capture
+  `dmesg`/journal venus-iris evidence and treat as an environment/firmware
+  regression to root-cause separately (no blind retries); (d) the
+  gl-roundtrip ambiguous-stride refusal is a separate Phase-3 harness
+  issue (predates the refcount, reproduces on 1fdd978) — investigate the
+  verify-gl-roundtrip.sh stride-disambiguation path next, do not block the
+  refcount commit on it.
+  GATE RESULT (2026-09-19 20:13 +0700, refcount driver, quiet box):
+  canary=1; matrix framemd5 sample-1/30/full ALL byte-exact vs native;
+  gst export probe reaches the driver; churn 7/7 — but
+  resolution_probe=failed status=124 AGAIN (1.3 GB livelock log, deleted).
+  dmesg: qcom-iris `session error received 0x4000003: fatal error` bursts
+  at 19:22:49, 19:55:41, 20:09:00 local — exactly the three failed probe
+  runs; no passwordless sudo (module reload unavailable).
+  GL-ROUNDTRIP ROOT CAUSE (offline comparator analysis of the 20:00
+  dumps, CPU-only): gl.raw = full 300-frame dump, ref.raw = 30 frames.
+  GL frames 0-2 are ALL-ZERO fillers (distinct_bytes=1); real content
+  starts at gl[3] == ref[0]; gl[5] == ref[2]; gl[4] holds WRONG content
+  (stale surface) — so the refusal is decode-start instability (leading
+  zero frames + one wrong frame), NOT a descriptor layout error; wherever
+  real frames flow, exported-dmabuf pixels stay byte-exact vs the
+  CPU-copy path. The 12:26 pass on this same binary had no leading zeros.
+  Same firmware-state family as the resolution probe; no rust/src change
+  warranted from this evidence.
+  NEXT REGISTERED (claude agent, 2026-09-19 20:18 +0700): native control
+  for the DRC-churn wedge — feed the concatenated low+high+low+high
+  Annex-B stream (/tmp/libva-v4l2-resolution/{low,high}.h264) to the
+  NATIVE decoder (`ffmpeg -c:v h264_v4l2m2m -f h264 -i <concat> -f null
+  -`, timeout 120, canary-gated): if native also stalls/EIOs on
+  resolution churn right now, the wedge is firmware-side and the refcount
+  commit stays gated with full attribution on file; if native completes,
+  the wedge is specific to the shared rust VAAPI DRC-churn handling
+  (committed == refcount, so still not the refcount diff) and the
+  actionable driver item becomes bounding the sync-drain retry loop that
+  currently livelocks (120 s, ~10 MB/s debug spam) instead of failing the
+  session cleanly. Exactly one control run, no blind retries; then ONE
+  re-run of verify-resolution-churn.sh on the refcount driver; commit iff
+  matrix rc=0 + churn 7/7.
+  NATIVE CONTROL RESULT (2026-09-19 20:23 +0700, canary-gated job): the
+  NATIVE decoder wedges identically — `ffmpeg -c:v h264_v4l2m2m` on the
+  same concat (low+high+low+high, 7.9 MB) hung PAST its `timeout 120`
+  (started 20:16, still alive 20:21+, SIGTERM-immune: all 18 threads
+  parked in `futex_do_wait`; ended via SIGKILL). `native-control.log` is
+  EMPTY (not even one warning) and journalctl shows NO iris fatal-error
+  burst in 20:14-20:22 — a SILENT stall, same wedge family as the rust
+  livelock but quieter (no drain-retry spam because ffmpeg blocks in
+  DQBUF instead of retrying). Verdict per the registered tree: the
+  DRC-churn wedge is FIRMWARE-SIDE — fresh canary sessions still decode
+  (canary=1 in the same job), but the resolution-churn workload stalls
+  the session regardless of decoder stack (native V4L2 and rust VA-API
+  both). Refcount commit stays gated with full attribution on file; the
+  `sync-drain livelock bounding` item is reclassified: the retry spam is
+  our driver surfacing a stall the native stack hides, so bounding it is
+  robustness work, not the root cause.
+  GATE FINAL (2026-09-19 20:27 +0700, the registered ONE re-run,
+  canary=1): `resolution_probe=failed status=124` again on the refcount
+  driver — 1.1 GB log, 20,887,286 `DECODER_CMD STOP sync drain failed`
+  lines in 120 s (~174 k lines/s). Matrix rc stays 1; per the registered
+  gate (commit iff matrix rc=0 + churn 7/7) the refcount commit REMAINS
+  GATED. No further retries. Refcount status: implemented, host 95/95,
+  all its own hardware legs green (canary, framemd5 x3 byte-exact, hold
+  matrix with retired==exports symmetry, churn 7/7, export probe), A/B
+  exonerated, blocked ONLY by the firmware-attributed resolution leg —
+  tree stays uncommitted-on-1fdd978 until a clean window lets
+  verify-rust-driver.sh reach rc=0.
+  NEXT REGISTERED (claude agent, 2026-09-19 20:28 +0700): bound the
+  sync-drain retry livelock (driver robustness; CPU-only implement +
+  host tests now, canary-gated hardware validation when the firmware
+  window allows): cap consecutive `DECODER_CMD STOP sync drain failed`
+  attempts per session at a small constant (e.g. 8), and on exhaustion
+  (a) stop re-arming the drain, (b) mark the session dead the same way
+  the abort/recovery path does (surface error surfaces, CAPTURE
+  streamoff), so gst/ffmpeg observe a clean decode failure instead of a
+  20 M-line log spin. Invariant to hold: a drain that later succeeds
+  resets the counter; a legitimate DRC rebuild path must never consume
+  the budget faster than the old behavior allowed. Host tests: counter
+  reset on success, exhaustion marks session dead, successful drains
+  still work. Then fmt/clippy/cargo test + canary-gated matrix/churn;
+  if matrix rc=0 in that window, land refcount+bound together.
+  IMPLEMENTED (claude agent, 2026-09-19 20:45 +0700, uncommitted on
+  1fdd978, files `rust/src/v4l2.rs` `rust/src/v4l2/submit.rs`
+  `rust/src/v4l2/capture.rs`): bounded sync-drain retry landed exactly as
+  registered — `SYNC_DRAIN_MAX_CONSECUTIVE_FAILURES = 8` and per-session
+  `sync_drain_failures: u32`; `maybe_start_sync_drain` now has a
+  top-of-function budget guard (once the budget is spent it issues NO
+  further STOP ioctls — the sync loop can no longer re-arm a drain a
+  wedged firmware will never accept), and the bookkeeping lives in a
+  `record_sync_drain_result` seam: success resets the streak and arms
+  `draining`, failure grows it, and crossing the budget sets
+  `abandoned = true`, which sync.rs's existing `v4l2_failed` check picks
+  up the SAME iteration and converts pending surfaces into
+  `VA_STATUS_ERROR_DECODING_ERROR` — a clean decode failure instead of
+  the 20,887,286-line/120 s spin recorded at GATE FINAL (under the same
+  wedge the driver now emits at most 8 failure lines then fails the
+  session). Teardown's `maybe_start_drain` deliberately untouched
+  (one-shot, terminal). Host: cargo test 98/98 (new:
+  `sync_drain_exhaustion_abandons_the_session` — drives the REAL
+  failing-ioctl path on /dev/null and asserts transient failures keep the
+  session alive until exactly the 8th, then budget guard refuses further
+  attempts; `sync_drain_success_resets_the_failure_budget_and_arms_the_drain`
+  via the seam — success clears a stale streak and a later failure starts
+  from zero, so legitimate DRC drains never consume the budget faster
+  than before; `sync_drain_guard_refuses_to_spend_budget_without_pending_work`
+  — empty fifo / non-streaming OUTPUT return false with the counter
+  untouched), fmt + clippy -D warnings clean, release build ok. Artifact
+  REFRESHED: `/tmp/libva-v4l2-rust-driver-refcount/msm_drv_video.so` now
+  carries refcount + bound. Commit gate unchanged: land refcount+bound
+  together iff a canary-gated window lets verify-rust-driver.sh reach
+  rc=0 with churn 7/7; no blind retries while the firmware wedge holds.
+  WINDOW NOTE (2026-09-19 20:48 +0700): first gate attempt aborted AT THE
+  CANARY — box quiet + canary=1 at 20:44 (window probe), but the gate's
+  own in-job canary returned 0 at 20:47 → CANARY_UNHEALTHY, exit 1; NO
+  matrix/churn ioctls were issued. The firmware window is flapping on a
+  ~minute timescale (consistent with the 19:22/19:55/20:09/20:16 wedge
+  family). One bounded-wait re-probe follows; if it opens, the gate runs
+  once; otherwise the refcount+bound tree stays host-validated on
+  1fdd978 with the commit gate armed for the next clean window.
+- GATE PASS — refcount+bound LANDED (claude agent, 2026-09-19 21:03 +0700):
+  the 20:53 bounded-wait re-probe opened the window (box quiet, load 0.71,
+  canary=1, WINDOW_OK) and the registered gate ran EXACTLY ONCE
+  (`/tmp/bound-gate.sh` → `/tmp/bound-matrix.log`, `/tmp/bound-churn.log`).
+  MATRIX rc=0: cargo 98/98 (incl. the three new sync-drain bound tests),
+  artifact `/tmp/libva-v4l2-rust-driver-refcount/msm_drv_video.so`,
+  `framemd5_ok` sample-1 / sample-30 / sample-full (byte-exact vs native),
+  `gst_export_probe=reached_driver status=0 buffers=1 hold_ms=0`,
+  `export_probe=blocked_before_driver status=218` (known ffmpeg-side hwmap
+  block, unchanged), `resolution_probe=passed status=0 source_changes=6`
+  — the repeatedly-failing resolution probe is GREEN on refcount+bound —
+  known-xfail labels unchanged (`one-frame-eos` native-produced-no-frames;
+  `bframes-240p` rust-decode-failed 251), and the verifier's success banner
+  `verified: cargo tests, vainfo, H.264 framemd5 regression matrix` (prints
+  only on rc=0). CHURN 7/7 (`reference-full-decode`, `mpv-cut-followed-by-gst`
+  ×3, `after-sigkill-mid-decode`, `after-sigkill-gst`, `after-sigterm-gst`;
+  `pass=7 fail=0`). Both commit-gate conditions satisfied → export-fd
+  refcounting + bounded sync-drain retry landed together in the commit
+  following this entry.
 - SUPERSEDED-NOTE (claude agent, 2026-09-19): the three codex "Phase 2 ...
   NOT COMPLETE" entries below describe pre-reorder-0 experiment trees and are
   CLOSED — Phase 2 is complete via commits c15992c (source-change flag +

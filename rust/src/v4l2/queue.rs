@@ -16,6 +16,14 @@ pub(super) struct V4l2Buffer {
     pub(super) addr: [*mut c_void; VIDEO_MAX_PLANES_USIZE],
     pub(super) len: [usize; VIDEO_MAX_PLANES_USIZE],
     pub(super) planes: [v4l2_plane; VIDEO_MAX_PLANES_USIZE],
+    /// Driver-side count of outstanding EXPBUF exports bound to this slot.
+    /// Incremented by `export_capture`, retired by `retire_slot_exports`
+    /// before the slot may return to the kernel queue. The stable-capture
+    /// recycle path intentionally requeues slots with outstanding exports
+    /// (the VA-API contract allows content changes once a surface is
+    /// reused); this counter exists so surface-release ordering is
+    /// observable and enforced, not to pin slots.
+    pub(super) export_refs: u32,
 }
 
 impl V4l2Buffer {
@@ -26,6 +34,7 @@ impl V4l2Buffer {
             addr: [ptr::null_mut(); VIDEO_MAX_PLANES_USIZE],
             len: [0; VIDEO_MAX_PLANES_USIZE],
             planes: [zeroed(); VIDEO_MAX_PLANES_USIZE],
+            export_refs: 0,
         }
     }
 }
