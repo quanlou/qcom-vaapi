@@ -187,7 +187,8 @@ pub(crate) unsafe extern "C" fn sync_surface2(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{DRV_ID_BASE_SURFACE, DRV_MAX_SURFACES, Surface};
+    use crate::state::{DRV_ID_BASE_SURFACE, DRV_MAX_SURFACES, DriverBox, Surface};
+    use std::ffi::c_void;
     use std::os::fd::{FromRawFd, IntoRawFd, OwnedFd};
 
     fn surface_with(state: SurfaceState, cap_idx: Option<usize>) -> Surface {
@@ -297,6 +298,44 @@ mod tests {
         let surface = guard.surfaces[0].as_ref().unwrap();
         assert!(surface.exported);
         assert_eq!(surface.export_fds.len(), 1);
+    }
+
+    #[test]
+    fn sync_returns_success_on_empty_and_ready_error_on_dead() {
+        // Chromium's VaapiVideoDecodeLinuxGL export flow syncs each pool
+        // surface right after `vaExportSurfaceHandle` and BEFORE its first
+        // `vaBeginPicture`. Returning DECODING_ERROR there made Chromium tear
+        // down the decoder at frame 1 and fall back to software; Mesa and
+        // Intel drivers succeed on Empty (no pending work), so we do too.
+        // Dead is the only terminal error path that returns DECODING_ERROR.
+        let raw = Box::into_raw(Box::new(DriverBox::new()));
+        let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
+        ctx.pDriverData = raw as *mut c_void;
+        let state = unsafe { &*raw };
+        {
+            let mut guard = state.lock.lock().unwrap();
+            guard.surfaces[0] = Some(surface_with(SurfaceState::Empty, None));
+            guard.surfaces[1] = Some(surface_with(SurfaceState::Ready, Some(0)));
+            guard.surfaces[2] = Some(surface_with(SurfaceState::Dead, None));
+        }
+
+        assert_eq!(
+            unsafe { sync_surface(&mut ctx, DRV_ID_BASE_SURFACE) },
+            ok(),
+            "Empty surface must sync-succeed (Chromium pool validity check)",
+        );
+        assert_eq!(
+            unsafe { sync_surface(&mut ctx, DRV_ID_BASE_SURFACE + 1) },
+            ok(),
+            "Ready surface stays sync-successful",
+        );
+        assert_eq!(
+            unsafe { sync_surface(&mut ctx, DRV_ID_BASE_SURFACE + 2) },
+            err(VA_STATUS_ERROR_DECODING_ERROR),
+            "Dead surface returns DECODING_ERROR",
+        );
+
+        unsafe { drop(Box::from_raw(raw)) };
     }
 
     fn state_with_empty_surfaces() -> DriverState {

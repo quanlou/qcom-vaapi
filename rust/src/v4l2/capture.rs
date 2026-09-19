@@ -282,6 +282,45 @@ mod tests {
     }
 
     #[test]
+    fn working_queue_topup_stops_at_working_queue_max() {
+        // Chromium exports its 22-frame pool one surface at a time and
+        // interleaves exports with decode; each submit calls
+        // `queue_working_capture`. If it queued every Free unreserved slot,
+        // later exports would find no unreserved slot left and
+        // `reserve_capture` would fail. The cap keeps the pipeline fed while
+        // leaving Free unreserved slots available for future reservations.
+        let path = CString::new("/dev/null").unwrap();
+        let fd = unsafe { open(path.as_ptr(), O_RDWR, 0) };
+        assert!(fd >= 0, "could not open /dev/null for the cap test");
+
+        let mut session = session_with_unmapped_capture(fd);
+        // The builder gives us one live slot; add enough to exceed
+        // WORKING_QUEUE_MAX. All slots start Free unreserved, which is the
+        // shape of a freshly bound stable-capture pool immediately after
+        // reservations retire (destroy/release path).
+        for _ in 0..12 {
+            session.cap.buffers.push(V4l2Buffer::new());
+        }
+        // Pre-load the queue with WORKING_QUEUE_MAX slots to prove the
+        // top-up is a no-op once the cap is met: the loop's early return
+        // must fire before any qbuf attempt reaches /dev/null (which would
+        // return Err and abort the top-up mid-scan).
+        for idx in 0..WORKING_QUEUE_MAX {
+            session.cap.buffers[idx].state = BufferState::Queued;
+        }
+        assert!(session.queue_working_capture().is_ok());
+        // The remaining slots must stay Free so a later `reserve_capture`
+        // can grab them.
+        for idx in WORKING_QUEUE_MAX..session.cap.buffers.len() {
+            assert!(
+                matches!(session.cap.buffers[idx].state, BufferState::Free),
+                "slot {} was queued past the WORKING_QUEUE_MAX cap",
+                idx
+            );
+        }
+    }
+
+    #[test]
     fn drc_capture_cycle_requires_a_streaming_capture_queue() {
         let path = CString::new("/dev/null").unwrap();
         let fd = unsafe { open(path.as_ptr(), O_RDWR, 0) };
