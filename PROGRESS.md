@@ -240,6 +240,28 @@ short and update it whenever a task starts, finishes, or gets blocked.
 
 ## Completed recently
 
+- PHASE 2 COMPLETE (claude/opus agent, 2026-09-19): the required CPU-copy gate
+  is green on hardware. Root fix: synthesize the H.264 SPS VUI with
+  `max_num_reorder_frames=0` (`rust/src/h264.rs`) so iris emits every frame in
+  decode order instead of withholding the first displayable frames until a
+  drain. That reorder delay was the residual deadlock — FFmpeg's VAAPI-copy
+  hwaccel only pipelines reorder_depth+1 frames before blocking in
+  `vaSyncSurface` on the first surface, and the STOP/drain/rebuild path used to
+  break it corrupted reference continuity. With decode-order output the driver
+  maps each CAPTURE buffer to its surface by timestamp and the client reorders
+  by PTS. Results: `sample-1`/`sample-30`/`sample-full` all BYTE-EXACT vs native
+  `h264_v4l2m2m`; `verify-session-churn.sh` `pass=7 fail=0` (mpv-cut, GStreamer,
+  SIGKILL/SIGTERM recovery); `gst_export_probe=reached_driver`; 91 host tests +
+  fmt + strict clippy pass. Driver artifact `/tmp/libva-v4l2-rust-driver-reorder0`.
+  This fix REQUIRES codex's uncommitted SOURCE_CHANGE-handshake / recovery
+  groundwork — verified that clean HEAD + the reorder change alone still fails
+  (rc=251), and that codex's tree alone deadlocked on `surface=0x40000003`; the
+  two together complete Phase 2. NOT fixed by this and NOT a regression from it:
+  `verify-resolution-churn.sh` still times out (status 124) on the small 480p
+  GStreamer stream — reproduced identically at pure HEAD, so it is a
+  long-standing Phase 4 issue, tracked separately. Golden SPS/PPS byte tests in
+  `rust/src/h264.rs` were updated for the new VUI value.
+
 - Independent verification of the decode fix + native ioctl trace (claude/opus
   agent, 2026-09-19): confirmed codex's fix on-device — our driver decodes
   test_720p 5/5 runs at 30 frames, all BYTE-EXACT vs freshly generated native

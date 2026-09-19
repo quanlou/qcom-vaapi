@@ -433,21 +433,26 @@ Exit criteria:
   retain the legacy queue-all CAPTURE behavior, while pre-decode PRIME export
   clients use stable surface-to-buffer bindings. The code boundary now lives
   in `rust/src/v4l2/capture.rs`. Buffer metadata/handle behavior is host-tested
-  in `rust/src/buffer/handles.rs`. The exit criterion remains open until a clean
-  device run proves repeated FFmpeg and mpv playback.
+  in `rust/src/buffer/handles.rs`. The exit criterion is now MET: a clean device
+  run proves repeated FFmpeg and mpv playback (see below).
 - Keep `vaDeriveImage` covered; it is currently copy-backed, not zero-copy.
   Null-output callback coverage is in place.
 - Finish image lifecycle cleanup.
 - Keep `QuerySurfaceError` and surface status behavior covered; direct callback
   regressions now prove Ready vs Rendering status and Dead-surface decode-error
   reporting.
-- Test FFmpeg and mpv `vaapi-copy`. Current status: mpv-cut + GStreamer churn
-  legs pass, but required FFmpeg `sample-1` still times out after the initial
-  same-dimension `SOURCE_CHANGE` marker.
+- Test FFmpeg and mpv `vaapi-copy`. DONE: the required 720p matrix
+  (`sample-1`/`sample-30`/`sample-full`) is byte-exact vs native
+  `h264_v4l2m2m`, and `verify-session-churn.sh` is `pass=7 fail=0` (mpv-cut,
+  GStreamer, and SIGKILL/SIGTERM recovery legs all pass). The fix was to
+  synthesize the SPS VUI with `max_num_reorder_frames=0` (decode-order output)
+  so iris stops withholding frames until a drain; this removed the
+  reorder-delay deadlock that blocked FFmpeg's VAAPI-copy sync path.
 
 Exit criteria:
 
-- FFmpeg and mpv copy paths are reliable over repeated playback.
+- FFmpeg and mpv copy paths are reliable over repeated playback. **MET**
+  (2026-09-19).
 
 ### Phase 3: harden dmabuf zero-copy
 
