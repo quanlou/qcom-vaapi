@@ -90,6 +90,9 @@ struct LegacyPool {
 pub(crate) struct V4l2Session {
     fd: c_int,
     devnode: String,
+    /// Compressed format selected for OUTPUT. Queue objects are rebuilt after
+    /// a firmware abort, so this must outlive any one queue incarnation.
+    coded_fourcc: u32,
     out: V4l2Queue,
     cap: V4l2Queue,
     /// CAPTURE pools from before session rebuilds, in pool order.
@@ -138,7 +141,7 @@ pub(crate) struct V4l2Session {
 }
 
 impl V4l2Session {
-    pub(crate) fn open_and_setup(width: i32, height: i32) -> Result<Self, ()> {
+    pub(crate) fn open_and_setup(width: i32, height: i32, coded_fourcc: u32) -> Result<Self, ()> {
         let devnode = std::env::var("V4L2_VA_DEVICE")
             .ok()
             .filter(|s| !s.is_empty())
@@ -152,6 +155,7 @@ impl V4l2Session {
         let mut this = Self {
             fd,
             devnode,
+            coded_fourcc,
             out: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE as u32),
             cap: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE as u32),
             legacy: Vec::new(),
@@ -178,7 +182,7 @@ impl V4l2Session {
 
         if this.query_cap().is_err()
             || this.subscribe_events().is_err()
-            || this.setup_output(width, height).is_err()
+            || this.setup_output(width, height, coded_fourcc).is_err()
         {
             return Err(());
         }
@@ -205,6 +209,14 @@ impl V4l2Session {
     /// exhausted.
     pub(crate) fn failed(&self) -> bool {
         self.abandoned
+    }
+
+    /// Finish queued work before a VA context is detached and return every
+    /// completed capture while its mappings are still live. Context teardown
+    /// can then publish CPU snapshots before `Drop` releases the V4L2 queues.
+    pub(crate) fn drain_for_context_destroy(&mut self) -> Vec<ReadyCapture> {
+        self.flush_for_teardown();
+        self.pump(0)
     }
 
     fn stream_on(&mut self, output: bool) -> Result<(), ()> {
@@ -369,6 +381,7 @@ mod tests {
         let mut s = V4l2Session {
             fd,
             devnode: "/dev/null".to_string(),
+            coded_fourcc: V4L2_PIX_FMT_H264,
             out: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE as u32),
             cap: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE as u32),
             legacy: Vec::new(),

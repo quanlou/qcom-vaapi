@@ -1,42 +1,17 @@
-//! H.264 picture lifecycle callbacks.
+//! Codec-neutral VA picture lifecycle callbacks.
 //!
-//! VA clients submit parsed H.264 parameter and slice buffers between
-//! `vaBeginPicture` and `vaEndPicture`. This module translates those buffers
-//! into the Rust H.264 assembler and submits the resulting Annex-B frame to
-//! the stateful V4L2 session.
+//! Codec modules translate VA buffers into complete compressed access units;
+//! this module validates handles, owns surface state transitions, and submits
+//! those access units to the stateful V4L2 session.
 
 use crate::bindings::*;
-use crate::h264::H264Slice;
 use crate::state::{
-    DRV_MAX_RENDER_BUFFERS, DRV_MAX_SLICES_PER_FRAME, SurfaceState, buffer_index, context_index,
-    surface_index,
+    DRV_MAX_RENDER_BUFFERS, SurfaceState, buffer_index, context_index, surface_index,
 };
 use crate::surface::release_surface_capture;
 use crate::sync::pump_and_publish;
 use crate::{err, ok, state_from_ctx};
 use std::ffi::c_int;
-use std::ptr;
-
-fn normalized_h264_timestamp_usec(
-    poc: i32,
-    keyframe: bool,
-    first_poc: &mut Option<i32>,
-    epoch_usec: &mut u64,
-    max_timestamp_usec: &mut u64,
-) -> u64 {
-    if poc < 0 {
-        return *epoch_usec;
-    }
-    if keyframe && first_poc.is_some() {
-        *epoch_usec = max_timestamp_usec.saturating_add(33_333);
-        *first_poc = Some(poc);
-    }
-    let base = *first_poc.get_or_insert(poc);
-    let relative_poc = i64::from(poc).saturating_sub(i64::from(base)).max(0) as u64;
-    let timestamp = epoch_usec.saturating_add((relative_poc * 100_000 + 3) / 6);
-    *max_timestamp_usec = (*max_timestamp_usec).max(timestamp);
-    timestamp
-}
 
 pub(crate) unsafe extern "C" fn begin_picture(
     ctx: VADriverContextP,
@@ -130,8 +105,7 @@ pub(crate) unsafe extern "C" fn begin_picture(
     };
     c.frame_open = true;
     c.render_target = render_target;
-    c.slices.clear();
-    c.syn.begin_picture();
+    c.decoder.begin_picture();
     if let Some(surf) = guard.surfaces[surf_idx].as_mut() {
         surf.state = SurfaceState::InProgress;
         surf.owner = context;
@@ -186,90 +160,9 @@ pub(crate) unsafe extern "C" fn render_picture(
     let Some(c) = guard.contexts[ctx_idx].as_mut() else {
         return err(VA_STATUS_ERROR_INVALID_CONTEXT);
     };
-    for buf in copied {
-        match buf.type_ {
-            VABufferType::VAPictureParameterBufferType => {
-                if (buf.elem_size as usize) < std::mem::size_of::<VAPictureParameterBufferH264>()
-                    || buf.data.len() < std::mem::size_of::<VAPictureParameterBufferH264>()
-                {
-                    return err(VA_STATUS_ERROR_INVALID_PARAMETER);
-                }
-                let pp = unsafe {
-                    ptr::read_unaligned(buf.data.as_ptr() as *const VAPictureParameterBufferH264)
-                };
-                c.syn.set_picture_params(pp);
-            }
-            VABufferType::VAIQMatrixBufferType => {
-                if buf.data.len() >= std::mem::size_of::<VAIQMatrixBufferH264>() {
-                    let iq = unsafe {
-                        ptr::read_unaligned(buf.data.as_ptr() as *const VAIQMatrixBufferH264)
-                    };
-                    c.syn.set_iq_matrix(iq);
-                }
-            }
-            VABufferType::VASliceParameterBufferType => {
-                if (buf.elem_size as usize) < std::mem::size_of::<VASliceParameterBufferH264>() {
-                    return err(VA_STATUS_ERROR_INVALID_PARAMETER);
-                }
-                if c.slices
-                    .len()
-                    .checked_add(buf.num_elements as usize)
-                    .is_none_or(|count| count > DRV_MAX_SLICES_PER_FRAME)
-                {
-                    return err(VA_STATUS_ERROR_MAX_NUM_EXCEEDED);
-                }
-                for j in 0..buf.num_elements as usize {
-                    let off = j
-                        .checked_mul(buf.elem_size as usize)
-                        .ok_or(())
-                        .map_err(|_| err(VA_STATUS_ERROR_INVALID_PARAMETER));
-                    let off = match off {
-                        Ok(v) => v,
-                        Err(e) => return e,
-                    };
-                    let Some(end) =
-                        off.checked_add(std::mem::size_of::<VASliceParameterBufferH264>())
-                    else {
-                        return err(VA_STATUS_ERROR_INVALID_PARAMETER);
-                    };
-                    if end > buf.data.len() {
-                        return err(VA_STATUS_ERROR_INVALID_PARAMETER);
-                    }
-                    let sp = unsafe {
-                        ptr::read_unaligned(
-                            buf.data.as_ptr().add(off) as *const VASliceParameterBufferH264
-                        )
-                    };
-                    c.slices.push(H264Slice {
-                        sp,
-                        data: Vec::new(),
-                    });
-                }
-            }
-            VABufferType::VASliceDataBufferType => {
-                let Some(first) = c.slices.iter().position(|s| s.data.is_empty()) else {
-                    return err(VA_STATUS_ERROR_INVALID_PARAMETER);
-                };
-                let total = (buf.elem_size as usize).saturating_mul(buf.num_elements as usize);
-                if total > buf.data.len() {
-                    return err(VA_STATUS_ERROR_INVALID_PARAMETER);
-                }
-                for slice in c.slices.iter_mut().skip(first) {
-                    if !slice.data.is_empty() {
-                        continue;
-                    }
-                    let off = slice.sp.slice_data_offset as usize;
-                    let size = slice.sp.slice_data_size as usize;
-                    let Some(end) = off.checked_add(size) else {
-                        return err(VA_STATUS_ERROR_INVALID_PARAMETER);
-                    };
-                    if size == 0 || end > total {
-                        return err(VA_STATUS_ERROR_INVALID_PARAMETER);
-                    }
-                    slice.data = buf.data[off..end].to_vec();
-                }
-            }
-            _ => return err(VA_STATUS_ERROR_UNSUPPORTED_BUFFERTYPE),
+    for buffer in copied {
+        if let Err(status) = c.decoder.render_buffer(&buffer) {
+            return status;
         }
     }
     ok()
@@ -302,30 +195,23 @@ pub(crate) unsafe extern "C" fn end_picture(
     if !c.frame_open {
         return err(VA_STATUS_ERROR_OPERATION_FAILED);
     }
-    if !c.syn.have_pp || c.slices.is_empty() || c.slices.iter().any(|s| s.data.is_empty()) {
+    let frame = match c.decoder.finish_picture(c.out_seq) {
+        Ok(frame) => frame,
+        Err(status) => {
+            c.frame_open = false;
+            return status;
+        }
+    };
+    if frame.bytes.is_empty() {
         c.frame_open = false;
         return err(VA_STATUS_ERROR_INVALID_PARAMETER);
     }
-    let Some(frame) = c.syn.assemble_frame(&c.slices) else {
-        c.frame_open = false;
-        return err(VA_STATUS_ERROR_INVALID_PARAMETER);
-    };
     if let Ok(prefix) = std::env::var("V4L2_VA_DUMP")
         && !prefix.is_empty()
     {
         let path = format!("{}_{:02}.bin", prefix, c.out_seq);
         let _ = std::fs::write(path, &frame.bytes);
     }
-    let _ = frame.emitted_headers;
-    let keyframe = frame.bytes.windows(5).any(|w| w == [0, 0, 0, 1, 0x65]);
-    let poc = c.syn.pp.CurrPic.TopFieldOrderCnt;
-    let timestamp_usec = normalized_h264_timestamp_usec(
-        poc,
-        keyframe,
-        &mut c.first_poc,
-        &mut c.poc_epoch_usec,
-        &mut c.max_timestamp_usec,
-    );
     if std::env::var_os("V4L2_VA_DEBUG").is_some() {
         eprintln!(
             "msm_drv_video_rs: EndPicture context={} surface={} seq={} bytes={} ts={} keyframe={}",
@@ -333,8 +219,8 @@ pub(crate) unsafe extern "C" fn end_picture(
             render_target,
             c.out_seq,
             frame.bytes.len(),
-            timestamp_usec,
-            keyframe
+            frame.timestamp_usec,
+            frame.keyframe
         );
     }
     let submit = c
@@ -346,14 +232,13 @@ pub(crate) unsafe extern "C" fn end_picture(
                 render_target,
                 cap_idx,
                 &frame.bytes,
-                keyframe,
-                timestamp_usec,
-                &c.syn.header_bytes(),
+                frame.keyframe,
+                frame.timestamp_usec,
+                &frame.headers,
             )
         })
         .map_err(|_| err(VA_STATUS_ERROR_DECODING_ERROR));
     c.out_seq = c.out_seq.saturating_add(1);
-    c.slices.clear();
     c.frame_open = false;
     if let Err(e) = submit {
         if let Some(idx) = surface_index(c.render_target)
@@ -377,31 +262,6 @@ pub(crate) unsafe extern "C" fn end_picture(
 
 #[cfg(test)]
 mod tests {
-    use super::normalized_h264_timestamp_usec;
-
-    #[test]
-    fn h264_timestamps_are_relative_to_first_poc() {
-        let mut first = None;
-        let mut epoch = 0;
-        let mut max_ts = 0;
-        assert_eq!(
-            normalized_h264_timestamp_usec(65_536, true, &mut first, &mut epoch, &mut max_ts),
-            0
-        );
-        assert_eq!(
-            normalized_h264_timestamp_usec(65_542, false, &mut first, &mut epoch, &mut max_ts),
-            100_000
-        );
-        assert_eq!(
-            normalized_h264_timestamp_usec(65_538, false, &mut first, &mut epoch, &mut max_ts),
-            33_333
-        );
-        assert_eq!(
-            normalized_h264_timestamp_usec(65_536, true, &mut first, &mut epoch, &mut max_ts),
-            133_333
-        );
-    }
-
     use super::*;
     use crate::state::{DRV_ID_BASE_CONTEXT, DRV_ID_BASE_SURFACE, DriverBox, Surface};
     use std::ffi::c_void;
@@ -455,12 +315,8 @@ mod tests {
                 render_targets: vec![DRV_ID_BASE_SURFACE],
                 frame_open: true,
                 render_target: DRV_ID_BASE_SURFACE,
-                slices: Vec::new(),
-                syn: crate::h264::H264Synth::new(VAProfile::VAProfileH264Main),
+                decoder: crate::codec::Decoder::new(VAProfile::VAProfileH264Main).unwrap(),
                 out_seq: 0,
-                first_poc: None,
-                poc_epoch_usec: 0,
-                max_timestamp_usec: 0,
                 v4l2: None,
             });
             guard.surfaces[0] = Some(Surface {

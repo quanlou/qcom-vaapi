@@ -204,6 +204,18 @@ if [[ "$resolution_status" -ne 0 && "$resolution_status" -ne 77 ]]; then
     exit "$resolution_status"
 fi
 
+long_status=0
+"$repo_root/tools/verify-long-playback.sh" "$driver_dir" || long_status=$?
+if [[ "$long_status" -ne 0 && "$long_status" -ne 77 ]]; then
+    exit "$long_status"
+fi
+
+codec_status=0
+"$repo_root/tools/verify-codec-expansion.sh" "$driver_dir" || codec_status=$?
+if [[ "$codec_status" -ne 0 && "$codec_status" -ne 77 ]]; then
+    exit "$codec_status"
+fi
+
 verify_framemd5 one-frame-eos "$one_frame_sample" "" optional
 # The 720p sample above already contains reordered frames and is part of the
 # required matrix. This stricter small High-profile stream currently exposes a
@@ -211,4 +223,4 @@ verify_framemd5 one-frame-eos "$one_frame_sample" "" optional
 # the baseline verifier unusable.
 verify_framemd5 bframes-240p "$bframes_sample" "" optional
 
-echo "verified: cargo tests, vainfo, H.264 framemd5 regression matrix"
+echo "verified: cargo tests, vainfo, H.264 matrix, lifecycle stress, HEVC/VP9 parity"

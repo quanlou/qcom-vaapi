@@ -4,10 +4,13 @@ A Rust VA-API/libva driver backed by the stateful V4L2 M2M `iris` decoder at
 `/dev/video16`. libva derives the driver name `msm` from the DRM driver on
 X1E80100, so the built module must be named `msm_drv_video.so`.
 
-**Current scope:** H.264 decode, NV12, CPU-copy output through
-`vaCreateImage`/`vaGetImage`/`vaDeriveImage`, plus an initial read-only DRM
-PRIME export path for ready V4L2 CAPTURE buffers. Browser-grade zero-copy still
-needs importer/lifetime validation in a browser.
+**Current scope:** H.264 Baseline/Main/High, HEVC Main, and VP9 Profile 0
+decode to NV12; CPU-copy output through
+`vaCreateImage`/`vaGetImage`/`vaDeriveImage`; and a read-only DRM PRIME export
+path for ready V4L2 CAPTURE buffers. HEVC Main10 remains hidden until P010
+surface support exists. AV1 remains hidden until complete sequence/frame OBU
+synthesis is implemented. Browser-grade zero-copy still needs validation in a
+browser.
 
 ## Documentation
 
@@ -49,6 +52,8 @@ Expected profiles:
 - `VAProfileH264ConstrainedBaseline : VAEntrypointVLD`
 - `VAProfileH264Main : VAEntrypointVLD`
 - `VAProfileH264High : VAEntrypointVLD`
+- `VAProfileHEVCMain : VAEntrypointVLD`
+- `VAProfileVP9Profile0 : VAEntrypointVLD`
 
 Run the full local verification script:
 
@@ -57,9 +62,11 @@ Run the full local verification script:
 ```
 
 The script runs Rust unit tests, builds the isolated driver, checks `vainfo`,
-compares a H.264 framemd5 matrix against native `h264_v4l2m2m`, and records DRM
-PRIME/export probe logs under `/tmp/libva-v4l2-verify/`. The required matrix
-covers one decoded frame, 30 decoded frames, and the full 300-frame 720p sample.
+compares a H.264 framemd5 matrix against native `h264_v4l2m2m`, verifies
+mixed-resolution and sustained playback, and compares HEVC/VP9 output against
+their native V4L2 decoders. It records DRM PRIME/export probe logs under
+`/tmp/libva-v4l2-verify/`. The required H.264 matrix covers one decoded frame,
+30 decoded frames, and the full 300-frame 720p sample.
 It also keeps stricter local probes visible: the one-frame EOS file is skipped
 when native V4L2 produces no frame rows, and `bframes-240p.mp4` is reported as
 an expected failure until the remaining H.264 synthesis edge is fixed. When
@@ -75,10 +82,11 @@ Exercise same-decoder resolution changes separately:
 ./tools/verify-resolution-churn.sh /tmp/libva-v4l2-rust-driver
 ```
 
-The probe concatenates 720x480 and 1280x720 H.264 clips twice before one
-`vah264dec`, then checks that both negotiated formats and at least four driver
-`SOURCE_CHANGE` events are observed. The main verifier runs it after the
-required framemd5 and export probes when both sample clips are available.
+The probe concatenates 960x640 and 1280x720 H.264 clips twice and decodes the
+playlist in one FFmpeg VAAPI-copy process. It requires every frame, at least
+four driver `SOURCE_CHANGE` events, no Iris firmware fault, and a matching
+post-run sanity decode. The main verifier runs it after the required framemd5
+and export probes.
 
 Run the graphical browser probe separately when a display session is available:
 
@@ -135,7 +143,7 @@ sudo cp /tmp/libva-v4l2-rust-driver/msm_drv_video.so /usr/lib/aarch64-linux-gnu/
   `V4L2_VA_RESOLUTION_HIGH_SAMPLE=...` — override the two clips used by
   `tools/verify-resolution-churn.sh`.
 - `V4L2_VA_RESOLUTION_DIR=...` — scratch directory for the resolution probe's
-  GStreamer log and temporary pipeline files.
+  FFmpeg logs and temporary playlist files.
 - `V4L2_VA_BROWSER=chromium` — browser executable selected by
   `tools/verify-browser-vaapi.sh`; `firefox` is also supported.
 - `V4L2_VA_BROWSER_SECONDS=20` — timeout for the graphical browser probe.
@@ -146,17 +154,17 @@ sudo cp /tmp/libva-v4l2-rust-driver/msm_drv_video.so /usr/lib/aarch64-linux-gnu/
 
 ## Design notes
 
-- VA-API hands the driver parsed H.264 picture parameters plus raw slice NAL
-  bytes. The Rust driver synthesizes SPS/PPS from those fields and prepends
-  them to the original slices, producing an Annex-B stream for the stateful
-  V4L2 decoder.
-- The V4L2 flow mirrors libavcodec's working `h264_v4l2m2m` path: configure
-  OUTPUT as H.264, configure CAPTURE as NV12, queue compressed frames, start
-  OUTPUT/CAPTURE, pump DQBUF, then bind CAPTURE buffers back to VA surfaces.
+- Codec-specific Rust modules translate parsed VA parameters and slice data
+  into complete coded access units. H.264 synthesizes SPS/PPS, HEVC synthesizes
+  VPS/SPS/PPS for supported Main-profile stream shapes, and VP9 forwards the
+  complete compressed frame supplied by VA.
+- The V4L2 flow selects H.264, HEVC, or VP9 on OUTPUT, configures CAPTURE as
+  NV12, queues compressed frames, pumps DQBUF, and binds CAPTURE buffers back
+  to VA surfaces.
 - CAPTURE buffers are returned to the decoder when libav reuses a VA surface,
   preventing CAPTURE pool starvation during threaded decode.
 - The unsafe boundary is limited to libva/V4L2/mmap FFI. Driver-owned VA state,
-  H.264 synthesis, buffer ownership, and surface bookkeeping live in Rust data
+  codec assembly, buffer ownership, and surface bookkeeping live in Rust data
   structures.
 
 ## Verification status
@@ -169,15 +177,20 @@ Validated locally on the sample at `/home/mq/tmp/vaatest/test_720p.mp4`:
 - `cargo clippy --all-targets -- -D warnings` passes for handwritten Rust; the
   generated libva bindings are excluded from project linting because their C ABI
   naming and bindgen transmute patterns are intentional.
-- `vainfo` loads the Rust driver and reports H.264 Baseline/Main/High VLD.
+- `vainfo` loads the Rust driver and reports H.264 Baseline/Main/High, HEVC
+  Main, and VP9 Profile 0 VLD.
 - Rust VA decode matches native `h264_v4l2m2m` byte-for-byte for the 30-frame
   framemd5 test.
 - The full 10-second sample now matches native `h264_v4l2m2m` for all 300 frames.
 - `tools/verify-rust-driver.sh` passes the required matrix locally:
   `sample-1`, `sample-30`, and `sample-full`.
-- `tools/verify-resolution-churn.sh` passes a same-decoder 720x480 to 1280x720
-  GStreamer playback repeated twice, observing both negotiated formats and
-  at least four `SOURCE_CHANGE` events.
+- `tools/verify-resolution-churn.sh` decodes all 780 frames across four
+  960x640/1280x720 transitions in one FFmpeg VAAPI-copy process, with four
+  `SOURCE_CHANGE` events, no firmware faults, and a healthy post-run decoder.
+- `tools/verify-long-playback.sh` decodes a 12-segment, 3,600-frame playlist
+  without a mismatch, firmware fault, or post-run decoder failure.
+- `tools/verify-codec-expansion.sh` verifies 30 HEVC Main and 30 VP9 Profile 0
+  frames byte-for-byte against `hevc_v4l2m2m` and `vp9_v4l2m2m`.
 - The `/home/mq/tmp/vaatest/one-frame.mp4` probe is optional: it is skipped when
   native V4L2 produces no frame rows and remains an expected failure when the
   Rust path cannot recover a usable frame. The stricter
@@ -244,9 +257,10 @@ Validated locally on the sample at `/home/mq/tmp/vaatest/test_720p.mp4`:
   zero-copy in browsers.
 - Test Chromium and Firefox with a working hardware-decode launch path, then
   implement the callbacks and surface-import behavior they require.
-- Extend CAPTURE reconfiguration coverage to repeated changes, seeks, and long
-  mixed-resolution playlists.
+- Extend mixed-resolution stress beyond four transitions once native Iris
+  firmware handles the same workload reliably.
 - Keep splitting the Rust driver into smaller modules around VA entrypoints,
   sync/publish logic, export handling, codec handling, V4L2 backend, and DRM
   interop.
-- Add HEVC / VP9 / AV1 profiles only after H.264 is production-grade.
+- Add P010/Main10 and AV1 sequence/frame OBU synthesis before advertising those
+  profiles.

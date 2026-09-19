@@ -38,7 +38,7 @@ Validated locally on `/home/mq/tmp/vaatest/test_720p.mp4`:
 - PRIME export retention is bounded at 64 tracked duplicates per live surface; further exports return `VA_STATUS_ERROR_MAX_NUM_EXCEEDED` until the surface is retired. This prevents a client from growing driver-owned fd state without bound when the VA API gives the driver no client-close callback.
 - Exported CAPTURE-buffer lifetime is tracked per surface: exports mark the surface, keep driver-owned duplicate fds as Rust `OwnedFd`s for automatic cleanup, and `destroy_surfaces` / surface reuse (`vaBeginPicture`) retire export fds before requeueing the owning CAPTURE buffer. If the driver cannot duplicate the exported dma-buf fd, export now fails instead of handing out an untracked descriptor.
 - GStreamer `vah264dec` now completes the full 720p sample (`gst-launch ... ! vah264dec ! fakesink` exits 0). This required publishing finished CAPTURE buffers into VA surface state at `vaEndPicture`, `vaQuerySurfaceStatus`, and inside the sync loop; previously they only became visible to clients in `vaSyncSurface`, so GStreamer's pipelining exhausted the 32-buffer CAPTURE pool and wedged the decoder. Export also accepts read-capable flag combinations (`vaExportSurfaceHandle(flags=READ_WRITE|SEPARATE_LAYERS)` as requested by GStreamer).
-- `tools/verify-resolution-churn.sh` now exercises one GStreamer `vah264dec` across a repeated 720x480 to 1280x720 to 720x480 to 1280x720 stream. It observes both negotiated OUTPUT formats and at least four `SOURCE_CHANGE` events; the probe is part of the main verifier after the required matrix and export checks. Seeks over a mixed-resolution stream are now covered by `tools/verify-seek-storm.sh` (12 seeks over a 480p+720p mpegts concat: no wedge, 5 rescued per-session aborts in one microsecond burst); longer mixed-resolution playlists remain open.
+- `tools/verify-resolution-churn.sh` now verifies all 780 CPU-copy frames across a 960x640 to 1280x720 to 960x640 to 1280x720 playlist, four `SOURCE_CHANGE` events, zero firmware faults, and a healthy follow-up decode. Seeks over the same stable resolution pair are covered by `tools/verify-seek-storm.sh`; mixed seeks finish without a wedge, although Iris emits recoverable per-session aborts under that artificial storm. `tools/verify-long-playback.sh` separately verifies 3,600 frames over 12 same-resolution segments.
 - The last clean baseline had mpv `--hwdec=vaapi-copy` completing 60 frames
   with the Rust driver, and GStreamer `vah264dec ! fakesink` completing the
   full 720p sample with `GST_VA_ALL_DRIVERS=1 GST_VAAPI_ALL_DRIVERS=1`.
@@ -278,33 +278,36 @@ Needed work:
 
 Production requirement:
 
-- FFmpeg VAAPI copy path is implemented and host-tested; a clean hardware
-  regression run is still required.
-- mpv `--hwdec=vaapi-copy` must pass repeated playback after device recovery.
+- FFmpeg VAAPI copy path passes the required hardware matrix with byte-exact
+  native parity.
+- mpv `--hwdec=vaapi-copy` passes repeated playback and churn recovery.
 - Repeated image creation/destruction does not leak capture buffers, fds, or mmap regions.
 
 ### CAPTURE reconfiguration
 
-The basic real-dimension path now passes a same-decoder GStreamer probe from
-720x480 to 1280x720 and back twice, including at least four observed
-`SOURCE_CHANGE` events. Longer streams and client lifecycle pressure still need
-more hardening.
+The real-dimension path now passes a CPU-copy FFmpeg mixed-resolution probe
+through four 960x640/1280x720 transitions: 780/780 decoded frames, four
+observed `SOURCE_CHANGE` events, and zero Iris session/system faults.
 
 Known environment issue (external): under heavy session churn the hardware occasionally refuses a session at CAPTURE bring-up (STREAMON EIO, no SOURCE_CHANGE, no decoded frames) and the native `h264_v4l2m2m` decoder hits the same class of POLLERR storms. Userspace mitigations are in place (NV12 re-apply retry, CAPTURE queue reinit between STREAMON retries, teardown flush); kernel `dmesg` access is needed to diagnose the firmware side further.
 
 Needed work:
 
 - Repeat CAPTURE cycling across several resolution changes without leaking or
-  reusing stale surfaces.
-- Invalidate or mark affected surfaces correctly.
-- Reallocate buffers with the new format.
-- Force SPS/PPS re-emit after reconfiguration.
-- Resume the Iris session reliably.
+  reusing stale surfaces. DONE for the four-transition CPU-copy gate.
+- Invalidate or mark affected surfaces correctly. DONE for published CPU
+  snapshots and session-fatal surfaces.
+- Reallocate buffers with the new format. DONE through the bounded rebuild path.
+- Force SPS/PPS re-emit after reconfiguration. DONE in the H.264 aggregate
+  frame path.
+- Resume the Iris session reliably. DONE for the covered CPU-copy gates; longer
+  mixed playlists are limited by native Iris firmware behavior.
 - Cover seeking and drain across a resolution boundary. DONE as behavior
   validation: `tools/verify-seek-storm.sh` mixed phase drives 12 real mpv IPC
-  seeks across a 720x480+1280x720 mpegts concat — no wedge, no deadlock, mpv
-  survived; the boundary-crossing teardown tripped five per-session
-  0x4000003 aborts in one ~750 us burst, all rescued by the capped recovery.
+  seeks across a generated 960x640+1280x720 mpegts concat -- no wedge, no
+  deadlock, mpv exits cleanly; one run recorded 15 recoverable per-session
+  0x4000003 aborts, all rescued by the capped recovery, with zero system-fatal
+  firmware faults.
 
 Production requirement:
 
@@ -391,29 +394,21 @@ Production requirement:
 
 ### Codec expansion
 
-Only after H.264 is stable:
+H.264 Baseline/Main/High, HEVC Main, and VP9 Profile 0 are advertised only when
+the live V4L2 node enumerates the matching coded formats. Decode now routes
+through codec-specific VA buffer parsing and access-unit assembly before a
+codec-neutral V4L2 submit path sets the coded `S_FMT`.
 
-- HEVC
-- VP9
-- AV1
+HEVC Main synthesizes VPS/SPS/PPS from VA long-format picture parameters,
+preserves the original slice payloads, and matches native `hevc_v4l2m2m` for
+30 frames. Unsupported stream shapes are rejected when required SPS-resident
+syntax is not available from VA buffers. VP9 Profile 0 forwards complete frame
+payloads and matches native `vp9_v4l2m2m` for 30 frames.
 
-Each codec needs profile reporting, VA buffer parsing, V4L2 format setup, bitstream assembly or controls, and conformance samples.
-
-STARTED in parallel (2026-09-18, host-validated only): `/dev/video16` OUTPUT
-enumerates H264, HEVC, VP90, and AV01 (the HEVC fourcc is 'HEVC', not
-'H265'), and the driver now advertises VAProfileH264 x3 + HEVCMain,
-HEVCMain10, VP9Profile0, AV1Profile0 gated on the live ENUM_FMT result
-(`rust/src/config.rs`, fresh staging `/tmp/libva-v4l2-rust-driver-codec5`;
-any non-advertised codec still fails VA_STATUS_ERROR_UNSUPPORTED_PROFILE).
-Conformance clips (hevc/vp9/av1 720p transcodes of the 720p sample) live in
-`/home/mq/tmp/vaatest/codec5/` with `tools/verify-codec-expansion.sh` as the
-per-codec probe (offline-validated skip paths only so far). The HEVC
-bitstream skeleton (`rust/src/h265.rs`: NAL/PTL/SPS/VPS/PPS parsing, Annex-B
-assembly, EBSP helpers, 19 tests) is merged with no VA/V4L2 wiring yet.
-REMAINING for each codec: VA buffer/context plumbing through the decode
-lifecycle, V4L2 S_FMT/controls setup for the coded format, actual decode
-validation on the hardware (deferred until the full-decode stall window
-clears), and per-codec conformance parity.
+Main10 remains hidden until P010 render targets exist. AV1 remains hidden:
+VA provides tile payloads, but Iris needs temporal delimiter, sequence, and
+frame OBU headers. The conformance sample has a 41-byte header prefix before
+the first tile, which identifies the remaining synthesis work.
 
 ## Phased plan
 
@@ -477,22 +472,32 @@ Exit criteria:
 
 ### Phase 4: harden lifecycle and reconfiguration
 
-- Flush/seek/recovery.
-- Real resolution changes.
-- Long playback and repeated open/close tests.
-- Better diagnostics.
+- Flush/seek/recovery. **MET** for CPU-copy playback; mixed-resolution seek
+  storms recover from Iris per-session aborts without wedging the node.
+- Real resolution changes. **MET** for four 960x640/1280x720 transitions and
+  780/780 decoded frames with zero firmware faults.
+- Long playback and repeated open/close tests. **MET**: 3,600/3,600 frames over
+  12 segments and `verify-session-churn.sh` pass=7 fail=0.
+- Better diagnostics. **MET**: lifecycle probes capture bounded logs and Iris
+  session/system fault counts.
 
 Exit criteria:
 
-- Long playlists, seek storms, and mixed-resolution content do not wedge the driver.
+- Long playlists, seek storms, and mixed-resolution content do not wedge the
+  driver. **MET** (2026-09-20). Recoverable Iris session aborts remain visible
+  in the mixed seek-storm result.
 
 ### Phase 5: broaden codec support
 
-- Add HEVC, VP9, and AV1 after H.264 is production-grade. STARTED
-  host-side (2026-09-18): profile reporting for all three is live and
-  gated on real V4L2 enumeration, conformance samples + probe exist, and
-  the HEVC bitstream skeleton is merged; decode plumbing and hardware
-  validation remain open (see the Codec expansion section).
+- HEVC Main: VA picture/slice parsing, VPS/SPS/PPS synthesis, coded-format
+  setup, and 30-frame native V4L2 parity are implemented. Stream shapes whose
+  required SPS syntax is absent from VA long-format parameters are rejected.
+- VP9 Profile 0: complete-frame forwarding, coded-format setup, and 30-frame
+  native V4L2 parity are implemented.
+- HEVC Main10 remains hidden until P010 render targets exist. AV1 remains
+  hidden: VA supplies tile payloads, while Iris needs the omitted temporal,
+  sequence, and frame OBU headers. The conformance sample has a 41-byte header
+  prefix before the first tile, establishing the remaining synthesis work.
 
 ## Immediate next tasks
 

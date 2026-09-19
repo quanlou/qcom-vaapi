@@ -119,11 +119,15 @@ semantics, and why "zero-copy" is a *lifetime* problem more than a
 
 ### Phase 4 — lifecycle hardening
 
+**Status:** CPU-copy lifecycle gate met on 2026-09-20. One process decodes all
+780 frames across four real 960x640/1280x720 transitions without an Iris fault;
+a 12-segment run decodes 3,600 frames; repeated session churn passes 7/7.
+Seek storms finish and preserve decoder health. Mixed-resolution seeks can
+still provoke recoverable Iris session aborts, which the probe reports.
+
 **What:** flush on seek, drain after flush, safe destruction of pending
-surfaces, real resolution changes (CAPTURE cycle + surface
-invalidation + SPS/PPS re-emit — the `SOURCE_CHANGE` handler currently
-only resumes same-size changes), error recovery that never wedges the
-device, deterministic `STREAMOFF`/release, leak checks.
+surfaces, real resolution changes, error recovery that never wedges the
+device, deterministic `STREAMOFF`/release, and leak checks.
 
 **Why:** browsers seek constantly and mixed-resolution playlists are
 normal. A driver that hangs on seek storm #40 is dead on arrival.
@@ -133,9 +137,13 @@ comes back here with interest.
 
 ### Phase 5 — more codecs (HEVC, VP9, AV1)
 
-**What:** per codec: profile reporting, new VA buffer types, V4L2
-format setup, bitstream assembly changes (HEVC also needs
-synthesized headers; VP9/AV1 differ again), conformance samples.
+**Status:** HEVC Main and VP9 Profile 0 are implemented and match their native
+V4L2 decoders for 30 frames. Main10 is hidden pending P010 surfaces. AV1 is
+hidden pending synthesis of the sequence/frame OBU headers omitted from VA tile
+buffers.
+
+**What:** per codec: profile reporting, new VA buffer types, V4L2 format setup,
+bitstream assembly changes, and native parity samples.
 
 **Why last:** each codec multiplies the lifecycle surface area. Do it
 once on a rock-solid H.264 base.

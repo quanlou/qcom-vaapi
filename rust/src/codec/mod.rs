@@ -1,0 +1,89 @@
+//! Codec selection and codec-specific VA buffer translation.
+//!
+//! The V4L2 session only consumes complete coded access units.  VA clients,
+//! however, submit picture parameters, slice metadata, and compressed bytes as
+//! separate buffers.  Each decoder below owns that assembly state so the
+//! picture lifecycle in `decode.rs` remains independent of codec syntax.
+
+mod h264;
+mod raw;
+
+use crate::bindings::*;
+use crate::state::Buffer;
+use crate::v4l2::{V4L2_PIX_FMT_AV1, V4L2_PIX_FMT_H264, V4L2_PIX_FMT_HEVC, V4L2_PIX_FMT_VP9};
+
+pub(crate) use h264::H264Decoder;
+pub(crate) use raw::RawDecoder;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Codec {
+    H264,
+    Hevc,
+    Vp9,
+    Av1,
+}
+
+impl Codec {
+    pub(crate) fn from_profile(profile: VAProfile) -> Option<Self> {
+        match profile {
+            VAProfile::VAProfileH264ConstrainedBaseline
+            | VAProfile::VAProfileH264Main
+            | VAProfile::VAProfileH264High => Some(Self::H264),
+            VAProfile::VAProfileHEVCMain | VAProfile::VAProfileHEVCMain10 => Some(Self::Hevc),
+            VAProfile::VAProfileVP9Profile0 => Some(Self::Vp9),
+            VAProfile::VAProfileAV1Profile0 => Some(Self::Av1),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn fourcc(self) -> u32 {
+        match self {
+            Self::H264 => V4L2_PIX_FMT_H264,
+            Self::Hevc => V4L2_PIX_FMT_HEVC,
+            Self::Vp9 => V4L2_PIX_FMT_VP9,
+            Self::Av1 => V4L2_PIX_FMT_AV1,
+        }
+    }
+}
+
+pub(crate) struct EncodedFrame {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) headers: Vec<u8>,
+    pub(crate) keyframe: bool,
+    pub(crate) timestamp_usec: u64,
+}
+
+pub(crate) enum Decoder {
+    H264(Box<H264Decoder>),
+    Raw(Box<RawDecoder>),
+}
+
+impl Decoder {
+    pub(crate) fn new(profile: VAProfile) -> Option<Self> {
+        match Codec::from_profile(profile)? {
+            Codec::H264 => Some(Self::H264(Box::new(H264Decoder::new(profile)))),
+            codec => Some(Self::Raw(Box::new(RawDecoder::new(codec)))),
+        }
+    }
+
+    pub(crate) fn begin_picture(&mut self) {
+        match self {
+            Self::H264(decoder) => decoder.begin_picture(),
+            Self::Raw(decoder) => decoder.begin_picture(),
+        }
+    }
+
+    pub(crate) fn render_buffer(&mut self, buffer: &Buffer) -> Result<(), VAStatus> {
+        match self {
+            Self::H264(decoder) => decoder.render_buffer(buffer),
+            Self::Raw(decoder) => decoder.render_buffer(buffer),
+        }
+    }
+
+    pub(crate) fn finish_picture(&mut self, sequence: u64) -> Result<EncodedFrame, VAStatus> {
+        match self {
+            Self::H264(decoder) => decoder.finish_picture(),
+            Self::Raw(decoder) => decoder.finish_picture(sequence),
+        }
+    }
+}

@@ -376,6 +376,7 @@ mod tests {
         let mut session = V4l2Session {
             fd,
             devnode: "/dev/null".to_string(),
+            coded_fourcc: super::super::V4L2_PIX_FMT_H264,
             out: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE as u32),
             cap: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE as u32),
             legacy: Vec::new(),

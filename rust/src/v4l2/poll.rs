@@ -519,7 +519,7 @@ impl V4l2Session {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{LegacyPool, O_RDWR, V4l2Buffer, V4l2Queue, open};
+    use super::super::{LegacyPool, O_RDWR, V4L2_PIX_FMT_H264, V4l2Buffer, V4l2Queue, open};
     use super::*;
     use crate::bindings::v4l2_buf_type;
     use std::collections::VecDeque;
@@ -556,6 +556,7 @@ mod tests {
         let mut session = V4l2Session {
             fd,
             devnode: "/dev/null".to_string(),
+            coded_fourcc: V4L2_PIX_FMT_H264,
             out: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE as u32),
             cap: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE as u32),
             legacy: Vec::new(),

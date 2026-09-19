@@ -137,7 +137,7 @@ impl V4l2Session {
         let setup = self
             .query_cap()
             .and_then(|_| self.subscribe_events())
-            .and_then(|_| self.setup_output(w, h))
+            .and_then(|_| self.setup_output(w, h, self.coded_fourcc))
             .and_then(|_| self.capture_pool_setup());
         if setup.is_err() {
             self.abandoned = true;

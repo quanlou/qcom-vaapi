@@ -6,6 +6,7 @@
 #[allow(clippy::all)]
 mod bindings;
 mod buffer;
+mod codec;
 mod config;
 mod context;
 mod decode;

@@ -10,9 +10,9 @@ set -uo pipefail
 #      `codec_<name>=skip reason=missing_sample=...`
 #   2. vainfo through the driver must advertise the codec's VAProfile, else
 #      `codec_<name>=skip reason=profile_not_advertised`
-#   3. a 1-frame framemd5 decode through the driver as self-reference, then a
-#      N-frame (V4L2_VA_CODEC_FRAMES, default 30) framemd5; frame 1 must be
-#      byte-identical between the two legs. Both legs run under
+#   3. an N-frame reference through the native V4L2 wrapper, a 1-frame decode
+#      through this driver, then an N-frame decode through this driver. Driver
+#      output must be byte-identical to native output. Driver legs run under
 #      tools/capture-iris-kernel-log.sh so iris firmware errors are attributed
 #      to the leg that caused them, with V4L2_VA_DEBUG=1.
 #   4. kernel classification exactly like tools/verify-eos-drain.sh:
@@ -36,13 +36,13 @@ kernel_tool="$repo_root/tools/capture-iris-kernel-log.sh"
 
 # ---- visible constants: VAProfile name -> sample mapping + grep patterns ----
 # Fields separated by '|' (NOT ':': the patterns themselves contain colons):
-#   <codec>|<VAProfile>|<sample file>|<vainfo grep pattern>
+#   <codec>|<VAProfile>|<sample file>|<vainfo grep pattern>|<native decoder>
 # Patterns are colon-anchored so VAProfileHEVCMain10 / VAProfileVP9Profile2
 # etc. cannot false-match the base profile.
 codec_specs=(
-    "hevc|VAProfileHEVCMain|hevc-main-720p.mp4|VAProfileHEVCMain[[:space:]]*:"
-    "vp9|VAProfileVP9Profile0|vp9-720p.webm|VAProfileVP9Profile0[[:space:]]*:"
-    "av1|VAProfileAV1Profile0|av1-720p.mp4|VAProfileAV1Profile0[[:space:]]*:"
+    "hevc|VAProfileHEVCMain|hevc-main-720p.mp4|VAProfileHEVCMain[[:space:]]*:|hevc_v4l2m2m"
+    "vp9|VAProfileVP9Profile0|vp9-720p.webm|VAProfileVP9Profile0[[:space:]]*:|vp9_v4l2m2m"
+    "av1|VAProfileAV1Profile0|av1-720p.mp4|VAProfileAV1Profile0[[:space:]]*:|"
 )
 
 mkdir -p "$work_dir"
@@ -108,13 +108,14 @@ decode_leg() { # <frames> <out.md5> <log> <file>
     set -e
 }
 
-run_codec() { # <name> <profile> <file> <pattern>
-    local name="$1" profile="$2" file="$3" pattern="$4"
+run_codec() { # <name> <profile> <file> <pattern> <native decoder>
+    local name="$1" profile="$2" file="$3" pattern="$4" native_decoder="$5"
     local base="$work_dir/$name"
+    local native_md5="$base-native-$codec_frames.md5" native_log="$base-native-$codec_frames.log"
     local ref_md5="$base-1f.md5" ref_log="$base-1f.log"
     local n_md5="$base-$codec_frames.md5" n_log="$base-$codec_frames.log"
-    local ref_status n_status ref_session ref_system n_session n_system
-    local ref_line n_line verdict
+    local native_status ref_status n_status ref_session ref_system n_session n_system
+    local native_records ref_records n_records verdict
 
     if [[ ! -f "$file" ]]; then
         echo "codec_$name=skip reason=missing_sample=$file"
@@ -123,6 +124,23 @@ run_codec() { # <name> <profile> <file> <pattern>
     if [[ "$vainfo_status" -ne 0 ]] \
         || ! grep -E "$pattern" "$work_dir/vainfo.log" >/dev/null; then
         echo "codec_$name=skip reason=profile_not_advertised profile=$profile vainfo_status=$vainfo_status log=$work_dir/vainfo.log"
+        return 2
+    fi
+    if [[ -z "$native_decoder" ]] || ! ffmpeg -hide_banner -decoders 2>/dev/null \
+        | grep -F " $native_decoder " >/dev/null; then
+        echo "codec_$name=skip reason=native_reference_unavailable decoder=$native_decoder"
+        return 2
+    fi
+
+    set +e
+    timeout 120s ffmpeg -y -nostdin -hide_banner -v error \
+        -c:v "$native_decoder" -i "$file" -map 0:v:0 \
+        -frames:v "$codec_frames" -f framemd5 "$native_md5" \
+        > "$native_log" 2>&1
+    native_status=$?
+    set -e
+    if [[ "$native_status" -ne 0 || ! -s "$native_md5" ]]; then
+        echo "codec_$name=skip reason=native_reference_failed status=$native_status log=$native_log"
         return 2
     fi
 
@@ -136,16 +154,22 @@ run_codec() { # <name> <profile> <file> <pattern>
     n_status=$leg_status
     read -r n_session n_system <<< "$(kernel_counts "$n_log")"
 
-    ref_line="$(first_frame_line "$ref_md5")"
-    n_line="$(first_frame_line "$n_md5")"
+    native_records="$base-native.records"
+    ref_records="$base-1f.records"
+    n_records="$base-$codec_frames.records"
+    awk '!/^#/ && NF {print $1, $2, $3, $4, $5, $6}' "$native_md5" > "$native_records"
+    awk '!/^#/ && NF {print $1, $2, $3, $4, $5, $6}' "$ref_md5" > "$ref_records"
+    awk '!/^#/ && NF {print $1, $2, $3, $4, $5, $6}' "$n_md5" > "$n_records"
 
-    verdict="pass reason=frame1_matches_n"
+    verdict="pass reason=native_parity"
     if [[ "$n_status" -ne 0 || ! -s "$n_md5" ]]; then
         verdict="fail reason=n_frame_decode_failed status=$n_status"
-    elif [[ "$ref_status" -ne 0 || -z "$ref_line" ]]; then
+    elif [[ "$ref_status" -ne 0 || ! -s "$ref_records" ]]; then
         verdict="fail reason=self_ref_decode_failed status=$ref_status"
-    elif [[ "$ref_line" != "$n_line" ]]; then
-        verdict="fail reason=parity_mismatch frames=$codec_frames"
+    elif ! cmp -s "$native_records" "$n_records"; then
+        verdict="fail reason=native_parity_mismatch frames=$codec_frames"
+    elif ! cmp -s "$ref_records" <(head -n 1 "$native_records"); then
+        verdict="fail reason=first_frame_native_parity_mismatch"
     elif [[ "$ref_system" != NA && "$ref_system" -gt 0 ]] \
         || [[ "$n_system" != NA && "$n_system" -gt 0 ]]; then
         verdict="fail reason=firmware_system_fatal"
@@ -154,7 +178,7 @@ run_codec() { # <name> <profile> <file> <pattern>
         verdict="degraded reason=session_abort_rescued status=0"
     fi
 
-    echo "codec_$name=$verdict profile=$profile frames=$codec_frames kernel_1f(session=$ref_session,system=$ref_system) kernel_n(session=$n_session,system=$n_system) log=$n_log"
+    echo "codec_$name=$verdict profile=$profile frames=$codec_frames native=$native_decoder kernel_1f(session=$ref_session,system=$ref_system) kernel_n(session=$n_session,system=$n_system) log=$n_log"
     if [[ "$verdict" == fail* ]]; then
         return 1
     elif [[ "$verdict" == degraded* ]]; then
@@ -168,12 +192,12 @@ failed=0
 skipped=0
 
 for spec in "${codec_specs[@]}"; do
-    IFS='|' read -r name profile sample pattern <<< "$spec"
+    IFS='|' read -r name profile sample pattern native_decoder <<< "$spec"
     # Per-codec returns are control flow (2=skip, 3=degraded), not errors;
     # `|| rc=$?` keeps them errexit-safe (set -e is on after the vainfo
     # capture, exactly as in tools/verify-eos-drain.sh).
     rc=0
-    run_codec "$name" "$profile" "$codec5_dir/$sample" "$pattern" || rc=$?
+    run_codec "$name" "$profile" "$codec5_dir/$sample" "$pattern" "$native_decoder" || rc=$?
     if [[ "$rc" -eq 2 ]]; then
         skipped=$((skipped + 1))
     elif [[ "$rc" -eq 1 ]]; then
