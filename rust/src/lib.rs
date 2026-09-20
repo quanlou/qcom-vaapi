@@ -3,6 +3,7 @@
 #![allow(non_upper_case_globals)]
 #![allow(dead_code)]
 
+mod av1;
 #[allow(clippy::all)]
 mod bindings;
 mod buffer;
