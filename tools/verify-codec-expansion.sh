@@ -105,7 +105,7 @@ decode_leg() { # <frames> <out.md5> <log> <file>
     set +e
     timeout 120s "$kernel_tool" -- \
         env V4L2_VA_DEBUG=1 LIBVA_DRIVERS_PATH="$driver_dir" \
-        ffmpeg -nostdin -hide_banner -v error \
+        ffmpeg -y -nostdin -hide_banner -v error \
         -hwaccel vaapi -hwaccel_device "$drm_device" \
         -i "$4" -map 0:v:0 -frames:v "$1" -f framemd5 "$2" \
         > "$3" 2>&1

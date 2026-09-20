@@ -23,16 +23,12 @@ use crate::{err, ok, state_from_ctx};
 use std::ffi::c_int;
 use std::ptr;
 
-/// Image formats advertised via `vaQueryImageFormats`. Kept at just NV12 for
-/// now: advertising P010 here triggered a `corrupted size vs. prev_size`
-/// glibc abort in the ffmpeg VAAPI copy path at surface teardown (double-free
-/// signature under `MALLOC_CHECK_`), reliably reproducible on the 720p H.264
-/// sample. The P010 codepath itself is intact — `create_image` still accepts
-/// P010 fourccs directly from clients that skip the query — so Main10
-/// clients can create P010 images via `vaCreateImage` once the query-formats
-/// interaction is understood. Root-causing the glibc abort belongs with the
-/// Main10 hardware validation.
-pub(crate) const SUPPORTED_IMAGE_FORMATS: [DecodedFormat; 1] = [DecodedFormat::Nv12];
+/// Image formats advertised via `vaQueryImageFormats`. Keep this in sync with
+/// `VADriverContext::max_image_formats`: FFmpeg allocates exactly that many
+/// entries before calling the query callback, and its VAAPI Main10 path also
+/// requires P010 to be present here before it creates P010 render surfaces.
+pub(crate) const SUPPORTED_IMAGE_FORMATS: [DecodedFormat; 2] =
+    [DecodedFormat::Nv12, DecodedFormat::P010];
 
 pub(crate) unsafe extern "C" fn query_image_formats(
     _ctx: VADriverContextP,

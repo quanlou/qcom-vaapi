@@ -4,13 +4,12 @@ A Rust VA-API/libva driver backed by the stateful V4L2 M2M `iris` decoder at
 `/dev/video16`. libva derives the driver name `msm` from the DRM driver on
 X1E80100, so the built module must be named `msm_drv_video.so`.
 
-**Current scope:** H.264 Baseline/Main/High, HEVC Main, and VP9 Profile 0
-decode to NV12; CPU-copy output through
+**Current scope:** H.264 Baseline/Main/High, HEVC Main, HEVC Main10, and VP9
+Profile 0 decode to NV12 or P010 as appropriate; CPU-copy output through
 `vaCreateImage`/`vaGetImage`/`vaDeriveImage`; and a read-only DRM PRIME export
-path for ready V4L2 CAPTURE buffers. HEVC Main10 remains hidden until P010
-surface support exists. AV1 remains hidden until complete sequence/frame OBU
-synthesis is implemented. Browser-grade zero-copy still needs validation in a
-browser.
+path for ready V4L2 CAPTURE buffers. AV1 remains hidden until complete
+sequence/frame OBU synthesis is implemented. Browser-grade zero-copy still
+needs validation in a browser.
 
 ## Documentation
 
@@ -53,6 +52,7 @@ Expected profiles:
 - `VAProfileH264Main : VAEntrypointVLD`
 - `VAProfileH264High : VAEntrypointVLD`
 - `VAProfileHEVCMain : VAEntrypointVLD`
+- `VAProfileHEVCMain10 : VAEntrypointVLD`
 - `VAProfileVP9Profile0 : VAEntrypointVLD`
 
 Run the full local verification script:
@@ -63,8 +63,11 @@ Run the full local verification script:
 
 The script runs Rust unit tests, builds the isolated driver, checks `vainfo`,
 compares a H.264 framemd5 matrix against native `h264_v4l2m2m`, verifies
-mixed-resolution and sustained playback, and compares HEVC/VP9 output against
-their native V4L2 decoders. It records DRM PRIME/export probe logs under
+mixed-resolution and sustained playback, and compares codec-expansion output
+against reference decoders. HEVC Main and VP9 use native V4L2 references;
+HEVC Main10 uses software HEVC converted to P010 because FFmpeg's
+`hevc_v4l2m2m` wrapper does not produce valid Main10 frame rows on this
+platform. It records DRM PRIME/export probe logs under
 `/tmp/libva-v4l2-verify/`. The required H.264 matrix covers one decoded frame,
 30 decoded frames, and the full 300-frame 720p sample.
 It also keeps stricter local probes visible: the one-frame EOS file is skipped
@@ -156,11 +159,11 @@ sudo cp /tmp/libva-v4l2-rust-driver/msm_drv_video.so /usr/lib/aarch64-linux-gnu/
 
 - Codec-specific Rust modules translate parsed VA parameters and slice data
   into complete coded access units. H.264 synthesizes SPS/PPS, HEVC synthesizes
-  VPS/SPS/PPS for supported Main-profile stream shapes, and VP9 forwards the
+  VPS/SPS/PPS for supported Main/Main10 stream shapes, and VP9 forwards the
   complete compressed frame supplied by VA.
 - The V4L2 flow selects H.264, HEVC, or VP9 on OUTPUT, configures CAPTURE as
-  NV12, queues compressed frames, pumps DQBUF, and binds CAPTURE buffers back
-  to VA surfaces.
+  NV12 or P010 from the VA profile, queues compressed frames, pumps DQBUF, and
+  binds CAPTURE buffers back to VA surfaces.
 - CAPTURE buffers are returned to the decoder when libav reuses a VA surface,
   preventing CAPTURE pool starvation during threaded decode.
 - The unsafe boundary is limited to libva/V4L2/mmap FFI. Driver-owned VA state,
@@ -178,7 +181,7 @@ Validated locally on the sample at `/home/mq/tmp/vaatest/test_720p.mp4`:
   generated libva bindings are excluded from project linting because their C ABI
   naming and bindgen transmute patterns are intentional.
 - `vainfo` loads the Rust driver and reports H.264 Baseline/Main/High, HEVC
-  Main, and VP9 Profile 0 VLD.
+  Main, HEVC Main10, and VP9 Profile 0 VLD.
 - Rust VA decode matches native `h264_v4l2m2m` byte-for-byte for the 30-frame
   framemd5 test.
 - The full 10-second sample now matches native `h264_v4l2m2m` for all 300 frames.
@@ -189,8 +192,11 @@ Validated locally on the sample at `/home/mq/tmp/vaatest/test_720p.mp4`:
   `SOURCE_CHANGE` events, no firmware faults, and a healthy post-run decoder.
 - `tools/verify-long-playback.sh` decodes a 12-segment, 3,600-frame playlist
   without a mismatch, firmware fault, or post-run decoder failure.
-- `tools/verify-codec-expansion.sh` verifies 30 HEVC Main and 30 VP9 Profile 0
-  frames byte-for-byte against `hevc_v4l2m2m` and `vp9_v4l2m2m`.
+- `tools/verify-codec-expansion.sh` verifies 30 HEVC Main, 30 HEVC Main10, and
+  30 VP9 Profile 0 frames byte-for-byte. HEVC Main and VP9 compare against
+  `hevc_v4l2m2m` and `vp9_v4l2m2m`; Main10 compares against software HEVC
+  output converted to P010 because the native FFmpeg V4L2 wrapper aborts on
+  the same Main10 sample.
 - The `/home/mq/tmp/vaatest/one-frame.mp4` probe is optional: it is skipped when
   native V4L2 produces no frame rows and remains an expected failure when the
   Rust path cannot recover a usable frame. The stricter
@@ -262,5 +268,4 @@ Validated locally on the sample at `/home/mq/tmp/vaatest/test_720p.mp4`:
 - Keep splitting the Rust driver into smaller modules around VA entrypoints,
   sync/publish logic, export handling, codec handling, V4L2 backend, and DRM
   interop.
-- Add P010/Main10 and AV1 sequence/frame OBU synthesis before advertising those
-  profiles.
+- Add AV1 sequence/frame OBU synthesis before advertising that profile.

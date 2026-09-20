@@ -234,4 +234,4 @@ verify_framemd5 one-frame-eos "$one_frame_sample" "" optional
 # the baseline verifier unusable.
 verify_framemd5 bframes-240p "$bframes_sample" "" optional
 
-echo "verified: cargo tests, vainfo, H.264 matrix, GL zero-copy, lifecycle stress, HEVC/VP9 parity"
+echo "verified: cargo tests, vainfo, H.264 matrix, GL zero-copy, lifecycle stress, HEVC/Main10/VP9 parity"

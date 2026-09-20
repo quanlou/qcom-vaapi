@@ -21,27 +21,27 @@ short and update it whenever a task starts, finishes, or gets blocked.
 
 ## Active task
 
-- Post-merge production hardening / agent split (codex agent, 2026-09-20): continue on `main` after merging Phase 4/5 at `fd2987b`. Phase 4 is complete for the covered gates: H.264 sample-1/30/full, mixed-resolution CPU-copy, long playback, seek stress, and repeated-open lifecycle all have passing evidence. Phase 5 is complete for HEVC Main and VP9 Profile 0; Main10 and AV1 remain intentionally hidden until the missing implementation pieces below exist.
+- Post-merge production hardening / agent split (codex agent, 2026-09-20): continue on `main` after merging Phase 4/5 at `fd2987b`. Phase 4 is complete for the covered gates: H.264 sample-1/30/full, mixed-resolution CPU-copy, long playback, seek stress, and repeated-open lifecycle all have passing evidence. Phase 5 is complete for HEVC Main, HEVC Main10, and VP9 Profile 0; AV1 remains intentionally hidden until the missing OBU synthesis exists.
 
   Parallel-safe work items for other agents:
   1. Firmware/small-stream lane: keep `bframes-240p` as an expected xfail, gather root-only `qcom_iris` dynamic_debug/HFI traces for a failing small stream versus passing 720p, and update `docs/08-iris-firmware-errors.md`. Do not weaken the required 720p matrix.
   2. GL/export verifier lane: keep the now-hard `tools/verify-gl-roundtrip.sh` gate green and improve diagnostics around tolerated gst-va pool warmup frames. Keep `verify-rust-driver.sh` and `verify-session-churn.sh` green after any V4L2 queue/export/teardown change.
   3. Browser/client lane: rerun `tools/verify-browser-vaapi.sh` on clean hardware after export or pool changes, add an unconfined Firefox path if available, and implement only callbacks/importer behavior that browser logs prove are required.
-  4. Main10 lane: add P010 surface/image/export capability and advertise HEVCMain10 only after a native-parity sample passes.
-  5. AV1 lane: synthesize the missing temporal delimiter, sequence, and frame OBU headers before advertising AV1; current evidence shows the conformance sample has a 41-byte prefix before the first VA tile payload.
-  6. Rust cleanup lane: keep reducing oversized modules around surface lifecycle, VA entrypoints, codec parsing/synthesis, and V4L2 backend boundaries while preserving current verifier behavior.
+  4. AV1 lane: synthesize the missing temporal delimiter, sequence, and frame OBU headers before advertising AV1; current evidence shows the conformance sample has a 41-byte prefix before the first VA tile payload.
+  5. Rust cleanup lane: keep reducing oversized modules around surface lifecycle, VA entrypoints, codec parsing/synthesis, and V4L2 backend boundaries while preserving current verifier behavior.
 
 ## Last verified clean baseline
 
-- Commit under test: `main` after Phase 4/5 merge (`fd2987b`) plus verifier
-  fixes staged for the next commit.
-- `tools/verify-rust-driver.sh /tmp/libva-v4l2-rust-driver-main`: passed 106
+- Commit under test: `main` with the staged Main10/P010 lane.
+- `tools/verify-rust-driver.sh /tmp/libva-v4l2-rust-driver-main10-full-20260920-120916`: passed 109
   Rust tests, H.264 sample-1/sample-30/sample-full byte-exact matrix,
   GStreamer export callback, GL zero-copy roundtrip (`missing=1 tolerated=2`),
   FFmpeg mixed-resolution gate (`decoded=780 expected=780 source_changes=4`),
-  long playback (`decoded=3600 expected=3600`), HEVC Main native parity, and
-  VP9 Profile 0 native parity. AV1 is skipped because it is not advertised.
-- `tools/verify-session-churn.sh /tmp/libva-v4l2-rust-driver-main`:
+  long playback (`decoded=3600 expected=3600`), HEVC Main native parity,
+  HEVC Main10 P010 reference parity, and VP9 Profile 0 native parity. Codec
+  logs: `/tmp/libva-v4l2-codec5-20260920-120916`. AV1 is skipped because it
+  is not advertised.
+- `tools/verify-session-churn.sh /tmp/libva-v4l2-rust-driver-main10-full-20260920-120916`:
   `pass=7 fail=0`. The GStreamer leg now retries once with driver debug after
   timeout so intermittent empty-log stalls leave useful evidence and still fail
   if persistent.
@@ -50,6 +50,23 @@ short and update it whenever a task starts, finishes, or gets blocked.
   session.
 
 ## Completed recently
+
+- Phase 5 Main10 / P010 lane (codex agent, 2026-09-20): added decoded-format
+  plumbing across configs, surfaces, CPU-copy images, V4L2 CAPTURE setup, and
+  DRM PRIME descriptors. HEVC Main10 now advertises only when `/dev/video16`
+  exposes P010 CAPTURE. Generated and documented
+  `/home/mq/tmp/vaatest/codec5/hevc-main10-720p.mp4`. Validation:
+  `cargo fmt --check`, 109 Rust tests, strict clippy, release build, and
+  full `tools/verify-rust-driver.sh` on
+  `/tmp/libva-v4l2-rust-driver-main10-full-20260920-120916` with codec logs
+  under `/tmp/libva-v4l2-codec5-20260920-120916`, and
+  `tools/verify-session-churn.sh` on the same artifact: HEVC Main native
+  reference parity passed, HEVC Main10 software-HEVC-to-P010 reference parity
+  passed, VP9 native reference parity passed, AV1 skipped because hidden, and
+  session churn passed `pass=7 fail=0`. Note:
+  FFmpeg's `hevc_v4l2m2m` native wrapper aborts or emits no frame rows for the
+  Main10 sample, so Main10 is gated against a software P010 reference instead
+  of that broken wrapper.
 
 - Phase 4/5 merged into `main` (codex agent, 2026-09-20): branch
   `codex/phase4-5` was merged as `fd2987b`; the isolated worktree is no longer

@@ -394,21 +394,25 @@ Production requirement:
 
 ### Codec expansion
 
-H.264 Baseline/Main/High, HEVC Main, and VP9 Profile 0 are advertised only when
-the live V4L2 node enumerates the matching coded formats. Decode now routes
-through codec-specific VA buffer parsing and access-unit assembly before a
-codec-neutral V4L2 submit path sets the coded `S_FMT`.
+H.264 Baseline/Main/High, HEVC Main, HEVC Main10, and VP9 Profile 0 are
+advertised only when the live V4L2 node enumerates the matching coded formats;
+HEVC Main10 also requires a P010 CAPTURE format. Decode now routes through
+codec-specific VA buffer parsing and access-unit assembly before a codec-neutral
+V4L2 submit path sets the coded `S_FMT`.
 
-HEVC Main synthesizes VPS/SPS/PPS from VA long-format picture parameters,
-preserves the original slice payloads, and matches native `hevc_v4l2m2m` for
-30 frames. Unsupported stream shapes are rejected when required SPS-resident
-syntax is not available from VA buffers. VP9 Profile 0 forwards complete frame
-payloads and matches native `vp9_v4l2m2m` for 30 frames.
+HEVC Main/Main10 synthesize VPS/SPS/PPS from VA long-format picture parameters
+and preserve the original slice payloads. HEVC Main matches native
+`hevc_v4l2m2m` for 30 frames; Main10 matches software HEVC converted to P010
+for 30 frames because FFmpeg's native V4L2 wrapper does not emit valid Main10
+frame rows on this platform. Unsupported stream shapes are rejected when
+required SPS-resident syntax is not available from VA buffers. VP9 Profile 0
+forwards complete frame payloads and matches native `vp9_v4l2m2m` for 30
+frames.
 
-Main10 remains hidden until P010 render targets exist. AV1 remains hidden:
-VA provides tile payloads, but Iris needs temporal delimiter, sequence, and
-frame OBU headers. The conformance sample has a 41-byte header prefix before
-the first tile, which identifies the remaining synthesis work.
+AV1 remains hidden: VA provides tile payloads, but Iris needs temporal
+delimiter, sequence, and frame OBU headers. The conformance sample has a
+41-byte header prefix before the first tile, which identifies the remaining
+synthesis work.
 
 ## Phased plan
 
@@ -489,15 +493,18 @@ Exit criteria:
 
 ### Phase 5: broaden codec support
 
-- HEVC Main: VA picture/slice parsing, VPS/SPS/PPS synthesis, coded-format
-  setup, and 30-frame native V4L2 parity are implemented. Stream shapes whose
-  required SPS syntax is absent from VA long-format parameters are rejected.
+- HEVC Main/Main10: VA picture/slice parsing, VPS/SPS/PPS synthesis,
+  coded-format setup, NV12/P010 CAPTURE selection, and 30-frame parity are
+  implemented. Main uses native V4L2 parity; Main10 uses software HEVC converted
+  to P010 because the native FFmpeg V4L2 wrapper fails the sample. Stream
+  shapes whose required SPS syntax is absent from VA long-format parameters are
+  rejected.
 - VP9 Profile 0: complete-frame forwarding, coded-format setup, and 30-frame
   native V4L2 parity are implemented.
-- HEVC Main10 remains hidden until P010 render targets exist. AV1 remains
-  hidden: VA supplies tile payloads, while Iris needs the omitted temporal,
-  sequence, and frame OBU headers. The conformance sample has a 41-byte header
-  prefix before the first tile, establishing the remaining synthesis work.
+- AV1 remains hidden: VA supplies tile payloads, while Iris needs the omitted
+  temporal, sequence, and frame OBU headers. The conformance sample has a
+  41-byte header prefix before the first tile, establishing the remaining
+  synthesis work.
 
 ## Immediate next tasks
 
