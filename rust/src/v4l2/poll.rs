@@ -432,11 +432,12 @@ impl V4l2Session {
         }
         if bytesused == 0 {
             // Empty CAPTURE buffers are either a drain marker, a source-change
-            // marker, or a firmware-abort signature. A marker immediately after
-            // SOURCE_CHANGE is normal for this stateful decoder: native keeps
-            // CAPTURE streaming and simply requeues the buffer. Treat only an
-            // empty buffer outside drain/source-change, with pending work, as a
-            // fatal session abort.
+            // marker, an AV1 hidden-reference completion, or a firmware-abort
+            // signature. A marker immediately after SOURCE_CHANGE is normal for
+            // this stateful decoder: native keeps CAPTURE streaming and simply
+            // requeues the buffer. Treat only an empty buffer outside known
+            // marker/no-output cases, with pending work, as a fatal session
+            // abort.
             let pending = self.fifo.len() + self.out_queued();
             if source_change_marker_is_expected(self.source_change_flush, self.draining) {
                 self.source_change_empty_seen = true;
@@ -447,6 +448,23 @@ impl V4l2Session {
                     );
                 }
                 self.maybe_resume_source_change();
+            } else if self
+                .fifo
+                .first()
+                .is_some_and(|pending| !pending.expects_output)
+            {
+                let hidden = self.fifo.remove(0);
+                let _ = self.qbuf_capture(idx);
+                self.no_output_waiting.push(hidden.surface);
+                if debug_enabled() {
+                    eprintln!(
+                        "msm_drv_video_rs: empty CAPTURE retired no-output surface={} ts={} (pending={}); waiting for next displayable capture",
+                        hidden.surface, hidden.timestamp, pending
+                    );
+                }
+                return None;
+            } else if !self.draining && pending > 0 && self.out_queued() == 0 {
+                self.maybe_start_sync_drain();
             } else if !self.draining && pending > 0 {
                 self.aborted = true;
                 if debug_enabled() {
@@ -465,7 +483,11 @@ impl V4l2Session {
         }
         let ts_usec = (buf.timestamp.tv_sec as u64).saturating_mul(1_000_000)
             + (buf.timestamp.tv_usec as u64);
-        let Some(hit) = self.fifo.iter().position(|(_, ts)| *ts == ts_usec) else {
+        let Some(hit) = self
+            .fifo
+            .iter()
+            .position(|pending| pending.timestamp == ts_usec)
+        else {
             if debug_enabled() {
                 eprintln!(
                     "msm_drv_video_rs: CAP timestamp {} has no pending surface; dropping replay output",
@@ -475,7 +497,8 @@ impl V4l2Session {
             let _ = self.qbuf_capture(idx);
             return None;
         };
-        let (surface, _) = self.fifo.remove(hit);
+        let pending = self.fifo.remove(hit);
+        let surface = pending.surface;
         self.published_timestamps.push_back(ts_usec);
         const MAX_PUBLISHED_TIMESTAMPS: usize = 128;
         if self.published_timestamps.len() > MAX_PUBLISHED_TIMESTAMPS {
@@ -519,11 +542,19 @@ impl V4l2Session {
                     height,
                     format,
                 });
-        Some(ReadyCapture {
+        let ready = ReadyCapture {
             surface,
-            cap_idx,
+            cap_idx: Some(cap_idx),
             frame,
-        })
+        };
+        for hidden_surface in self.no_output_waiting.drain(..) {
+            self.ready.push(ReadyCapture {
+                surface: hidden_surface,
+                cap_idx: ready.cap_idx,
+                frame: ready.frame.clone(),
+            });
+        }
+        Some(ready)
     }
 }
 
@@ -573,6 +604,7 @@ mod tests {
             legacy: Vec::new(),
             fifo: Vec::new(),
             ready: Vec::new(),
+            no_output_waiting: Vec::new(),
             eos: false,
             draining: false,
             out_order: VecDeque::new(),

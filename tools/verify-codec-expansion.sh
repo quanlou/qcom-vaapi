@@ -47,7 +47,7 @@ codec_specs=(
     "hevc|VAProfileHEVCMain|hevc-main-720p.mp4|VAProfileHEVCMain[[:space:]]*:|hevc_v4l2m2m|"
     "hevc10|VAProfileHEVCMain10|hevc-main10-720p.mp4|VAProfileHEVCMain10[[:space:]]*:|hevc|p010le"
     "vp9|VAProfileVP9Profile0|vp9-720p.webm|VAProfileVP9Profile0[[:space:]]*:|vp9_v4l2m2m|"
-    "av1|VAProfileAV1Profile0|av1-720p.mp4|VAProfileAV1Profile0[[:space:]]*:||"
+    "av1|VAProfileAV1Profile0|av1-720p.mp4|VAProfileAV1Profile0[[:space:]]*:|libdav1d|nv12"
 )
 
 mkdir -p "$work_dir"

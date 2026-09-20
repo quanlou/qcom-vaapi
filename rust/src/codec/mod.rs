@@ -50,6 +50,7 @@ pub(crate) struct EncodedFrame {
     pub(crate) bytes: Vec<u8>,
     pub(crate) headers: Vec<u8>,
     pub(crate) keyframe: bool,
+    pub(crate) expects_output: bool,
     pub(crate) timestamp_usec: u64,
 }
 

@@ -24,7 +24,7 @@ pub(crate) fn apply_ready_captures(guard: &mut DriverState, ready: Vec<ReadyCapt
         {
             if std::env::var_os("V4L2_VA_DEBUG").is_some() {
                 eprintln!(
-                    "msm_drv_video_rs: publish surface={} cap_idx={} previous_state={:?} previous_cap={:?} export_fds={}",
+                    "msm_drv_video_rs: publish surface={} cap_idx={:?} previous_state={:?} previous_cap={:?} export_fds={}",
                     r.surface,
                     r.cap_idx,
                     s.state,
@@ -32,8 +32,10 @@ pub(crate) fn apply_ready_captures(guard: &mut DriverState, ready: Vec<ReadyCapt
                     s.export_fds.len()
                 );
             }
-            s.cap_idx = Some(r.cap_idx);
-            s.frame = r.frame;
+            if let Some(cap_idx) = r.cap_idx {
+                s.cap_idx = Some(cap_idx);
+                s.frame = r.frame;
+            }
             // A PRIME export is a handle to the CAPTURE allocation, not a
             // one-frame lease. Keep the bookkeeping live while the same VA
             // surface is reused so importers can retain the fd across frames.
@@ -216,7 +218,7 @@ mod tests {
             &mut guard,
             vec![ReadyCapture {
                 surface: surf_id,
-                cap_idx: 3,
+                cap_idx: Some(3),
                 frame: None,
             }],
         );
@@ -237,12 +239,12 @@ mod tests {
             vec![
                 ReadyCapture {
                     surface: DRV_ID_BASE_SURFACE + 9_999,
-                    cap_idx: 0,
+                    cap_idx: Some(0),
                     frame: None,
                 },
                 ReadyCapture {
                     surface: VA_INVALID_ID,
-                    cap_idx: 1,
+                    cap_idx: Some(1),
                     frame: None,
                 },
             ],
@@ -262,7 +264,7 @@ mod tests {
             &mut guard,
             vec![ReadyCapture {
                 surface: DRV_ID_BASE_SURFACE,
-                cap_idx: 11,
+                cap_idx: Some(11),
                 frame: None,
             }],
         );
@@ -292,7 +294,7 @@ mod tests {
             &mut guard,
             vec![ReadyCapture {
                 surface: DRV_ID_BASE_SURFACE,
-                cap_idx: 4,
+                cap_idx: Some(4),
                 frame: None,
             }],
         );
@@ -300,6 +302,25 @@ mod tests {
         let surface = guard.surfaces[0].as_ref().unwrap();
         assert!(surface.exported);
         assert_eq!(surface.export_fds.len(), 1);
+    }
+
+    #[test]
+    fn publish_marks_no_output_surface_ready_without_capture_slot() {
+        let mut guard = state_with_empty_surfaces();
+        guard.surfaces[5] = Some(surface_with(SurfaceState::Pending, None));
+
+        apply_ready_captures(
+            &mut guard,
+            vec![ReadyCapture {
+                surface: DRV_ID_BASE_SURFACE + 5,
+                cap_idx: None,
+                frame: None,
+            }],
+        );
+
+        let surface = guard.surfaces[5].as_ref().unwrap();
+        assert_eq!(surface.state, SurfaceState::Ready);
+        assert_eq!(surface.cap_idx, None);
     }
 
     #[test]

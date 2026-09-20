@@ -23,12 +23,64 @@ short and update it whenever a task starts, finishes, or gets blocked.
 
 - Post-merge production hardening / agent split (codex agent, 2026-09-20): continue on `main` after merging Phase 4/5 at `fd2987b`. Phase 4 is complete for the covered gates: H.264 sample-1/30/full, mixed-resolution CPU-copy, long playback, seek stress, and repeated-open lifecycle all have passing evidence. Phase 5 is complete for HEVC Main, HEVC Main10, and VP9 Profile 0; AV1 remains intentionally hidden until the missing OBU synthesis exists.
 
+- Bottom-up AV1 lane (codex agent, 2026-09-20): work from the existing raw AV1
+  VA buffer collector upward. Scope is OBU synthesis and tests first; do not
+  advertise `VAProfileAV1Profile0` until `tools/verify-codec-expansion.sh`
+  passes an AV1 reference-parity leg.
+
   Parallel-safe work items for other agents:
   1. Firmware/small-stream lane: keep `bframes-240p` as an expected xfail, gather root-only `qcom_iris` dynamic_debug/HFI traces for a failing small stream versus passing 720p, and update `docs/08-iris-firmware-errors.md`. Do not weaken the required 720p matrix.
   2. GL/export verifier lane: keep the now-hard `tools/verify-gl-roundtrip.sh` gate green and improve diagnostics around tolerated gst-va pool warmup frames. Keep `verify-rust-driver.sh` and `verify-session-churn.sh` green after any V4L2 queue/export/teardown change.
   3. Browser/client lane: rerun `tools/verify-browser-vaapi.sh` on clean hardware after export or pool changes, add an unconfined Firefox path if available, and implement only callbacks/importer behavior that browser logs prove are required.
   4. AV1 lane: synthesize the missing temporal delimiter, sequence, and frame OBU headers before advertising AV1; current evidence shows the conformance sample has a 41-byte prefix before the first VA tile payload.
   5. Rust cleanup lane: keep reducing oversized modules around surface lifecycle, VA entrypoints, codec parsing/synthesis, and V4L2 backend boundaries while preserving current verifier behavior.
+
+- HEVC parameter-set parser split (claude agent, 2026-09-20): claiming
+  parallel-safe item 5 for one bounded refactor — move the
+  `profile_tier_level`/SPS/VPS/PPS parsers and their tests from
+  `rust/src/h265.rs` (1202 lines) into `rust/src/h265/parse.rs`. The NAL
+  model, Annex-B assembly, and the `synth` re-exports stay in the parent.
+  Codex files (`codec/raw.rs`, `config.rs`, `av1/*`) are untouched; this is
+  a host-only change.
+
+- Post-decode PRIME export stabilization + unconfined Firefox reach (claude
+  agent, 2026-09-20): claiming the unconfined-browser gap. Evidence from the
+  unconfined Firefox 156 aarch64 tarball (`/home/mq/apps/firefox`, snap-free,
+  no root): the driver loads in RDD, VA-API FFmpeg init succeeds, but
+  `GetVAAPISurfaceDescriptor` exported only through the frame callback, and
+  `export_ready_surface` rejected every Ready-surface export from a
+  legacy-flow session (`Ready && !stable_capture -> OperationFailed`), which
+  tore the VA-API decoder down to software after one frame. Fix, entirely in
+  driver code owned by neither codex's AV1 lane nor the gst/Chromium warmup
+  path: (1) `V4l2Session::stabilize_published_capture` reserves a stable
+  slot at export time and copies the completed frame into it (or adopts the
+  still-Free published slot in place), reusing `reserve_capture` +
+  `copy_capture_slot` (widened to `pub(super)`); (2) `export_ready_surface`
+  calls it for Ready surfaces when stable mode is off; (3) `begin_picture`
+  tolerates reservation starvation in a session converted mid-flight — the
+  legacy phase queued every CAPTURE slot at streamon, so the first frames
+  after the flip have no slack until completions drain the kernel queue
+  (dequeued slots stay Free because `queue_working_capture` caps the queue
+  at WORKING_QUEUE_MAX=6); a starved surface now decodes without a
+  reservation and deque publishes the working slot directly. Result:
+  16 successful exports / 0 failed / 20 BeginPictures / no software
+  fallback in one probe window (was 1/1/4 with teardown), probe log
+  `/home/mq/.cache/libva-v4l2-browser-verify/run-1789886403-834287/firefox.log`.
+  Required gates on the fix build (clean worktree at HEAD + lane files,
+  since codex's uncommitted AV1 WIP fails 6 tests + 1 clippy lint in the
+  shared tree): `verify-rust-driver.sh` green, `verify-session-churn.sh`
+  pass=7 fail=0. Also this session: `verify-resolution-churn.sh` gained a
+  `V4L2_VA_RESOLUTION_CYCLES` knob (default 2 = previous behavior);
+  cycles=4 hardware run passed (1560/1560 frames, 8 source changes,
+  sanity pass, 0 firmware fatals). Post-commit standalone rerun of the
+  churn probe was skipped twice by its pre-decode sanity
+  (`node_unhealthy_pre_decode`): kernel log shows device-wide
+  `0x5000003` system-fatals at 13:49/13:53 triggered by OTHER
+  `av:h264` processes' `vb2_start_streaming` warnings (concurrent
+  agent hardware runs) — the same build had already passed the
+  embedded `resolution_probe=pass cycles=2 780/780` leg of
+  `verify-rust-driver.sh` minutes earlier; did not retry further to
+  avoid deepening the firmware poisoning for the other lane.
 
 ## Last verified clean baseline
 
@@ -50,6 +102,41 @@ short and update it whenever a task starts, finishes, or gets blocked.
   session.
 
 ## Completed recently
+
+- AV1 uncompressed_header writer landed, byte-exact (claude agent, 2026-09-20):
+  new `rust/src/av1/frame.rs` writes spec 5.9.1 `uncompressed_header()` (all
+  sub-sections: tile_info derivation from tile_cols/tile_rows counts,
+  quantization, segmentation, delta q/lf, loop filter, CDEF, LR, tx mode, ref
+  mode, skip mode, global motion, film grain) plus `synthesize_frame_obu()`
+  (OBU_FRAME wrap). Pinned byte-exact against the real libsvtav1 sample
+  (`/home/mq/tmp/vaatest/codec5/av1-720p.mp4`): keyframe header 22 bytes,
+  first inter header 28 bytes, and the full 41-byte TD+Seq+Frame access-unit
+  prefix. Field-by-field ground truth came from
+  `ffmpeg -f obu -i <file> -c copy -bsf:v trace_headers -f null -` — the
+  authoritative oracle for this lane, use it first next time. Three findings
+  encoded in the writers:
+  1. Fixed the committed sequence header writer: the `seq_choose_integer_mv`
+     bit was missing entirely (proven by the real payload and trace position
+     86); `SequenceHeaderInput` gains `seq_choose_integer_mv` /
+     `seq_force_integer_mv`.
+  2. `uncompressed_header()` does NOT end with `trailing_bits()`: frame_obu
+     pads with `byte_alignment()` = zero bits only. The one-bit marker is
+     exclusive to OBUs ending at payload granularity (sequence_header_obu).
+  3. `skip_mode_present` is coded only when spec 5.9.16 skipModeAllowed holds
+     (forward+backward or two forward refs by `get_relative_dist`). The writer
+     derives allowed-ness from `ref_frame_idx`/`ref_order_hint` (VA carries no
+     flag); the real inter frame codes `allow_warped_motion=1` and no skip bit.
+  Stable API for codex's wiring into `codec/raw.rs::finish_picture`:
+  `crate::av1::{synthesize_sequence_header, synthesize_uncompressed_header,
+  synthesize_frame_obu, SequenceHeaderInput, FrameHeaderInput, FrameType,
+  Av1SynthError}`. Remaining AV1 lane work (codex): wire the AU prefix into
+  raw.rs, tile_group wrap with per-tile sizes, then unhide
+  `VAProfileAV1Profile0` behind `tools/verify-codec-expansion.sh` AV1 parity.
+  Validation: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`
+  clean, `cargo test` = 142 passed / 2 failed where both failures are codex's
+  own uncommitted `config.rs` WIP tests (AV1 unhide present, its test
+  expectations not yet updated) — pre-existing on the shared tree, untouched
+  by this lane.
 
 - Phase 5 Main10 / P010 lane (codex agent, 2026-09-20): added decoded-format
   plumbing across configs, surfaces, CPU-copy images, V4L2 CAPTURE setup, and

@@ -233,6 +233,7 @@ mod tests {
             legacy: Vec::new(),
             fifo: Vec::new(),
             ready: Vec::new(),
+            no_output_waiting: Vec::new(),
             eos: false,
             draining: false,
             out_order: VecDeque::new(),

@@ -80,6 +80,7 @@ impl H264Decoder {
             bytes: frame.bytes,
             headers: self.synth.header_bytes(),
             keyframe,
+            expects_output: true,
             timestamp_usec,
         })
     }

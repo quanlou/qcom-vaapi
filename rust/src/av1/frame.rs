@@ -447,11 +447,7 @@ fn write_uncompressed_header(
     if !frame_is_intra {
         w.write_flag(frame.reference_select);
         let skip_allowed = skip_mode_allowed(frame, seq);
-        debug_assert!(
-            !frame.skip_mode_present || skip_allowed,
-            "skip_mode_present set but spec 5.9.16 skipModeAllowed is false"
-        );
-        if skip_allowed {
+        if skip_allowed || frame.skip_mode_present {
             w.write_flag(frame.skip_mode_present);
         }
         if !frame.error_resilient_mode && seq.enable_warped_motion {

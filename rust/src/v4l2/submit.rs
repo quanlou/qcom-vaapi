@@ -33,6 +33,7 @@ impl V4l2Session {
         timestamp_usec: u64,
         keyframe: bool,
         surface: Option<u32>,
+        expects_output: bool,
     ) {
         if keyframe {
             self.replay_history.clear();
@@ -42,6 +43,7 @@ impl V4l2Session {
             timestamp: timestamp_usec,
             keyframe,
             surface,
+            expects_output,
         });
         const MAX_REPLAY_HISTORY: usize = 64;
         if self.replay_history.len() > MAX_REPLAY_HISTORY {
@@ -50,17 +52,22 @@ impl V4l2Session {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn submit_frame(
         &mut self,
         surface: u32,
         cap_idx: Option<usize>,
         data: &[u8],
         keyframe: bool,
+        expects_output: bool,
         timestamp_usec: u64,
         headers: &[u8],
     ) -> Result<(), ()> {
         if !headers.is_empty() {
             self.headers = headers.to_vec();
+        }
+        if keyframe {
+            self.no_output_waiting.clear();
         }
         // A previously armed abort means the device behind this session is
         // dead; rebuild before queuing anything else. If the rebuild already
@@ -119,7 +126,14 @@ impl V4l2Session {
             self.queue_all_capture()?;
         }
         let idx = self
-            .qbuf_output_bytes(data, keyframe, timestamp_usec, Some(surface), true)
+            .qbuf_output_bytes(
+                data,
+                keyframe,
+                timestamp_usec,
+                Some(surface),
+                expects_output,
+                true,
+            )
             .map_err(|_| {
                 if debug_enabled() {
                     eprintln!("msm_drv_video_rs: output buffer invalid or QBUF failed");
@@ -141,7 +155,11 @@ impl V4l2Session {
             }
             return Err(e);
         }
-        self.fifo.push((surface, timestamp_usec));
+        self.fifo.push(super::PendingFrame {
+            surface,
+            timestamp: timestamp_usec,
+            expects_output,
+        });
         let ready = self.pump(0);
         self.ready.extend(ready);
         Ok(())
@@ -155,6 +173,7 @@ impl V4l2Session {
         keyframe: bool,
         timestamp_usec: u64,
         surface: Option<u32>,
+        expects_output: bool,
         remember: bool,
     ) -> Result<usize, ()> {
         let idx = self
@@ -187,7 +206,7 @@ impl V4l2Session {
             b.state = BufferState::Queued;
             self.out_order.push_back(idx);
             if remember {
-                self.remember_replay_chunk(data, timestamp_usec, keyframe, surface);
+                self.remember_replay_chunk(data, timestamp_usec, keyframe, surface, expects_output);
             }
         } else if debug_enabled() {
             eprintln!(
@@ -254,7 +273,14 @@ impl V4l2Session {
                 let ready = self.pump(2);
                 self.ready.extend(ready);
             }
-            self.qbuf_output_bytes(&chunk.data, chunk.keyframe, chunk.timestamp, None, false)?;
+            self.qbuf_output_bytes(
+                &chunk.data,
+                chunk.keyframe,
+                chunk.timestamp,
+                None,
+                chunk.expects_output,
+                false,
+            )?;
         }
         if debug_enabled() && !replay.is_empty() {
             eprintln!(
@@ -383,6 +409,7 @@ mod tests {
             legacy: Vec::new(),
             fifo: Vec::new(),
             ready: Vec::new(),
+            no_output_waiting: Vec::new(),
             eos: false,
             draining: false,
             out_order: VecDeque::new(),
@@ -402,7 +429,11 @@ mod tests {
             published_timestamps: VecDeque::new(),
         };
         session.out.streaming = true;
-        session.fifo.push((0, 0));
+        session.fifo.push(super::super::PendingFrame {
+            surface: 0,
+            timestamp: 0,
+            expects_output: true,
+        });
         session
     }
 

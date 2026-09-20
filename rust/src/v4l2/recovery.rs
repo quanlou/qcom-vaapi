@@ -158,13 +158,13 @@ impl V4l2Session {
             } else {
                 Cow::Borrowed(chunk.as_slice())
             };
-            let (surface, timestamp) = fifo_tail[i];
+            let pending = fifo_tail[i].clone();
             if self.stable_capture {
                 // Rebind the replayed surface's reservation in the new pool.
                 // Reserved slots never enter the kernel queue, so only the
                 // unreserved working sub-pool is topped up here; the DQ-time
                 // copy in `dequeue_capture` finds the reservation by surface.
-                if self.reserve_capture(surface).is_none() {
+                if self.reserve_capture(pending.surface).is_none() {
                     self.abandoned = true;
                     self.headers = headers;
                     if debug_enabled() {
@@ -188,7 +188,14 @@ impl V4l2Session {
                 }
                 return Err(());
             }
-            match self.qbuf_output_bytes(&payload, false, timestamp, Some(surface), false) {
+            match self.qbuf_output_bytes(
+                &payload,
+                false,
+                pending.timestamp,
+                Some(pending.surface),
+                pending.expects_output,
+                false,
+            ) {
                 Ok(idx) => {
                     if debug_enabled() {
                         eprintln!(
@@ -197,7 +204,7 @@ impl V4l2Session {
                             payload.len()
                         );
                     }
-                    self.fifo.push((surface, timestamp));
+                    self.fifo.push(pending);
                 }
                 Err(_) => {
                     self.abandoned = true;

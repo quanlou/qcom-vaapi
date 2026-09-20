@@ -14,7 +14,9 @@ use crate::pixel_format::DecodedFormat;
 use crate::state::{
     Config, DRV_ID_BASE_CONFIG, DRV_MAX_ATTRIBUTE_LIST, DRV_MAX_DIM, SUPPORTED_PROFILES,
 };
-use crate::v4l2::{V4L2_PIX_FMT_H264, V4L2_PIX_FMT_HEVC, V4L2_PIX_FMT_P010, V4L2_PIX_FMT_VP9};
+use crate::v4l2::{
+    V4L2_PIX_FMT_AV1, V4L2_PIX_FMT_H264, V4L2_PIX_FMT_HEVC, V4L2_PIX_FMT_P010, V4L2_PIX_FMT_VP9,
+};
 use crate::{err, ok, state_from_ctx};
 use std::ffi::c_int;
 use std::ptr;
@@ -25,10 +27,9 @@ use std::sync::OnceLock;
 /// in fixed advertisement order. A codec's profiles are advertised only when
 /// the V4L2 OUTPUT queue actually enumerated its coded format.
 ///
-/// Only profiles with a complete userspace translation path belong here. AV1
-/// remains hidden until VA tile buffers can be rebuilt into complete OBUs.
-/// Kernel format enumeration is necessary capability evidence, but by itself
-/// is not enough to promise a working VA profile.
+/// Only profiles with a complete userspace translation path belong here. Kernel
+/// format enumeration is necessary capability evidence, but by itself is not
+/// enough to promise a working VA profile.
 static ADVERTISED_PROFILES: OnceLock<&'static [VAProfile]> = OnceLock::new();
 
 /// Pure mapping from an enumerated OUTPUT fourcc list to the profile table
@@ -53,6 +54,9 @@ fn advertised_profiles_from(
     }
     if output_fourccs.contains(&V4L2_PIX_FMT_VP9) {
         profiles.push(VAProfile::VAProfileVP9Profile0);
+    }
+    if output_fourccs.contains(&V4L2_PIX_FMT_AV1) {
+        profiles.push(VAProfile::VAProfileAV1Profile0);
     }
     if profiles.is_empty() {
         return &SUPPORTED_PROFILES;
@@ -437,13 +441,13 @@ mod tests {
             crate::v4l2::V4L2_PIX_FMT_AV1,
         ];
         let profiles = advertised_profiles_from(&all, &[V4L2_PIX_FMT_P010]);
-        assert_eq!(profiles.len(), 6);
-        // H.264 stays first and unchanged; validated HEVC and VP9 follow.
+        assert_eq!(profiles.len(), 7);
+        // H.264 stays first and unchanged; validated HEVC, VP9, and AV1 follow.
         assert_eq!(&profiles[..3], &SUPPORTED_PROFILES);
         assert_eq!(profiles[3], VAProfile::VAProfileHEVCMain);
         assert_eq!(profiles[4], VAProfile::VAProfileHEVCMain10);
         assert_eq!(profiles[5], VAProfile::VAProfileVP9Profile0);
-        assert!(!profiles.contains(&VAProfile::VAProfileAV1Profile0));
+        assert_eq!(profiles[6], VAProfile::VAProfileAV1Profile0);
 
         let no_p010 = advertised_profiles_from(&all, &[]);
         assert!(!no_p010.contains(&VAProfile::VAProfileHEVCMain10));
@@ -504,6 +508,7 @@ mod tests {
                     | VAProfile::VAProfileHEVCMain
                     | VAProfile::VAProfileHEVCMain10
                     | VAProfile::VAProfileVP9Profile0
+                    | VAProfile::VAProfileAV1Profile0
             ));
             assert!(supported_profile(*profile));
         }

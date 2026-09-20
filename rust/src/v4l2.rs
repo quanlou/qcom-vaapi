@@ -50,11 +50,18 @@ static UNMAPPED_PLANES: std::sync::atomic::AtomicUsize = std::sync::atomic::Atom
 #[derive(Clone)]
 pub(crate) struct ReadyCapture {
     pub(crate) surface: u32,
-    pub(crate) cap_idx: usize,
+    pub(crate) cap_idx: Option<usize>,
     /// Pixels copied at dequeue time. CAPTURE slots are recycled as soon as
     /// they are requeued, so late surface reads must use this snapshot rather
     /// than the slot's live mapping.
     pub(crate) frame: Option<crate::state::SurfaceFrame>,
+}
+
+#[derive(Clone)]
+struct PendingFrame {
+    surface: u32,
+    timestamp: u64,
+    expects_output: bool,
 }
 
 #[derive(Clone)]
@@ -63,6 +70,7 @@ struct ReplayChunk {
     timestamp: u64,
     keyframe: bool,
     surface: Option<u32>,
+    expects_output: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -104,8 +112,9 @@ pub(crate) struct V4l2Session {
     cap: V4l2Queue,
     /// CAPTURE pools from before session rebuilds, in pool order.
     legacy: Vec<LegacyPool>,
-    fifo: Vec<(u32, u64)>,
+    fifo: Vec<PendingFrame>,
     ready: Vec<ReadyCapture>,
+    no_output_waiting: Vec<u32>,
     eos: bool,
     draining: bool,
     /// Submission order of OUTPUT buffers, used to replay pending chunks in
@@ -174,6 +183,7 @@ impl V4l2Session {
             legacy: Vec::new(),
             fifo: Vec::new(),
             ready: Vec::new(),
+            no_output_waiting: Vec::new(),
             eos: false,
             draining: false,
             out_order: VecDeque::new(),
@@ -415,6 +425,7 @@ mod tests {
             legacy: Vec::new(),
             fifo: Vec::new(),
             ready: Vec::new(),
+            no_output_waiting: Vec::new(),
             eos: false,
             draining: false,
             out_order: VecDeque::new(),

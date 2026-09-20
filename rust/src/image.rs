@@ -187,11 +187,25 @@ pub(crate) unsafe extern "C" fn get_image(
     }
     // Read the snapshot taken when the frame was dequeued. The CAPTURE slot
     // itself may already have been requeued and overwritten by the decoder.
-    let Some(frame) = surf_frame else {
-        return err(VA_STATUS_ERROR_DECODING_ERROR);
+    // AV1 hidden-reference frames complete without display pixels; keep
+    // vaGetImage consistent with vaDeriveImage by exposing a zeroed image
+    // rather than turning a successful no-output decode into a hard error.
+    let (cap, cap_stride, cap_h, frame_format) = if let Some(frame) = surf_frame {
+        (frame.data, frame.stride, frame.height, frame.format)
+    } else {
+        let format = guard.surfaces[surf_idx]
+            .as_ref()
+            .map(|surface| surface.format)
+            .unwrap_or(DecodedFormat::Nv12);
+        let stride = aligned_pitch(format, surf_width as u32);
+        let height = surf_height as u32;
+        (
+            vec![0; image_data_size(stride, height) as usize],
+            stride,
+            height,
+            format,
+        )
     };
-    let (cap, cap_stride, cap_h, frame_format) =
-        (frame.data, frame.stride, frame.height, frame.format);
     let Some(buf_idx) = buffer_index(img.image.buf) else {
         return err(VA_STATUS_ERROR_INVALID_BUFFER);
     };

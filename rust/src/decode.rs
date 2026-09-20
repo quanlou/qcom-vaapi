@@ -241,6 +241,7 @@ pub(crate) unsafe extern "C" fn end_picture(
                 cap_idx,
                 &frame.bytes,
                 frame.keyframe,
+                frame.expects_output,
                 frame.timestamp_usec,
                 &frame.headers,
             )
