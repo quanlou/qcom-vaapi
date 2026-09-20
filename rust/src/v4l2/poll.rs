@@ -182,7 +182,7 @@ impl V4l2Session {
     /// publish step: the firmware-chosen working slot's frame must land in
     /// the surface's reserved slot, whose allocation backs the surface's
     /// exported dma-bufs.
-    fn copy_capture_slot(&mut self, from_live: usize, to_live: usize) {
+    pub(super) fn copy_capture_slot(&mut self, from_live: usize, to_live: usize) {
         if from_live == to_live {
             return;
         }

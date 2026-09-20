@@ -140,7 +140,7 @@ pub(crate) fn export_ready_surface(
     let Some(surf_idx) = surface_index(surface_id) else {
         return Err(SurfaceExportError::InvalidSurface);
     };
-    let Some((surface_state, owner, existing_cap_idx)) = guard.surfaces[surf_idx]
+    let Some((surface_state, owner, mut existing_cap_idx)) = guard.surfaces[surf_idx]
         .as_ref()
         .map(|surf| (surf.state, surf.owner, surf.cap_idx))
     else {
@@ -187,7 +187,26 @@ pub(crate) fn export_ready_surface(
         .and_then(|context| context.v4l2.as_ref())
         .is_some_and(|v4l2| v4l2.stable_capture_mode());
     if surface_state == SurfaceState::Ready && !stable_capture {
-        return Err(SurfaceExportError::OperationFailed);
+        // Post-decode export from a legacy-flow session (Firefox exports
+        // only through the frame callback, after the frame was published).
+        // Preserve export identity by reserving a stable slot now and
+        // copying the completed frame into it; the copy source is the
+        // published working slot, whose bytes the firmware keeps until it
+        // refills that slot.
+        let Some(published) = existing_cap_idx else {
+            return Err(SurfaceExportError::OperationFailed);
+        };
+        let Some(cap_idx) = guard.contexts[ctx_idx]
+            .as_mut()
+            .and_then(|context| context.v4l2.as_mut())
+            .and_then(|v4l2| v4l2.stabilize_published_capture(published, surface_id))
+        else {
+            return Err(SurfaceExportError::OperationFailed);
+        };
+        if let Some(surf) = guard.surfaces[surf_idx].as_mut() {
+            surf.cap_idx = Some(cap_idx);
+        }
+        existing_cap_idx = Some(cap_idx);
     }
     let cap_idx = if let Some(cap_idx) = existing_cap_idx {
         cap_idx

@@ -13,6 +13,16 @@ drm_device="${V4L2_VA_DRM_DEVICE:-/dev/dri/renderD128}"
 work_dir="${V4L2_VA_RESOLUTION_DIR:-/tmp/libva-v4l2-resolution}"
 kernel_tool="$repo_root/tools/capture-iris-kernel-log.sh"
 
+# Stress cycles: how many alternating low/high pairs the playlist carries.
+# The default of 2 keeps the historical four-clip gate (4 transitions);
+# a larger value scales the playlist, expected frame count, transition
+# floor, and timeouts linearly without changing any assertion.
+cycles="${V4L2_VA_RESOLUTION_CYCLES:-2}"
+if ! [[ "$cycles" =~ ^[0-9]+$ ]] || (( cycles < 1 )); then
+    echo "resolution_probe=skip reason=invalid_cycles=$cycles"
+    exit 77
+fi
+
 for tool in ffmpeg ffprobe; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "resolution_probe=skip reason=missing_tool=$tool"
@@ -59,7 +69,7 @@ if ! [[ "$low_frames" =~ ^[0-9]+$ && "$high_frames" =~ ^[0-9]+$ ]]; then
     echo "resolution_probe=skip reason=frame_count_failed low=$low_frames high=$high_frames"
     exit 77
 fi
-expected_frames=$((2 * low_frames + 2 * high_frames))
+expected_frames=$((cycles * (low_frames + high_frames)))
 
 decode_one() { # <md5> <log>
     timeout 60s env LIBVA_DRIVERS_PATH="$driver_dir" \
@@ -77,10 +87,14 @@ if ! decode_one "$before_md5" "$work_dir/before.log" || [[ ! -s "$before_md5" ]]
 fi
 
 concat_file="$work_dir/concat.txt"
-printf "file '%s'\nfile '%s'\nfile '%s'\nfile '%s'\n" \
-    "$low_sample" "$high_sample" "$low_sample" "$high_sample" > "$concat_file"
+: > "$concat_file"
+for ((c = 0; c < cycles; c++)); do
+    printf "file '%s'\n" "$low_sample" >> "$concat_file"
+    printf "file '%s'\n" "$high_sample" >> "$concat_file"
+done
 playlist="$work_dir/mixed.ts"
-if ! timeout 90s ffmpeg -y -nostdin -hide_banner -v error \
+build_timeout=$((90 * cycles))
+if ! timeout "$build_timeout"s ffmpeg -y -nostdin -hide_banner -v error \
     -f concat -safe 0 -i "$concat_file" -map 0:v:0 -c copy -f mpegts "$playlist" \
     > "$work_dir/playlist-build.log" 2>&1; then
     echo "resolution_probe=skip reason=playlist_build_failed log=$work_dir/playlist-build.log"
@@ -89,8 +103,10 @@ fi
 
 log="$work_dir/ffmpeg-resolution.log"
 frames_md5="$work_dir/frames.md5"
+decode_timeout=$((210 * cycles))
+watch_timeout=$((240 * cycles))
 set +e
-timeout 240s "$kernel_tool" -- timeout 210s env \
+timeout "$watch_timeout"s "$kernel_tool" -- timeout "$decode_timeout"s env \
     LIBVA_DRIVERS_PATH="$driver_dir" V4L2_VA_DEBUG=1 \
     ffmpeg -y -nostdin -hide_banner -v error \
     -hwaccel vaapi -hwaccel_device "$drm_device" \
@@ -122,9 +138,9 @@ if (( status != 0 )); then
 elif (( decoded != expected_frames )); then
     result=fail
     reason="decoded_${decoded}_expected_${expected_frames}"
-elif (( source_changes < 4 )); then
+elif (( source_changes < 2 * cycles )); then
     result=fail
-    reason="source_changes_${source_changes}_expected_at_least_4"
+    reason="source_changes_${source_changes}_expected_at_least_$((2 * cycles))"
 elif [[ "$session_fatal" != NA ]] && (( session_fatal > 0 )); then
     result=fail
     reason=firmware_session_fatal
@@ -138,5 +154,5 @@ fi
 
 low_dims="$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$low_sample" 2>/dev/null | tr ',' 'x')"
 high_dims="$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$high_sample" 2>/dev/null | tr ',' 'x')"
-echo "resolution_probe=$result reason=$reason dimensions=${low_dims}/${high_dims} decoded=$decoded expected=$expected_frames source_changes=$source_changes sanity=$sanity kernel(session=$session_fatal,system=$system_fatal) log=$log"
+echo "resolution_probe=$result reason=$reason cycles=$cycles dimensions=${low_dims}/${high_dims} decoded=$decoded expected=$expected_frames source_changes=$source_changes sanity=$sanity kernel(session=$session_fatal,system=$system_fatal) log=$log"
 [[ "$result" == pass ]]

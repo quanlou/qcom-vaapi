@@ -49,6 +49,43 @@ impl V4l2Session {
         Some(self.legacy_len() + idx)
     }
 
+    /// Late-binding stabilization for post-decode PRIME export (the Firefox
+    /// pattern: `vaExportSurfaceHandle` arrives only through the frame
+    /// callback, so the surface's frame lives in a shared working slot that
+    /// the legacy flow already dequeued and handed back to the kernel).
+    /// Reserve a fresh stable slot for `surface`, copy the completed frame
+    /// into it, and return the new client-visible reservation index. A still
+    /// `Free` published slot is adopted in place instead. `None` means the
+    /// frame is unrecoverable (recycled reservation, non-live legacy index):
+    /// the caller must fail the export rather than hand out foreign bytes.
+    /// A `Queued` source still holds this frame's bytes in its mapped plane
+    /// until the firmware refills it, which needs roughly a full queue depth
+    /// of further decodes; copying within that window preserves the frame.
+    pub(crate) fn stabilize_published_capture(
+        &mut self,
+        published_idx: usize,
+        surface: u32,
+    ) -> Option<usize> {
+        if !self.capture_is_live(published_idx) {
+            return None;
+        }
+        let live = published_idx - self.legacy_len();
+        if !matches!(
+            self.cap.buffers.get(live)?.state,
+            BufferState::Free | BufferState::Queued
+        ) {
+            return None;
+        }
+        let reserved = self.reserve_capture(surface)?;
+        if reserved == published_idx {
+            // The reservation adopted the published slot itself: the frame
+            // bytes are already in place, no copy needed.
+            return Some(reserved);
+        }
+        self.copy_capture_slot(live, reserved - self.legacy_len());
+        Some(reserved)
+    }
+
     /// The client-visible reservation slot owned by `surface`, if it is
     /// still live and reserved.
     pub(crate) fn reserved_capture_for(&self, surface: u32) -> Option<usize> {
@@ -383,5 +420,85 @@ mod tests {
         assert_eq!(session.cap.buffers[0].export_refs, 2);
         session.retire_slot_exports(1, 2);
         assert_eq!(session.cap.buffers[0].export_refs, 0);
+    }
+
+    #[test]
+    fn stabilize_copies_a_recycled_working_slot_into_a_fresh_reservation() {
+        let path = CString::new("/dev/null").unwrap();
+        let fd = unsafe { open(path.as_ptr(), O_RDWR, 0) };
+        assert!(fd >= 0, "could not open /dev/null for the stabilize test");
+
+        let mut session = session_with_unmapped_capture(fd);
+        session.cap.buffers.push(V4l2Buffer::new());
+        // Legacy publish already requeued the frame's working slot: client
+        // index one is Queued again while still holding the frame bytes.
+        session.cap.buffers[0].state = BufferState::Queued;
+        assert!(!session.stable_capture_mode());
+
+        assert_eq!(session.stabilize_published_capture(1, 7), Some(2));
+        assert!(session.stable_capture_mode());
+        // The recycled source is untouched and the fresh reservation is
+        // bound to the exporting surface only.
+        assert!(matches!(session.cap.buffers[0].state, BufferState::Queued));
+        assert!(matches!(
+            session.cap.buffers[1].state,
+            BufferState::Reserved
+        ));
+        assert_eq!(session.cap.buffers[1].reserved_for, Some(7));
+        assert_eq!(session.reserved_capture_for(7), Some(2));
+    }
+
+    #[test]
+    fn stabilize_adopts_a_still_free_published_slot_in_place() {
+        let path = CString::new("/dev/null").unwrap();
+        let fd = unsafe { open(path.as_ptr(), O_RDWR, 0) };
+        assert!(fd >= 0, "could not open /dev/null for the adopt test");
+
+        let mut session = session_with_unmapped_capture(fd);
+        // Dequeued but not yet requeued: the published slot itself is still
+        // Free and unreserved, so the reservation adopts it without a copy
+        // and no second slot is consumed.
+        assert_eq!(session.stabilize_published_capture(1, 7), Some(1));
+        assert!(matches!(
+            session.cap.buffers[0].state,
+            BufferState::Reserved
+        ));
+        assert_eq!(session.cap.buffers[0].reserved_for, Some(7));
+        assert_eq!(session.cap.buffers.len(), 1);
+    }
+
+    #[test]
+    fn stabilize_refuses_slots_owned_by_another_surface() {
+        let path = CString::new("/dev/null").unwrap();
+        let fd = unsafe { open(path.as_ptr(), O_RDWR, 0) };
+        assert!(
+            fd >= 0,
+            "could not open /dev/null for the foreign-slot test"
+        );
+
+        let mut session = session_with_unmapped_capture(fd);
+        session.cap.buffers[0].state = BufferState::Reserved;
+        session.cap.buffers[0].reserved_for = Some(9);
+
+        assert_eq!(session.stabilize_published_capture(1, 7), None);
+        // The refusal must not flip the session into stable capture.
+        assert!(!session.stable_capture_mode());
+        assert!(matches!(
+            session.cap.buffers[0].state,
+            BufferState::Reserved
+        ));
+        assert_eq!(session.cap.buffers[0].reserved_for, Some(9));
+    }
+
+    #[test]
+    fn stabilize_ignores_legacy_pool_indices() {
+        let path = CString::new("/dev/null").unwrap();
+        let fd = unsafe { open(path.as_ptr(), O_RDWR, 0) };
+        assert!(fd >= 0, "could not open /dev/null for the legacy test");
+
+        let mut session = session_with_unmapped_capture(fd);
+        // The synthetic legacy pool owns client index zero.
+        assert_eq!(session.stabilize_published_capture(0, 7), None);
+        assert!(!session.stable_capture_mode());
     }
 }

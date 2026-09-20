@@ -86,18 +86,26 @@ pub(crate) unsafe extern "C" fn begin_picture(
             .and_then(|surface| surface.cap_idx)
             .is_none()
     {
-        let cap_idx = guard.contexts[ctx_idx]
+        // Born-stable sessions always have reservation slack. A session
+        // converted mid-flight (first post-decode export while a legacy
+        // queue still saturates CAPTURE) starves until completions drain
+        // the kernel queue; that must not fail the frame. The surface
+        // decodes without a reservation (dequeue then publishes the
+        // working slot directly) and can still be stabilized later at
+        // export time once slack exists.
+        if let Some(cap_idx) = guard.contexts[ctx_idx]
             .as_mut()
             .and_then(|context| context.v4l2.as_mut())
             .and_then(|v4l2| v4l2.reserve_capture(render_target))
-            .ok_or(())
-            .map_err(|_| err(VA_STATUS_ERROR_OPERATION_FAILED));
-        let cap_idx = match cap_idx {
-            Ok(cap_idx) => cap_idx,
-            Err(status) => return status,
-        };
-        if let Some(surface) = guard.surfaces[surf_idx].as_mut() {
-            surface.cap_idx = Some(cap_idx);
+        {
+            if let Some(surface) = guard.surfaces[surf_idx].as_mut() {
+                surface.cap_idx = Some(cap_idx);
+            }
+        } else if std::env::var_os("V4L2_VA_DEBUG").is_some() {
+            eprintln!(
+                "msm_drv_video_rs: BeginPicture surface={} stable reservation starved; decoding without a reservation",
+                render_target
+            );
         }
     }
     let Some(c) = guard.contexts[ctx_idx].as_mut() else {
