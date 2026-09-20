@@ -175,6 +175,17 @@ if [[ "$gst_export_status" -ne 0 && "$gst_export_status" -ne 77 ]]; then
     exit "$gst_export_status"
 fi
 
+# GL roundtrip: prove the exported dma-buf descriptor's plane offsets,
+# strides, and sizes are correct by round-tripping the sample through
+# glupload/gldownload and confirming each ref frame's pixels appear
+# byte-exact in the gl set (survives gst-vaapi pool warmup + B-frame
+# reorder). This is the standing Phase 3 zero-copy gate.
+gl_roundtrip_status=0
+"$repo_root/tools/verify-gl-roundtrip.sh" "$driver_dir" || gl_roundtrip_status=$?
+if [[ "$gl_roundtrip_status" -ne 0 && "$gl_roundtrip_status" -ne 77 ]]; then
+    exit "$gl_roundtrip_status"
+fi
+
 hwmap_log="$work_dir/hwmap-export-probe.log"
 set +e
 timeout 60s env LIBVA_DRIVERS_PATH="$driver_dir" V4L2_VA_DEBUG=1 \
@@ -223,4 +234,4 @@ verify_framemd5 one-frame-eos "$one_frame_sample" "" optional
 # the baseline verifier unusable.
 verify_framemd5 bframes-240p "$bframes_sample" "" optional
 
-echo "verified: cargo tests, vainfo, H.264 matrix, lifecycle stress, HEVC/VP9 parity"
+echo "verified: cargo tests, vainfo, H.264 matrix, GL zero-copy, lifecycle stress, HEVC/VP9 parity"
