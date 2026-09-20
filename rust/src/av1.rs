@@ -16,13 +16,14 @@
 //! frame assembler. Callers stay in `rust/src/codec/raw.rs`.
 //!
 //! Kept scope: this file implements the bit-writer + OBU framing primitives
-//! with unit coverage. The full sequence and frame syntax writers live in
-//! `synth.rs` — currently a skeleton that will grow to full parity as the
-//! AV1 profile advertisement is unblocked. The advertisement in
-//! `rust/src/config.rs` stays gated on both V4L2 OUTPUT-format enumeration
-//! AND a passing native (or software) parity sample.
+//! with unit coverage. The sequence syntax writer lives in `synth.rs` and
+//! the uncompressed_header (frame) syntax writer in `frame.rs`; both are
+//! pinned byte-exact against the real libsvtav1 sample. The advertisement
+//! in `rust/src/config.rs` stays gated on both V4L2 OUTPUT-format
+//! enumeration AND a passing native (or software) parity sample.
 
 pub(crate) mod bitstream;
+pub(crate) mod frame;
 pub(crate) mod synth;
 
 // Re-exports are pre-wired for the follow-up integration in `codec/raw.rs`
@@ -31,6 +32,11 @@ pub(crate) mod synth;
 // without shuffling paths; #[allow] silences the interim "unused" warning.
 #[allow(unused_imports)]
 pub(crate) use bitstream::{BitWriter, ObuType, ObuWriter, leb128_size, write_leb128};
+#[allow(unused_imports)]
+pub(crate) use frame::{
+    Av1SynthError, FrameHeaderInput, FrameType, synthesize_frame_obu,
+    synthesize_uncompressed_header,
+};
 #[allow(unused_imports)]
 pub(crate) use synth::{
     ColorDescription, SeqProfile, SequenceHeaderInput, synthesize_sequence_header,

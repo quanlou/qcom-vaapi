@@ -69,6 +69,16 @@ pub(crate) struct SequenceHeaderInput {
     pub(crate) enable_superres: bool,
     pub(crate) enable_cdef: bool,
     pub(crate) enable_restoration: bool,
+    /// `seq_choose_integer_mv` (spec 5.5.1): coded right after
+    /// `seq_choose_screen_content_tools` whenever
+    /// `seq_force_screen_content_tools > 0`, which is always the case
+    /// for this writer (it pins the choose-screen-content-tools bit to 1
+    /// → SELECT). When false, `seq_force_integer_mv_value` is coded
+    /// instead of implying SELECT_INTEGER_MV.
+    pub(crate) seq_choose_integer_mv: bool,
+    /// Explicit `seq_force_integer_mv`, only emitted when
+    /// `seq_choose_integer_mv` is false.
+    pub(crate) seq_force_integer_mv: bool,
     /// 8, 10, or 12.
     pub(crate) bit_depth: u8,
     /// Only meaningful for profiles that permit monochrome.
@@ -161,9 +171,14 @@ pub(crate) fn write_sequence_header_payload(input: &SequenceHeaderInput) -> Vec<
         w.write_flag(input.enable_ref_frame_mvs);
     }
     // seq_choose_screen_content_tools = 1 → seq_force_screen_content_tools
-    // = SELECT (2); no follow-up integer_mv fields required. This matches
-    // libsvtav1's default and iris's stateful expectations.
+    // = SELECT (2). Because that is > 0, the integer-MV choice is coded
+    // next (spec 5.5.1); the byte-exact reference fixture proves the
+    // real libsvtav1 stream sets seq_choose_integer_mv = 1 here.
     w.write_flag(true);
+    w.write_flag(input.seq_choose_integer_mv);
+    if !input.seq_choose_integer_mv {
+        w.write_flag(input.seq_force_integer_mv);
+    }
     if input.enable_order_hint {
         w.write_bits(u32::from(input.order_hint_bits_minus_1 & 0x07), 3);
     }
@@ -271,6 +286,8 @@ mod tests {
             enable_superres: false,
             enable_cdef: false,
             enable_restoration: false,
+            seq_choose_integer_mv: true,
+            seq_force_integer_mv: false,
             bit_depth: 8,
             monochrome: false,
             color_description: None,
@@ -387,5 +404,55 @@ mod tests {
         assert_eq!(bits_needed(255), 8);
         assert_eq!(bits_needed(256), 9);
         assert_eq!(bits_needed(u32::MAX), 32);
+    }
+
+    /// Byte-exact reproduction of the real Sequence Header payload from
+    /// /home/mq/tmp/vaatest/codec5/av1-720p.mp4 (libsvtav1, 1280x720 8-bit
+    /// 4:2:0): `00 00 00 2d 4c ff b3 c6 af 98 24`. The input mirrors the
+    /// field values decoded from those bytes, including the
+    /// seq_choose_integer_mv bit the previous revision of this writer
+    /// silently dropped.
+    #[test]
+    fn payload_matches_real_sample_sequence_header_bytes() {
+        let input = SequenceHeaderInput {
+            seq_profile: SeqProfile::Main,
+            seq_level_idx_0: 5,
+            seq_tier_0: false,
+            max_frame_width: 1280,
+            max_frame_height: 720,
+            use_128x128_superblock: false,
+            enable_filter_intra: false,
+            enable_intra_edge_filter: true,
+            enable_interintra_compound: true,
+            enable_masked_compound: false,
+            enable_warped_motion: true,
+            enable_dual_filter: false,
+            enable_order_hint: true,
+            enable_jnt_comp: false,
+            enable_ref_frame_mvs: true,
+            order_hint_bits_minus_1: 6,
+            enable_superres: false,
+            enable_cdef: true,
+            enable_restoration: true,
+            seq_choose_integer_mv: true,
+            seq_force_integer_mv: false,
+            bit_depth: 8,
+            monochrome: false,
+            color_description: None,
+            color_range: false,
+            subsampling_x: true,
+            subsampling_y: true,
+            chroma_sample_position: 1,
+            separate_uv_deltas: false,
+            film_grain_params_present: false,
+        };
+        const REAL_PAYLOAD: [u8; 11] = [
+            0x00, 0x00, 0x00, 0x2d, 0x4c, 0xff, 0xb3, 0xc6, 0xaf, 0x98, 0x24,
+        ];
+        assert_eq!(
+            write_sequence_header_payload(&input),
+            REAL_PAYLOAD,
+            "sequence header payload must be byte-exact vs the real sample"
+        );
     }
 }
