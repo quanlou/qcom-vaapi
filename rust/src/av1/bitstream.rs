@@ -290,4 +290,50 @@ mod tests {
         assert_eq!(obu_header_byte(ObuType::Frame), 0x32);
         assert_eq!(obu_header_byte(ObuType::TileGroup), 0x22);
     }
+
+    /// Reference fixture: the exact first 4 bytes of the real 720p AV1
+    /// sample at /home/mq/tmp/vaatest/codec5/av1-720p.mp4 after
+    /// `ffmpeg ... -c copy -f obu`. Our primitives must reproduce these
+    /// framing bytes byte-exact before any future synth can trust its
+    /// output.
+    ///
+    /// Layout:
+    ///   0x12       — Temporal Delimiter OBU header (obu_type=2, has_size=1)
+    ///   0x00       — TD payload size (LEB128 zero)
+    ///   0x0a       — Sequence Header OBU header (obu_type=1, has_size=1)
+    ///   0x0b       — Sequence Header payload size = 11 (LEB128 single byte)
+    #[test]
+    fn framing_reproduces_real_sample_prefix() {
+        let td = ObuWriter::temporal_delimiter();
+        assert_eq!(td, [0x12, 0x00], "TD OBU must match real AV1 stream");
+
+        // Wrap an 11-byte placeholder payload as a Sequence Header OBU
+        // and confirm the framing bytes (not the payload contents,
+        // which require the not-yet-implemented sequence syntax writer).
+        let seq = ObuWriter::wrap(ObuType::SequenceHeader, &[0u8; 11]);
+        assert_eq!(seq[0], 0x0a, "Seq Header OBU header byte");
+        assert_eq!(seq[1], 0x0b, "Seq Header LEB128 size=11");
+        assert_eq!(seq.len(), 1 + 1 + 11);
+    }
+
+    /// Reference: the actual Sequence Header payload bytes from the
+    /// libsvtav1-encoded 720p sample, byte 0 broken out. A future
+    /// synth pass must reproduce byte 0's seq_profile / still_picture
+    /// / reduced_still_picture_header / timing_info_present /
+    /// initial_display_delay_present prefix before more work makes sense.
+    ///
+    /// byte 0 = 0x00 → seq_profile=0, everything else clear, so the
+    /// next 3 bits are the leading operating-points count.
+    #[test]
+    fn sequence_header_reference_byte0_matches_expected_profile0() {
+        const REAL_SEQ_HEADER_PAYLOAD: [u8; 11] = [
+            0x00, 0x00, 0x00, 0x2d, 0x4c, 0xff, 0xb3, 0xc6, 0xaf, 0x98, 0x24,
+        ];
+        let b0 = REAL_SEQ_HEADER_PAYLOAD[0];
+        assert_eq!((b0 >> 5) & 0x07, 0, "seq_profile");
+        assert_eq!((b0 >> 4) & 0x01, 0, "still_picture");
+        assert_eq!((b0 >> 3) & 0x01, 0, "reduced_still_picture_header");
+        assert_eq!((b0 >> 2) & 0x01, 0, "timing_info_present_flag");
+        assert_eq!((b0 >> 1) & 0x01, 0, "initial_display_delay_present_flag");
+    }
 }
