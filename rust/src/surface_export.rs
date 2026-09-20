@@ -230,7 +230,7 @@ pub(crate) fn export_ready_surface(
             return Err(SurfaceExportError::OperationFailed);
         }
     };
-    let desc = DrmPrimeDescriptor::from_nv12_capture(capture, layout);
+    let desc = DrmPrimeDescriptor::from_capture(capture, layout);
     if let Some(surf) = guard.surfaces[surf_idx].as_mut() {
         surf.exported = true;
         surf.export_count = surf.export_count.saturating_add(1);
@@ -265,6 +265,7 @@ mod tests {
         Surface {
             width: 64,
             height: 64,
+            format: crate::pixel_format::DecodedFormat::Nv12,
             state,
             cap_idx,
             frame: None,

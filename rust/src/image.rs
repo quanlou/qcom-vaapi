@@ -2,17 +2,18 @@
 //!
 //! The browser-grade path should eventually use dma-buf export, but FFmpeg,
 //! mpv `vaapi-copy`, and fallback client paths still rely on VAImage buffers.
-//! Keep the NV12 layout math here so the libva callbacks only validate handles
-//! and move data between driver objects.
+//! Keep the semiplanar layout math here so the libva callbacks only validate
+//! handles and move data between driver objects.
 
 mod layout;
 
 pub(crate) use layout::{
-    aligned_nv12_pitch, copy_nv12_region, is_nv12, make_nv12_image, nv12_data_size, nv12_format,
-    region_within,
+    aligned_pitch, copy_semiplanar_region, decoded_format_from_image, image_data_size,
+    image_format, make_image, region_within,
 };
 
 use crate::bindings::*;
+use crate::pixel_format::DecodedFormat;
 use crate::state::{
     Buffer, DRV_ID_BASE_BUFFER, DRV_ID_BASE_IMAGE, DRV_MAX_DIM, DRV_MIN_DIM, Image, SurfaceState,
     buffer_index, image_index, surface_index,
@@ -21,6 +22,17 @@ use crate::sync::sync_surface;
 use crate::{err, ok, state_from_ctx};
 use std::ffi::c_int;
 use std::ptr;
+
+/// Image formats advertised via `vaQueryImageFormats`. Kept at just NV12 for
+/// now: advertising P010 here triggered a `corrupted size vs. prev_size`
+/// glibc abort in the ffmpeg VAAPI copy path at surface teardown (double-free
+/// signature under `MALLOC_CHECK_`), reliably reproducible on the 720p H.264
+/// sample. The P010 codepath itself is intact — `create_image` still accepts
+/// P010 fourccs directly from clients that skip the query — so Main10
+/// clients can create P010 images via `vaCreateImage` once the query-formats
+/// interaction is understood. Root-causing the glibc abort belongs with the
+/// Main10 hardware validation.
+pub(crate) const SUPPORTED_IMAGE_FORMATS: [DecodedFormat; 1] = [DecodedFormat::Nv12];
 
 pub(crate) unsafe extern "C" fn query_image_formats(
     _ctx: VADriverContextP,
@@ -31,11 +43,11 @@ pub(crate) unsafe extern "C" fn query_image_formats(
         return err(VA_STATUS_ERROR_INVALID_PARAMETER);
     }
     unsafe {
-        ptr::write_bytes(format_list, 0, 1);
-        (*format_list).fourcc = VA_FOURCC_NV12;
-        (*format_list).byte_order = VA_LSB_FIRST;
-        (*format_list).bits_per_pixel = 12;
-        *num_formats = 1;
+        ptr::write_bytes(format_list, 0, SUPPORTED_IMAGE_FORMATS.len());
+        for (idx, format) in SUPPORTED_IMAGE_FORMATS.iter().copied().enumerate() {
+            *format_list.add(idx) = image_format(format);
+        }
+        *num_formats = SUPPORTED_IMAGE_FORMATS.len() as c_int;
     }
     ok()
 }
@@ -51,9 +63,9 @@ pub(crate) unsafe extern "C" fn create_image(
         return err(VA_STATUS_ERROR_INVALID_PARAMETER);
     }
     let fmt = unsafe { *format };
-    if !is_nv12(&fmt) {
+    let Some(decoded_format) = decoded_format_from_image(&fmt) else {
         return err(VA_STATUS_ERROR_INVALID_IMAGE_FORMAT);
-    }
+    };
     if !(DRV_MIN_DIM..=DRV_MAX_DIM).contains(&width)
         || !(DRV_MIN_DIM..=DRV_MAX_DIM).contains(&height)
     {
@@ -66,8 +78,8 @@ pub(crate) unsafe extern "C" fn create_image(
         Ok(g) => g,
         Err(_) => return err(VA_STATUS_ERROR_OPERATION_FAILED),
     };
-    let pitch = aligned_nv12_pitch(width as u32);
-    let data_size = nv12_data_size(pitch, height as u32);
+    let pitch = aligned_pitch(decoded_format, width as u32);
+    let data_size = image_data_size(pitch, height as u32);
     let Some(buf_idx) = guard.buffers.iter().position(|v| v.is_none()) else {
         return err(VA_STATUS_ERROR_MAX_NUM_EXCEEDED);
     };
@@ -76,7 +88,7 @@ pub(crate) unsafe extern "C" fn create_image(
     };
     let buf_id = DRV_ID_BASE_BUFFER + buf_idx as u32;
     let image_id = DRV_ID_BASE_IMAGE + img_idx as u32;
-    let img = make_nv12_image(
+    let img = make_image(
         image_id,
         buf_id,
         width as u16,
@@ -182,7 +194,8 @@ pub(crate) unsafe extern "C" fn get_image(
     let Some(frame) = surf_frame else {
         return err(VA_STATUS_ERROR_DECODING_ERROR);
     };
-    let (cap, cap_stride, cap_h) = (frame.data, frame.stride, frame.height);
+    let (cap, cap_stride, cap_h, frame_format) =
+        (frame.data, frame.stride, frame.height, frame.format);
     let Some(buf_idx) = buffer_index(img.image.buf) else {
         return err(VA_STATUS_ERROR_INVALID_BUFFER);
     };
@@ -194,7 +207,14 @@ pub(crate) unsafe extern "C" fn get_image(
     if buf.mapped {
         return err(VA_STATUS_ERROR_OPERATION_FAILED);
     }
-    copy_nv12_region(
+    let Some(image_format) = decoded_format_from_image(&img.image.format) else {
+        return err(VA_STATUS_ERROR_INVALID_IMAGE_FORMAT);
+    };
+    if image_format != frame_format {
+        return err(VA_STATUS_ERROR_INVALID_IMAGE_FORMAT);
+    }
+    copy_semiplanar_region(
+        frame_format,
         &cap,
         cap_stride,
         cap_h,
@@ -238,7 +258,11 @@ pub(crate) unsafe extern "C" fn derive_image(
         return err(VA_STATUS_ERROR_INVALID_SURFACE);
     };
 
-    let mut pitch = aligned_nv12_pitch(surf_width as u32);
+    let mut frame_format = guard.surfaces[surf_idx]
+        .as_ref()
+        .map(|surface| surface.format)
+        .unwrap_or(DecodedFormat::Nv12);
+    let mut pitch = aligned_pitch(frame_format, surf_width as u32);
     let mut cap_h = surf_height as u32;
     let mut data: Vec<u8> = Vec::new();
 
@@ -249,11 +273,12 @@ pub(crate) unsafe extern "C" fn derive_image(
     {
         pitch = frame.stride;
         cap_h = frame.height;
-        let data_size = nv12_data_size(pitch, cap_h);
+        frame_format = frame.format;
+        let data_size = image_data_size(pitch, cap_h);
         data = frame.data.into_iter().take(data_size as usize).collect();
     }
 
-    let data_size = nv12_data_size(pitch, cap_h);
+    let data_size = image_data_size(pitch, cap_h);
     if data.is_empty() {
         data = vec![0; data_size as usize];
     } else if data.len() < data_size as usize {
@@ -268,14 +293,14 @@ pub(crate) unsafe extern "C" fn derive_image(
     };
     let buf_id = DRV_ID_BASE_BUFFER + buf_idx as u32;
     let image_id = DRV_ID_BASE_IMAGE + img_idx as u32;
-    let img = make_nv12_image(
+    let img = make_image(
         image_id,
         buf_id,
         surf_width as u16,
         surf_height as u16,
         pitch,
         cap_h,
-        nv12_format(),
+        image_format(frame_format),
     );
 
     guard.buffers[buf_idx] = Some(Buffer {
@@ -314,14 +339,14 @@ mod tests {
             mapped: true,
         });
         state.lock.lock().unwrap().images[0] = Some(Image {
-            image: make_nv12_image(
+            image: make_image(
                 image_id,
                 buffer_id,
                 16,
                 16,
-                aligned_nv12_pitch(16),
+                aligned_pitch(DecodedFormat::Nv12, 16),
                 16,
-                nv12_format(),
+                image_format(DecodedFormat::Nv12),
             ),
         });
 

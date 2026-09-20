@@ -13,7 +13,9 @@ mod setup;
 mod submit;
 mod teardown;
 use abi::*;
-pub(crate) use abi::{V4L2_PIX_FMT_AV1, V4L2_PIX_FMT_H264, V4L2_PIX_FMT_HEVC, V4L2_PIX_FMT_VP9};
+pub(crate) use abi::{
+    V4L2_PIX_FMT_AV1, V4L2_PIX_FMT_H264, V4L2_PIX_FMT_HEVC, V4L2_PIX_FMT_P010, V4L2_PIX_FMT_VP9,
+};
 use queue::{BufferState, V4l2Buffer, V4l2Queue};
 
 const OUT_NUM_BUFFERS: u32 = 16;
@@ -72,6 +74,10 @@ pub(crate) struct CaptureExport {
     pub(crate) stride: u32,
     pub(crate) y_offset: u32,
     pub(crate) uv_offset: u32,
+    /// CAPTURE surface format (NV12 for 8-bit YUV420, P010 for 10-bit).
+    /// Callers building the DRM PRIME descriptor need this to pick the
+    /// right per-layer DRM fourcc without re-parsing the raw V4L2 fourcc.
+    pub(crate) format: crate::pixel_format::DecodedFormat,
 }
 
 /// CAPTURE pool from a previous device incarnation whose decoded frames may
@@ -93,6 +99,7 @@ pub(crate) struct V4l2Session {
     /// Compressed format selected for OUTPUT. Queue objects are rebuilt after
     /// a firmware abort, so this must outlive any one queue incarnation.
     coded_fourcc: u32,
+    capture_fourcc: u32,
     out: V4l2Queue,
     cap: V4l2Queue,
     /// CAPTURE pools from before session rebuilds, in pool order.
@@ -141,7 +148,12 @@ pub(crate) struct V4l2Session {
 }
 
 impl V4l2Session {
-    pub(crate) fn open_and_setup(width: i32, height: i32, coded_fourcc: u32) -> Result<Self, ()> {
+    pub(crate) fn open_and_setup(
+        width: i32,
+        height: i32,
+        coded_fourcc: u32,
+        capture_fourcc: u32,
+    ) -> Result<Self, ()> {
         let devnode = std::env::var("V4L2_VA_DEVICE")
             .ok()
             .filter(|s| !s.is_empty())
@@ -156,6 +168,7 @@ impl V4l2Session {
             fd,
             devnode,
             coded_fourcc,
+            capture_fourcc,
             out: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE as u32),
             cap: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE as u32),
             legacy: Vec::new(),
@@ -315,7 +328,7 @@ fn debug_enabled() -> bool {
 /// is safe to run while other clients decode. An empty result means the node
 /// could not be opened or exposed nothing; callers keep the historical
 /// H.264-only capability table in that case.
-pub(crate) fn enumerate_output_fourccs() -> Vec<u32> {
+fn enumerate_queue_fourccs(queue_type: u32, label: &str) -> Vec<u32> {
     let devnode = std::env::var("V4L2_VA_DEVICE")
         .ok()
         .filter(|s| !s.is_empty())
@@ -329,7 +342,7 @@ pub(crate) fn enumerate_output_fourccs() -> Vec<u32> {
     }
     let mut fourccs = Vec::new();
     let mut desc: v4l2_fmtdesc = zeroed();
-    desc.type_ = v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE as u32;
+    desc.type_ = queue_type;
     // 64 is a safety bound far above any real coded-format count; the loop
     // normally ends on the first ENUM_FMT EINVAL past the last format.
     while fourccs.len() < 64
@@ -345,9 +358,23 @@ pub(crate) fn enumerate_output_fourccs() -> Vec<u32> {
             .map(|fourcc| format!("{fourcc:#010x}"))
             .collect::<Vec<_>>()
             .join(",");
-        eprintln!("msm_drv_video_rs: OUTPUT coded formats on {devnode}: [{list}]");
+        eprintln!("msm_drv_video_rs: {label} formats on {devnode}: [{list}]");
     }
     fourccs
+}
+
+pub(crate) fn enumerate_output_fourccs() -> Vec<u32> {
+    enumerate_queue_fourccs(
+        v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE as u32,
+        "OUTPUT coded",
+    )
+}
+
+pub(crate) fn enumerate_capture_fourccs() -> Vec<u32> {
+    enumerate_queue_fourccs(
+        v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE as u32,
+        "CAPTURE decoded",
+    )
 }
 
 #[cfg(test)]
@@ -382,6 +409,7 @@ mod tests {
             fd,
             devnode: "/dev/null".to_string(),
             coded_fourcc: V4L2_PIX_FMT_H264,
+            capture_fourcc: crate::pixel_format::DecodedFormat::Nv12.v4l2_fourcc(),
             out: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE as u32),
             cap: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE as u32),
             legacy: Vec::new(),

@@ -195,6 +195,7 @@ mod tests {
         Surface {
             width: 64,
             height: 64,
+            format: crate::pixel_format::DecodedFormat::Nv12,
             state,
             cap_idx,
             frame: None,
@@ -277,6 +278,7 @@ mod tests {
         guard.surfaces[0] = Some(Surface {
             width: 64,
             height: 64,
+            format: crate::pixel_format::DecodedFormat::Nv12,
             state: SurfaceState::Pending,
             cap_idx: Some(4),
             frame: None,

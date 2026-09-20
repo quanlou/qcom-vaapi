@@ -100,6 +100,7 @@ mod tests {
         Surface {
             width: 16,
             height: 16,
+            format: crate::pixel_format::DecodedFormat::Nv12,
             state,
             cap_idx: None,
             frame: None,

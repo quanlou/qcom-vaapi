@@ -13,6 +13,7 @@ mod decode;
 mod h264;
 mod h265;
 mod image;
+mod pixel_format;
 mod state;
 mod surface;
 mod surface_export;
@@ -61,7 +62,7 @@ unsafe fn driver_init(ctx: VADriverContextP) -> VAStatus {
         (*ctx).max_profiles = config::advertised_profiles().len() as c_int;
         (*ctx).max_entrypoints = 1;
         (*ctx).max_attributes = 16;
-        (*ctx).max_image_formats = 1;
+        (*ctx).max_image_formats = image::SUPPORTED_IMAGE_FORMATS.len() as c_int;
         (*ctx).max_subpic_formats = 1;
         (*ctx).max_display_attributes = 1;
         (*ctx).str_vendor = VENDOR.as_ptr() as *const c_char;
@@ -85,4 +86,24 @@ pub unsafe extern "C" fn __vaDriverInit_1_24(ctx: VADriverContextP) -> VAStatus 
 /// vtables are writable for initialization.
 pub unsafe extern "C" fn __vaDriverInit_1_0(ctx: VADriverContextP) -> VAStatus {
     unsafe { driver_init(ctx) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn driver_init_reports_image_format_capacity() {
+        let mut vtable: VADriverVTable = unsafe { std::mem::zeroed() };
+        let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
+        ctx.vtable = &mut vtable;
+
+        assert_eq!(unsafe { driver_init(&mut ctx) }, ok());
+        assert_eq!(
+            ctx.max_image_formats as usize,
+            image::SUPPORTED_IMAGE_FORMATS.len()
+        );
+
+        unsafe { drop(Box::from_raw(ctx.pDriverData as *mut DriverBox)) };
+    }
 }

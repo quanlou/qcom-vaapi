@@ -239,6 +239,8 @@ impl V4l2Session {
         if let Some(b) = self.cap.buffers.get_mut(live_idx) {
             b.export_refs = b.export_refs.saturating_add(1);
         }
+        let format = crate::pixel_format::DecodedFormat::from_v4l2_fourcc(self.capture_fourcc)
+            .unwrap_or(crate::pixel_format::DecodedFormat::Nv12);
         Some(CaptureExport {
             fd: exp.fd,
             size,
@@ -247,6 +249,7 @@ impl V4l2Session {
             stride,
             y_offset: 0,
             uv_offset,
+            format,
         })
     }
 
@@ -502,12 +505,19 @@ impl V4l2Session {
         } else {
             dq_cap_idx
         };
+        // Recover the DecodedFormat that the session was set up with, so
+        // late CPU-copy reads (vaGetImage / vaDeriveImage) can pick the
+        // right layout without carrying the raw V4L2 fourcc through the
+        // state layer.
+        let format = crate::pixel_format::DecodedFormat::from_v4l2_fourcc(self.capture_fourcc)
+            .unwrap_or(crate::pixel_format::DecodedFormat::Nv12);
         let frame =
             self.capture_copy(cap_idx)
                 .map(|(data, stride, height)| crate::state::SurfaceFrame {
                     data,
                     stride,
                     height,
+                    format,
                 });
         Some(ReadyCapture {
             surface,
@@ -557,6 +567,7 @@ mod tests {
             fd,
             devnode: "/dev/null".to_string(),
             coded_fourcc: V4L2_PIX_FMT_H264,
+            capture_fourcc: crate::pixel_format::DecodedFormat::Nv12.v4l2_fourcc(),
             out: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE as u32),
             cap: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE as u32),
             legacy: Vec::new(),

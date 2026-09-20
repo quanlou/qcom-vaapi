@@ -275,6 +275,7 @@ mod tests {
         state.lock.lock().unwrap().surfaces[0] = Some(Surface {
             width: 320,
             height: 240,
+            format: crate::pixel_format::DecodedFormat::Nv12,
             state: SurfaceState::Pending,
             cap_idx: Some(2),
             frame: None,
@@ -322,6 +323,7 @@ mod tests {
             guard.surfaces[0] = Some(Surface {
                 width: 320,
                 height: 240,
+                format: crate::pixel_format::DecodedFormat::Nv12,
                 state: SurfaceState::Pending,
                 cap_idx: Some(2),
                 frame: None,

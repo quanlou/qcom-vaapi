@@ -23,6 +23,7 @@ pub(super) const VIDEO_MAX_PLANES_USIZE: usize = VIDEO_MAX_PLANES as usize;
 
 pub(crate) const V4L2_PIX_FMT_H264: u32 = fourcc(b'H', b'2', b'6', b'4');
 pub(super) const V4L2_PIX_FMT_NV12: u32 = fourcc(b'N', b'V', b'1', b'2');
+pub(crate) const V4L2_PIX_FMT_P010: u32 = fourcc(b'P', b'0', b'1', b'0');
 // Coded formats enumerated on the Iris decoder OUTPUT queue (confirmed by
 // read-only VIDIOC_ENUM_FMT). Note HEVC uses the 'HEVC' fourcc, not 'H265'.
 // pub(crate) so v4l2.rs can re-export them for config.rs capability gating.

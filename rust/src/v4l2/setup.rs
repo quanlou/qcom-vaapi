@@ -6,8 +6,8 @@
 
 use super::{
     BufferState, CAP_EXTRA_BUFFERS, CAP_NUM_BUFFERS_MAX, CAP_NUM_BUFFERS_MIN, OUT_NUM_BUFFERS,
-    V4L2_PIX_FMT_NV12, V4l2Buffer, V4l2Session, VIDIOC_ENUM_FMT, VIDIOC_G_FMT, VIDIOC_QBUF,
-    VIDIOC_QUERYCAP, VIDIOC_S_FMT, debug_enabled, xioctl, zeroed,
+    V4l2Buffer, V4l2Session, VIDIOC_ENUM_FMT, VIDIOC_G_FMT, VIDIOC_QBUF, VIDIOC_QUERYCAP,
+    VIDIOC_S_FMT, debug_enabled, xioctl, zeroed,
 };
 use crate::bindings::*;
 use std::ffi::c_void;
@@ -93,7 +93,7 @@ impl V4l2Session {
         let mut cap_fmt: v4l2_format = zeroed();
         cap_fmt.type_ = self.cap.type_;
         let mut cap_pix: v4l2_pix_format_mplane = zeroed();
-        cap_pix.pixelformat = V4L2_PIX_FMT_NV12;
+        cap_pix.pixelformat = self.capture_fourcc;
         cap_pix.width = width.max(0) as u32;
         cap_pix.height = height.max(0) as u32;
         cap_pix.field = v4l2_field::V4L2_FIELD_NONE as u32;
@@ -151,7 +151,7 @@ impl V4l2Session {
         }
 
         // After rapid session churn the device can briefly report a stale or
-        // empty CAPTURE format. Re-apply NV12 and give the hardware a short
+        // empty CAPTURE format. Re-apply the negotiated format and give the hardware a short
         // window to accept it before failing the whole session.
         let mut attempts = 0u32;
         loop {
@@ -159,7 +159,7 @@ impl V4l2Session {
             cap_fmt.type_ = self.cap.type_;
             xioctl(self.fd, VIDIOC_G_FMT, &mut cap_fmt as *mut _ as *mut c_void)?;
             let pix = unsafe { cap_fmt.fmt.pix_mp };
-            if pix.pixelformat == V4L2_PIX_FMT_NV12 {
+            if pix.pixelformat == self.capture_fourcc {
                 self.cap.fmt = cap_fmt;
                 self.cap.fourcc = pix.pixelformat;
                 self.cap.width = pix.width;
@@ -171,8 +171,8 @@ impl V4l2Session {
                 if debug_enabled() {
                     let got = pix.pixelformat;
                     eprintln!(
-                        "msm_drv_video_rs: CAPTURE format never became NV12 (fourcc=0x{:08x})",
-                        got
+                        "msm_drv_video_rs: CAPTURE format never became 0x{:08x} (fourcc=0x{:08x})",
+                        self.capture_fourcc, got
                     );
                 }
                 return Err(());
@@ -180,7 +180,7 @@ impl V4l2Session {
             let mut set: v4l2_format = zeroed();
             set.type_ = self.cap.type_;
             let mut spix: v4l2_pix_format_mplane = zeroed();
-            spix.pixelformat = V4L2_PIX_FMT_NV12;
+            spix.pixelformat = self.capture_fourcc;
             spix.width = self.out.width;
             spix.height = self.out.height;
             spix.field = v4l2_field::V4L2_FIELD_NONE as u32;

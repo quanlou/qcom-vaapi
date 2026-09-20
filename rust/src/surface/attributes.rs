@@ -4,6 +4,7 @@
 //! CAPTURE ownership remain in the parent surface lifecycle module.
 
 use crate::bindings::*;
+use crate::pixel_format::DecodedFormat;
 use crate::state::{DRV_ID_BASE_CONFIG, DRV_MAX_DIM, DRV_MIN_DIM, config_index};
 use crate::va_drm::exported_surface_memory_types;
 use crate::{err, ok, state_from_ctx};
@@ -29,9 +30,14 @@ pub(crate) unsafe extern "C" fn query_surface_attributes(
         Ok(g) => g,
         Err(_) => return err(VA_STATUS_ERROR_OPERATION_FAILED),
     };
-    if idx >= guard.configs.len() || guard.configs[idx].is_none() {
+    let Some(format) = guard
+        .configs
+        .get(idx)
+        .and_then(|config| config.as_ref())
+        .map(|config| config.format)
+    else {
         return err(VA_STATUS_ERROR_INVALID_CONFIG);
-    }
+    };
     drop(guard);
 
     const QUERY_ATTRS: [VASurfaceAttribType; 6] = [
@@ -52,7 +58,7 @@ pub(crate) unsafe extern "C" fn query_surface_attributes(
         let attr = unsafe { &mut *attrib_list.add(i) };
         unsafe { ptr::write_bytes(attr, 0, 1) };
         attr.type_ = ty;
-        fill_surface_attr(attr, SurfaceAttrMode::Query);
+        fill_surface_attr(attr, SurfaceAttrMode::Query, format);
     }
     unsafe { *num_attribs = QUERY_ATTRS.len() as u32 };
     ok()
@@ -70,14 +76,14 @@ fn set_surface_attr_value(a: &mut VASurfaceAttrib, flags: u32, value: i32) {
     a.value.value.i = value;
 }
 
-fn fill_surface_attr(a: &mut VASurfaceAttrib, mode: SurfaceAttrMode) {
+fn fill_surface_attr(a: &mut VASurfaceAttrib, mode: SurfaceAttrMode, format: DecodedFormat) {
     match a.type_ {
         VASurfaceAttribType::VASurfaceAttribPixelFormat => {
             let flags = match mode {
                 SurfaceAttrMode::Query => VA_SURFACE_ATTRIB_GETTABLE | VA_SURFACE_ATTRIB_SETTABLE,
                 SurfaceAttrMode::Get => VA_SURFACE_ATTRIB_GETTABLE,
             };
-            set_surface_attr_value(a, flags, VA_FOURCC_NV12 as i32)
+            set_surface_attr_value(a, flags, format.va_fourcc() as i32)
         }
         VASurfaceAttribType::VASurfaceAttribMemoryType => set_surface_attr_value(
             a,
@@ -123,13 +129,13 @@ pub(crate) unsafe extern "C" fn get_surface_attributes(
         Ok(g) => g,
         Err(_) => return err(VA_STATUS_ERROR_OPERATION_FAILED),
     };
-    if guard.configs[idx].is_none() {
+    let Some(format) = guard.configs[idx].as_ref().map(|config| config.format) else {
         return err(VA_STATUS_ERROR_INVALID_CONFIG);
-    }
+    };
     drop(guard);
     for i in 0..num_attribs as usize {
         let attr = unsafe { &mut *attrib_list.add(i) };
-        fill_surface_attr(attr, SurfaceAttrMode::Get);
+        fill_surface_attr(attr, SurfaceAttrMode::Get, format);
     }
     ok()
 }
@@ -150,23 +156,27 @@ mod tests {
     }
 
     #[test]
-    fn reports_nv12_pixel_format_for_query_and_get() {
+    fn reports_pixel_format_for_query_and_get() {
         let mut query = attr(VASurfaceAttribType::VASurfaceAttribPixelFormat);
-        fill_surface_attr(&mut query, SurfaceAttrMode::Query);
+        fill_surface_attr(&mut query, SurfaceAttrMode::Query, DecodedFormat::Nv12);
         assert_eq!(unsafe { query.value.value.i } as u32, VA_FOURCC_NV12);
         assert_ne!(query.flags & VA_SURFACE_ATTRIB_GETTABLE, 0);
         assert_ne!(query.flags & VA_SURFACE_ATTRIB_SETTABLE, 0);
 
         let mut get = attr(VASurfaceAttribType::VASurfaceAttribPixelFormat);
-        fill_surface_attr(&mut get, SurfaceAttrMode::Get);
+        fill_surface_attr(&mut get, SurfaceAttrMode::Get, DecodedFormat::Nv12);
         assert_eq!(unsafe { get.value.value.i } as u32, VA_FOURCC_NV12);
         assert_eq!(get.flags, VA_SURFACE_ATTRIB_GETTABLE);
+
+        let mut p010 = attr(VASurfaceAttribType::VASurfaceAttribPixelFormat);
+        fill_surface_attr(&mut p010, SurfaceAttrMode::Get, DecodedFormat::P010);
+        assert_eq!(unsafe { p010.value.value.i } as u32, VA_FOURCC_P010);
     }
 
     #[test]
     fn reports_va_and_prime_memory_types() {
         let mut memory = attr(VASurfaceAttribType::VASurfaceAttribMemoryType);
-        fill_surface_attr(&mut memory, SurfaceAttrMode::Get);
+        fill_surface_attr(&mut memory, SurfaceAttrMode::Get, DecodedFormat::Nv12);
         let types = unsafe { memory.value.value.i } as u32;
         assert_ne!(types & VA_SURFACE_ATTRIB_MEM_TYPE_VA, 0);
         assert_ne!(

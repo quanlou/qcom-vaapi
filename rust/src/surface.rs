@@ -12,6 +12,7 @@ pub(crate) use attributes::{get_surface_attributes, query_surface_attributes};
 pub(crate) use status::{query_surface_error, query_surface_status};
 
 use crate::bindings::*;
+use crate::pixel_format::DecodedFormat;
 use crate::state::{
     DRV_ID_BASE_SURFACE, DRV_MAX_ATTRIBUTE_LIST, DRV_MAX_DIM, DRV_MAX_SURFACES, DRV_MIN_DIM,
     DriverBox, DriverState, Surface, SurfaceState, context_index, surface_index,
@@ -25,6 +26,7 @@ fn create_surfaces_common(
     state: &DriverBox,
     width: i32,
     height: i32,
+    format: DecodedFormat,
     num_surfaces: usize,
     surfaces: *mut VASurfaceID,
 ) -> VAStatus {
@@ -57,6 +59,7 @@ fn create_surfaces_common(
         guard.surfaces[slot_idx] = Some(Surface {
             width,
             height,
+            format,
             state: SurfaceState::Empty,
             cap_idx: None,
             frame: None,
@@ -70,7 +73,10 @@ fn create_surfaces_common(
     ok()
 }
 
-fn validate_surface_creation_attributes(attributes: &[VASurfaceAttrib]) -> VAStatus {
+fn validate_surface_creation_attributes(
+    format: DecodedFormat,
+    attributes: &[VASurfaceAttrib],
+) -> VAStatus {
     for attribute in attributes {
         if attribute.flags & VA_SURFACE_ATTRIB_SETTABLE == 0 {
             continue;
@@ -81,7 +87,7 @@ fn validate_surface_creation_attributes(attributes: &[VASurfaceAttrib]) -> VASta
             {
                 return err(VA_STATUS_ERROR_INVALID_PARAMETER);
             }
-            // The V4L2 CAPTURE allocation is exported as linear NV12. The
+            // The V4L2 CAPTURE allocation is exported as a linear surface. The
             // modifier list is an allocation preference, so accepting it here
             // lets clients negotiate against the explicit modifier returned
             // later in VADRMPRIMESurfaceDescriptor.
@@ -92,7 +98,7 @@ fn validate_surface_creation_attributes(attributes: &[VASurfaceAttrib]) -> VASta
         }
         let value = unsafe { attribute.value.value.i } as u32;
         let status = match attribute.type_ {
-            VASurfaceAttribType::VASurfaceAttribPixelFormat if value == VA_FOURCC_NV12 => ok(),
+            VASurfaceAttribType::VASurfaceAttribPixelFormat if value == format.va_fourcc() => ok(),
             VASurfaceAttribType::VASurfaceAttribPixelFormat => {
                 err(VA_STATUS_ERROR_INVALID_PARAMETER)
             }
@@ -135,16 +141,23 @@ pub(crate) unsafe extern "C" fn create_surfaces(
     num_surfaces: c_int,
     surfaces: *mut VASurfaceID,
 ) -> VAStatus {
-    if format as u32 != VA_RT_FORMAT_YUV420 {
+    let Some(decoded_format) = DecodedFormat::from_rt_format(format as u32) else {
         return err(VA_STATUS_ERROR_INVALID_PARAMETER);
-    }
+    };
     let Some(state) = (unsafe { state_from_ctx(ctx) }) else {
         return err(VA_STATUS_ERROR_INVALID_DISPLAY);
     };
     if num_surfaces <= 0 {
         return err(VA_STATUS_ERROR_INVALID_PARAMETER);
     }
-    create_surfaces_common(state, width, height, num_surfaces as usize, surfaces)
+    create_surfaces_common(
+        state,
+        width,
+        height,
+        decoded_format,
+        num_surfaces as usize,
+        surfaces,
+    )
 }
 
 pub(crate) unsafe extern "C" fn create_surfaces2(
@@ -157,9 +170,9 @@ pub(crate) unsafe extern "C" fn create_surfaces2(
     attrib_list: *mut VASurfaceAttrib,
     num_attribs: u32,
 ) -> VAStatus {
-    if format != VA_RT_FORMAT_YUV420 {
+    let Some(decoded_format) = DecodedFormat::from_rt_format(format) else {
         return err(VA_STATUS_ERROR_INVALID_PARAMETER);
-    }
+    };
     if num_attribs > 0 && attrib_list.is_null() {
         return err(VA_STATUS_ERROR_INVALID_PARAMETER);
     }
@@ -171,7 +184,7 @@ pub(crate) unsafe extern "C" fn create_surfaces2(
     } else {
         &[]
     };
-    let check = validate_surface_creation_attributes(attributes);
+    let check = validate_surface_creation_attributes(decoded_format, attributes);
     if check != ok() {
         return check;
     }
@@ -182,6 +195,7 @@ pub(crate) unsafe extern "C" fn create_surfaces2(
         state,
         width as i32,
         height as i32,
+        decoded_format,
         num_surfaces as usize,
         surfaces,
     )
@@ -310,6 +324,7 @@ mod tests {
         Surface {
             width: 16,
             height: 16,
+            format: DecodedFormat::Nv12,
             state,
             cap_idx: None,
             frame: None,
@@ -322,41 +337,51 @@ mod tests {
 
     #[test]
     fn validates_only_supported_settable_surface_attributes() {
+        let fmt = DecodedFormat::Nv12;
         let mut pixel = attr(VASurfaceAttribType::VASurfaceAttribPixelFormat);
         pixel.flags = VA_SURFACE_ATTRIB_SETTABLE;
         pixel.value.value.i = VA_FOURCC_NV12 as i32;
-        assert_eq!(validate_surface_creation_attributes(&[pixel]), ok());
+        assert_eq!(validate_surface_creation_attributes(fmt, &[pixel]), ok());
 
         pixel.value.value.i = VA_FOURCC_YUY2 as i32;
         assert_eq!(
-            validate_surface_creation_attributes(&[pixel]),
+            validate_surface_creation_attributes(fmt, &[pixel]),
             VA_STATUS_ERROR_INVALID_PARAMETER as VAStatus
+        );
+
+        pixel.value.value.i = VA_FOURCC_P010 as i32;
+        assert_eq!(
+            validate_surface_creation_attributes(DecodedFormat::P010, &[pixel]),
+            ok()
         );
 
         let mut memory = attr(VASurfaceAttribType::VASurfaceAttribMemoryType);
         memory.flags = VA_SURFACE_ATTRIB_SETTABLE;
         memory.value.value.i = VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2 as i32;
         assert_eq!(
-            validate_surface_creation_attributes(&[memory]),
+            validate_surface_creation_attributes(fmt, &[memory]),
             VA_STATUS_ERROR_UNSUPPORTED_MEMORY_TYPE as VAStatus
         );
 
         // A non-settable attribute is ignored regardless of type.
         let ignored = attr(VASurfaceAttribType::VASurfaceAttribUsageHint);
-        assert_eq!(validate_surface_creation_attributes(&[ignored]), ok());
+        assert_eq!(validate_surface_creation_attributes(fmt, &[ignored]), ok());
 
         // Chromium's VaapiVideoDecoder passes a SETTABLE usage hint on
         // vaCreateSurfaces; it must be accepted, not rejected as unsupported.
         let mut usage_hint = attr(VASurfaceAttribType::VASurfaceAttribUsageHint);
         usage_hint.flags = VA_SURFACE_ATTRIB_SETTABLE;
         usage_hint.value.value.i = VA_SURFACE_ATTRIB_USAGE_HINT_DECODER as i32;
-        assert_eq!(validate_surface_creation_attributes(&[usage_hint]), ok());
+        assert_eq!(
+            validate_surface_creation_attributes(fmt, &[usage_hint]),
+            ok()
+        );
 
         // An attribute we genuinely cannot honor is still rejected.
         let mut external = attr(VASurfaceAttribType::VASurfaceAttribExternalBufferDescriptor);
         external.flags = VA_SURFACE_ATTRIB_SETTABLE;
         assert_eq!(
-            validate_surface_creation_attributes(&[external]),
+            validate_surface_creation_attributes(fmt, &[external]),
             VA_STATUS_ERROR_ATTR_NOT_SUPPORTED as VAStatus
         );
     }

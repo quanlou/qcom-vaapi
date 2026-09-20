@@ -81,8 +81,12 @@ pub(crate) unsafe extern "C" fn create_context(
     let Some(decoder) = Decoder::new(cfg.profile) else {
         return err(VA_STATUS_ERROR_UNSUPPORTED_PROFILE);
     };
-    let Ok(v4l2) = V4l2Session::open_and_setup(picture_width, picture_height, codec.fourcc())
-    else {
+    let Ok(v4l2) = V4l2Session::open_and_setup(
+        picture_width,
+        picture_height,
+        codec.fourcc(),
+        cfg.format.v4l2_fourcc(),
+    ) else {
         return err(VA_STATUS_ERROR_OPERATION_FAILED);
     };
     if let Some(idx) = guard.contexts.iter().position(Option::is_none) {
@@ -229,6 +233,7 @@ mod tests {
         state.lock.lock().unwrap().surfaces[0] = Some(Surface {
             width: 320,
             height: 240,
+            format: crate::pixel_format::DecodedFormat::Nv12,
             state: SurfaceState::Pending,
             cap_idx: Some(4),
             frame: None,
@@ -264,12 +269,14 @@ mod tests {
         state.lock.lock().unwrap().surfaces[0] = Some(Surface {
             width: 320,
             height: 240,
+            format: crate::pixel_format::DecodedFormat::Nv12,
             state: SurfaceState::Ready,
             cap_idx: Some(4),
             frame: Some(SurfaceFrame {
                 data: vec![1, 2, 3, 4],
                 stride: 2,
                 height: 2,
+                format: crate::pixel_format::DecodedFormat::Nv12,
             }),
             owner: context_id,
             exported: false,
@@ -362,6 +369,7 @@ mod tests {
             profile: VAProfile::VAProfileH264Main,
             entrypoint: VAEntrypoint::VAEntrypointVLD,
             attribs: Vec::new(),
+            format: crate::pixel_format::DecodedFormat::Nv12,
         });
         state.lock.lock().unwrap().contexts[0] = Some(context_for_test(DRV_ID_BASE_CONFIG));
 
@@ -383,6 +391,7 @@ mod tests {
             profile: VAProfile::VAProfileH264Main,
             entrypoint: VAEntrypoint::VAEntrypointVLD,
             attribs: Vec::new(),
+            format: crate::pixel_format::DecodedFormat::Nv12,
         });
         let mut context_id = VA_INVALID_ID;
 

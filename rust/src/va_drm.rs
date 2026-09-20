@@ -9,8 +9,9 @@ use std::ffi::c_int;
 
 use crate::bindings::{
     VA_EXPORT_SURFACE_COMPOSED_LAYERS, VA_EXPORT_SURFACE_READ_ONLY, VA_EXPORT_SURFACE_READ_WRITE,
-    VA_EXPORT_SURFACE_SEPARATE_LAYERS, VA_EXPORT_SURFACE_WRITE_ONLY, VA_FOURCC_NV12,
+    VA_EXPORT_SURFACE_SEPARATE_LAYERS, VA_EXPORT_SURFACE_WRITE_ONLY,
 };
+use crate::pixel_format::DecodedFormat;
 use crate::v4l2::CaptureExport;
 
 pub(crate) const VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2: u32 = 0x4000_0000;
@@ -20,8 +21,11 @@ pub(crate) fn exported_surface_memory_types(internal_va: u32) -> u32 {
 }
 
 const DRM_FORMAT_NV12: u32 = fourcc(b'N', b'V', b'1', b'2');
+const DRM_FORMAT_P010: u32 = fourcc(b'P', b'0', b'1', b'0');
 const DRM_FORMAT_R8: u32 = fourcc(b'R', b'8', b' ', b' ');
 const DRM_FORMAT_GR88: u32 = fourcc(b'G', b'R', b'8', b'8');
+const DRM_FORMAT_R16: u32 = fourcc(b'R', b'1', b'6', b' ');
+const DRM_FORMAT_GR1616: u32 = fourcc(b'G', b'R', b'3', b'2');
 const DRM_FORMAT_MOD_LINEAR: u64 = 0;
 
 const fn fourcc(a: u8, b: u8, c: u8, d: u8) -> u32 {
@@ -87,9 +91,9 @@ pub(crate) struct DrmPrimeDescriptor {
 }
 
 impl DrmPrimeDescriptor {
-    pub(crate) fn from_nv12_capture(capture: CaptureExport, layout: DrmPrimeLayout) -> Self {
+    pub(crate) fn from_capture(capture: CaptureExport, layout: DrmPrimeLayout) -> Self {
         let mut desc = Self {
-            fourcc: VA_FOURCC_NV12,
+            fourcc: capture.format.va_fourcc(),
             width: capture.width,
             height: capture.height,
             num_objects: 1,
@@ -107,7 +111,10 @@ impl DrmPrimeDescriptor {
             DrmPrimeLayout::Composed => {
                 desc.num_layers = 1;
                 desc.layers[0] = DrmPrimeLayer {
-                    drm_format: DRM_FORMAT_NV12,
+                    drm_format: match capture.format {
+                        DecodedFormat::Nv12 => DRM_FORMAT_NV12,
+                        DecodedFormat::P010 => DRM_FORMAT_P010,
+                    },
                     num_planes: 2,
                     object_index: [0, 0, 0, 0],
                     offset: [capture.y_offset, capture.uv_offset, 0, 0],
@@ -117,14 +124,20 @@ impl DrmPrimeDescriptor {
             DrmPrimeLayout::Separate => {
                 desc.num_layers = 2;
                 desc.layers[0] = DrmPrimeLayer {
-                    drm_format: DRM_FORMAT_R8,
+                    drm_format: match capture.format {
+                        DecodedFormat::Nv12 => DRM_FORMAT_R8,
+                        DecodedFormat::P010 => DRM_FORMAT_R16,
+                    },
                     num_planes: 1,
                     object_index: [0, 0, 0, 0],
                     offset: [capture.y_offset, 0, 0, 0],
                     pitch: [capture.stride, 0, 0, 0],
                 };
                 desc.layers[1] = DrmPrimeLayer {
-                    drm_format: DRM_FORMAT_GR88,
+                    drm_format: match capture.format {
+                        DecodedFormat::Nv12 => DRM_FORMAT_GR88,
+                        DecodedFormat::P010 => DRM_FORMAT_GR1616,
+                    },
                     num_planes: 1,
                     object_index: [0, 0, 0, 0],
                     offset: [capture.uv_offset, 0, 0, 0],
@@ -149,6 +162,7 @@ mod tests {
             stride: 128,
             y_offset: 0,
             uv_offset: 2048,
+            format: DecodedFormat::Nv12,
         }
     }
 
@@ -190,8 +204,8 @@ mod tests {
 
     #[test]
     fn builds_composed_nv12_descriptor() {
-        let desc = DrmPrimeDescriptor::from_nv12_capture(capture(), DrmPrimeLayout::Composed);
-        assert_eq!(desc.fourcc, VA_FOURCC_NV12);
+        let desc = DrmPrimeDescriptor::from_capture(capture(), DrmPrimeLayout::Composed);
+        assert_eq!(desc.fourcc, DecodedFormat::Nv12.va_fourcc());
         assert_eq!(desc.num_objects, 1);
         assert_eq!(desc.objects[0].fd, 17);
         assert_eq!(desc.num_layers, 1);
@@ -202,10 +216,20 @@ mod tests {
 
     #[test]
     fn builds_separate_nv12_descriptor() {
-        let desc = DrmPrimeDescriptor::from_nv12_capture(capture(), DrmPrimeLayout::Separate);
+        let desc = DrmPrimeDescriptor::from_capture(capture(), DrmPrimeLayout::Separate);
         assert_eq!(desc.num_layers, 2);
         assert_eq!(desc.layers[0].drm_format, DRM_FORMAT_R8);
         assert_eq!(desc.layers[1].drm_format, DRM_FORMAT_GR88);
         assert_eq!(desc.layers[1].offset[0], 2048);
+    }
+
+    #[test]
+    fn builds_p010_descriptor() {
+        let mut cap = capture();
+        cap.format = DecodedFormat::P010;
+        let desc = DrmPrimeDescriptor::from_capture(cap, DrmPrimeLayout::Separate);
+        assert_eq!(desc.fourcc, DecodedFormat::P010.va_fourcc());
+        assert_eq!(desc.layers[0].drm_format, DRM_FORMAT_R16);
+        assert_eq!(desc.layers[1].drm_format, DRM_FORMAT_GR1616);
     }
 }

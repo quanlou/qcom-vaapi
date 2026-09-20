@@ -10,6 +10,7 @@ use std::sync::Mutex;
 
 use crate::bindings::*;
 use crate::codec::Decoder;
+use crate::pixel_format::DecodedFormat;
 use crate::v4l2::V4l2Session;
 
 pub(crate) const DRV_ID_BASE_CONFIG: u32 = 0x0100_0000;
@@ -44,6 +45,7 @@ pub(crate) struct Config {
     pub(crate) profile: VAProfile,
     pub(crate) entrypoint: VAEntrypoint,
     pub(crate) attribs: Vec<VAConfigAttrib>,
+    pub(crate) format: DecodedFormat,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -64,11 +66,13 @@ pub(crate) struct SurfaceFrame {
     pub(crate) data: Vec<u8>,
     pub(crate) stride: u32,
     pub(crate) height: u32,
+    pub(crate) format: DecodedFormat,
 }
 
 pub(crate) struct Surface {
     pub(crate) width: i32,
     pub(crate) height: i32,
+    pub(crate) format: DecodedFormat,
     pub(crate) state: SurfaceState,
     pub(crate) cap_idx: Option<usize>,
     /// Dequeued frame bytes backing the CPU-copy read path (vaGetImage /
