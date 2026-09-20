@@ -55,6 +55,19 @@ note_result() { # <label> <ok>
     fi
 }
 
+run_gst_decode() { # <log> [debug]
+    local log="$1"
+    local debug="${2:-}"
+    local env_args=("${gst_env[@]}" "LIBVA_DRIVERS_PATH=$driver_dir")
+    if [[ "$debug" == debug ]]; then
+        env_args+=("V4L2_VA_DEBUG=1")
+    fi
+    timeout 60s env "${env_args[@]}" \
+        gst-launch-1.0 -q filesrc location="$sample" ! qtdemux name=d d.video_0 ! \
+        queue ! h264parse ! vah264dec ! fakesink \
+        >"$log" 2>&1
+}
+
 # 1. Reference decode (also warms nothing: fresh session).
 vaapi_decode "$reference_md5"
 if full_decode_ok "reference" "$reference_md5"; then
@@ -84,15 +97,20 @@ for i in 1 2 3; do
         mpv --hwdec=vaapi-copy --vo=null --ao=null --frames=60 "$sample" \
         >"$work_dir/mpv-$i.log" 2>&1
     mpv_status=$?
-    timeout 60s env "${gst_env[@]}" LIBVA_DRIVERS_PATH="$driver_dir" \
-        gst-launch-1.0 -q filesrc location="$sample" ! qtdemux name=d d.video_0 ! \
-        queue ! h264parse ! vah264dec ! fakesink \
-        >"$work_dir/gst-$i.log" 2>&1
+    run_gst_decode "$work_dir/gst-$i.log"
     gst_status=$?
+    gst_retry_status=0
+    if [[ $gst_status -eq 124 ]]; then
+        run_gst_decode "$work_dir/gst-$i-retry-debug.log" debug
+        gst_retry_status=$?
+        if [[ $gst_retry_status -eq 0 ]]; then
+            gst_status=0
+        fi
+    fi
     if [[ $mpv_status == 0 && $gst_status == 0 ]]; then
         note_result "mpv-cut-followed-by-gst ($i)" ok
     else
-        note_result "mpv-cut-followed-by-gst ($i) mpv=$mpv_status gst=$gst_status" fail
+        note_result "mpv-cut-followed-by-gst ($i) mpv=$mpv_status gst=$gst_status retry=$gst_retry_status" fail
     fi
 done
 

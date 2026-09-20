@@ -52,15 +52,10 @@ fi
 
 concat_file="$work_dir/concat.txt"
 : > "$concat_file"
-expected_frames=0
+expected_frames=""
 for ((i = 0; i < segments; i++)); do
     sample="$high_sample"
     printf "file '%s'\n" "$sample" >> "$concat_file"
-    frames="$(ffprobe -v error -select_streams v:0 -count_frames \
-        -show_entries stream=nb_read_frames -of csv=p=0 "$sample" 2>/dev/null || true)"
-    if [[ "$frames" =~ ^[0-9]+$ ]]; then
-        expected_frames=$((expected_frames + frames))
-    fi
 done
 
 playlist="$work_dir/playlist.ts"
@@ -68,6 +63,13 @@ if ! timeout 120s ffmpeg -y -nostdin -hide_banner -v error \
     -f concat -safe 0 -i "$concat_file" -map 0:v:0 -c copy -f mpegts "$playlist" \
     > "$work_dir/playlist-build.log" 2>&1; then
     echo "long_playback=skip reason=playlist_build_failed log=$work_dir/playlist-build.log"
+    exit 77
+fi
+expected_frames="$(ffprobe -v error -select_streams v:0 -count_frames \
+    -show_entries stream=nb_read_frames -of csv=p=0 "$playlist" 2>/dev/null \
+    | awk '/^[0-9]+$/ { print; exit }')"
+if [[ ! "$expected_frames" =~ ^[0-9]+$ ]]; then
+    echo "long_playback=skip reason=playlist_frame_count_unavailable log=$work_dir/playlist-build.log"
     exit 77
 fi
 
@@ -103,7 +105,7 @@ reason=completed
 if (( playlist_status != 0 )); then
     result=fail
     reason="playlist_status_$playlist_status"
-elif (( expected_frames > 0 && decoded != expected_frames )); then
+elif (( decoded != expected_frames )); then
     result=fail
     reason="decoded_${decoded}_expected_${expected_frames}"
 elif (( source_changes < 1 )); then

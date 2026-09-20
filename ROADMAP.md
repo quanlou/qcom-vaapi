@@ -502,31 +502,26 @@ Exit criteria:
 ## Immediate next tasks
 
 1. `bframes-240p` `framemd5_xfail`: the bounded session-recovery path is now covered, but the probe still fails often enough to remain an expected failure. Userspace triggers were exonerated. Firmware-side evidence is now captured unprivileged with `tools/capture-iris-kernel-log.sh` (see `docs/08-iris-firmware-errors.md`): the abort is a `qcom-iris` session-fatal `0x4000003`; when it escalates to a device-wide `0x5000003` the node power-cycles (~90s poison) and even native decode fails. Remaining step needs root: enable `qcom_iris` dynamic_debug and diff the HFI sequence of a failing small session vs a passing 720p session. The required 720p matrix in the verifier stays as is.
-2. Keep the runtime GStreamer export and resolution verifiers (`tools/verify-gst-export.sh` and `tools/verify-resolution-churn.sh`) in the main verification loop. The standalone C export verifier (`tools/verify-export-prime.sh`) still exits 77 with a package hint until `libva-dev libavcodec-dev libavformat-dev libavutil-dev` headers are installed.
-3. Finish the same-dimension `SOURCE_CHANGE` resume path for short FFmpeg copy decodes: current driver handles the empty CAPTURE/EOS marker pair without false recovery, queues/drains OUTPUT, and can publish the first frame with a native-matching MD5, but the STOP/START drain workaround loses later H.264 reference continuity and FFmpeg still exits nonzero after decoding ahead. Replace the midstream STOP workaround with a frame-preserving resume: mirror native's OUTPUT-first/CAPTURE-later sequence without ending the decode stream, or make rebuild/replay preserve enough reference state to continue after the first published surfaces.
-   [2026-09-18 diagnosis (offline strace analysis, PROGRESS.md "SOURCE_CHANGE resume DIAGNOSIS RESULT"): native receives the same-dims SOURCE_CHANGE EVERY session and its only handling is G_FMT + one EBUSY-ignored DECODER_CMD + keep pumping — NO successful STOP, NO START, NO queue cycle, and FLAG_LAST/EOS never appear mid-stream. The marker pair on our side means iris self-drained into the V4L2 Stopped state; per spec only V4L2_DEC_CMD_START resumes it, but the current code can never send one there (the START helper is gated on `eos||draining`, and the suppressed paired-EOS never sets `eos`). Recipe: never STOP for same-dims source change; START immediately at marker-pair completion; pump CAPTURE continuously (no deferral); keep false-abort suppression. If references still break, audit whether SPS/PPS are re-prepended onto every AU (iris may re-parse + auto-drain mid-stream).]
-   [2026-09-19 DONE (claude agent): the required H.264 matrix is byte-exact vs
-   native on hardware — sample-1/30/full rc=0 with `cmp`-equal framemd5s, churn
-   7/7, resolution-churn pass (6 SOURCE_CHANGEs). The landing fix differs from
-   the 2026-09-18 recipe: the same-dims marker path already worked; the actual
-   short-decode blocker was a vaSyncSurface input-starvation deadlock (iris
-   defers frame release until the next AU, which a syncing client never sends),
-   broken with a bounded STOP drain whose resume replays SPS/PPS + keyframe
-   history (iris drops its reference chain across STOP), plus dequeue-time
-   pixel snapshots to fix CAPTURE-slot aliasing on late vaGetImage/
-   vaDeriveImage reads. Evidence in PROGRESS.md Completed recently; the
-   remaining gst-gl failure is the separate Phase 3 export wedge.]
-4. Reference-count exported fds so CAPTURE requeue waits until the last exported handle is retired; add GStreamer dmabuf import as the first real lifetime test.
-5. mpv `--hwdec=vaapi-copy` and GStreamer `vah264dec` pass for the three mpv-cut churn legs after the Phase 2 source-change fix. Still open: forced-kill/SIGTERM parity and a non-copy mpv/GStreamer GL path.
-6. Keep `tools/verify-browser-vaapi.sh` as the browser diagnostic. Chromium's
-   snap `native` mode now reaches this driver and negotiates its VAAPI decode
-   path; rerun it on a clean device window to prove successful browser frames.
-   An unconfined Firefox path remains useful, then use browser logs to implement
-   any browser-specific callbacks and importer lifetime requirements.
-7. Continue splitting the remaining surface lifecycle and shared VA entrypoint
+2. Keep the runtime GStreamer export, GL zero-copy, mixed-resolution,
+   long-playback, codec, churn, and browser verifiers in the main loop.
+   `verify-rust-driver.sh` now covers the first five on merged `main`; run
+   `verify-session-churn.sh` after V4L2 queue/export/teardown changes.
+   The standalone C export verifier
+   (`tools/verify-export-prime.sh`) still exits 77 with a package hint until
+   `libva-dev libavcodec-dev libavformat-dev libavutil-dev` headers are
+   installed.
+3. Keep `tools/verify-gl-roundtrip.sh` green as a hard zero-copy gate. It now
+   tolerates the observed gst-va pool warmup gap (`missing=1 tolerated=2` in
+   the latest run); future work should improve the diagnostic output if that
+   tolerance is exceeded.
+4. Keep `tools/verify-browser-vaapi.sh` as the browser diagnostic. Chromium snap
+   `native` mode has already played end-to-end through zero-copy VAAPI; rerun it
+   after export or pool changes. An unconfined Firefox path remains useful for
+   client-compat callback coverage.
+5. Continue splitting the remaining surface lifecycle and shared VA entrypoint
    helpers after `state.rs`, `image.rs`, `buffer.rs`, `buffer/handles.rs`,
    `decode.rs`, `sync.rs`, `surface_export.rs`, and `va_drm.rs`.
-8. Keep `DECODER_CMD STOP` limited to explicit teardown/recovery drains. The
+6. Keep `DECODER_CMD STOP` limited to explicit teardown/recovery drains. The
    sync-timeout fallback was removed because backpressure can be followed by
    more submissions; cover normal EOS and teardown drain behavior with a
    dedicated regression sample. PROBE ADDED: `tools/verify-eos-drain.sh`
