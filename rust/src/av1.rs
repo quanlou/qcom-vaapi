@@ -23,6 +23,7 @@
 //! AND a passing native (or software) parity sample.
 
 pub(crate) mod bitstream;
+pub(crate) mod synth;
 
 // Re-exports are pre-wired for the follow-up integration in `codec/raw.rs`
 // that emits TD + Sequence Header + Frame OBU around each AV1 access unit.
@@ -30,3 +31,7 @@ pub(crate) mod bitstream;
 // without shuffling paths; #[allow] silences the interim "unused" warning.
 #[allow(unused_imports)]
 pub(crate) use bitstream::{BitWriter, ObuType, ObuWriter, leb128_size, write_leb128};
+#[allow(unused_imports)]
+pub(crate) use synth::{
+    ColorDescription, SeqProfile, SequenceHeaderInput, synthesize_sequence_header,
+};
