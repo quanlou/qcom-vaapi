@@ -40,12 +40,16 @@ fn release_mapping(addr: *mut c_void, length: usize) {
     unsafe { munmap(addr, length) };
     #[cfg(test)]
     {
-        UNMAPPED_PLANES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        UNMAPPED_PLANES.with(|count| count.set(count.get() + 1));
     }
 }
 
 #[cfg(test)]
-static UNMAPPED_PLANES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+thread_local! {
+    // Session teardown runs synchronously on its caller. A global counter
+    // includes unrelated mappings released by concurrently running tests.
+    static UNMAPPED_PLANES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 #[derive(Clone)]
 pub(crate) struct ReadyCapture {
@@ -393,7 +397,6 @@ mod tests {
 
     const MAP_PRIVATE: c_int = 0x02;
     const MAP_ANONYMOUS: c_int = 0x20;
-    static SESSION_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// A real anonymous mapping so `release_mapping` exercises actual munmap.
     fn anon_plane() -> (*mut c_void, usize) {
@@ -470,8 +473,7 @@ mod tests {
 
     #[test]
     fn teardown_unmaps_planes_and_closes_fd() {
-        let _lock = SESSION_TEST_LOCK.lock().unwrap();
-        let before = UNMAPPED_PLANES.load(std::sync::atomic::Ordering::Relaxed);
+        let before = UNMAPPED_PLANES.with(std::cell::Cell::get);
         let path = CString::new("/dev/null").unwrap();
         let fd = unsafe { open(path.as_ptr(), O_RDWR, 0) };
         assert!(fd >= 0, "could not open /dev/null for the leak check");
@@ -483,14 +485,14 @@ mod tests {
             assert_eq!(b.len[0], 0);
             assert_eq!(b.num_planes, 0);
         }
-        let after_release = UNMAPPED_PLANES.load(std::sync::atomic::Ordering::Relaxed) - before;
+        let after_release = UNMAPPED_PLANES.with(std::cell::Cell::get) - before;
         assert_eq!(
             after_release, 2,
             "CAPTURE release must unmap exactly its planes"
         );
 
         drop(s);
-        let total = UNMAPPED_PLANES.load(std::sync::atomic::Ordering::Relaxed) - before;
+        let total = UNMAPPED_PLANES.with(std::cell::Cell::get) - before;
         assert_eq!(
             total, 5,
             "OUTPUT + legacy planes must also be released on drop"

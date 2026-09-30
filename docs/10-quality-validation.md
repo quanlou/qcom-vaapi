@@ -93,3 +93,39 @@ kernel logs, and restores the exact original print-enabled callsites on exit.
 It stops at the first failure rather than retrying poisoned sessions. Logging
 is limited to the available Qualcomm Iris callsites; deeper HFI payload tracing
 may still require kernel instrumentation.
+
+## Repeated 4K playback and kernel memory safety
+
+The 600-frame H.264 copy run now matches all ten repetitions of the complete
+native 60-frame reference, including every checksum, duration, and timestamp.
+The drain-resume fix runs replay before OUTPUT pacing and skips old-reference
+replay for a fresh keyframe. The recorded run took 13.39 seconds (44.81 fps),
+with peak process RSS 1,322,912 KiB. These are copy-path measurements with debug
+logging and checksum output, not browser presentation or a 4K60 pass.
+
+The same run exposed two kernel UBSAN out-of-bounds reports, so its overall
+quality verdict is **failed**. See [the candidate kernel fix](../kernel/README.md)
+for the source analysis, isolated sanitizer regression, and remaining hardware
+validation. The kernel log wrapper now returns failure for kernel warnings,
+UBSAN/KASAN/BUG reports, firmware errors, and unavailable journal observation.
+It monitors native-reference runs as well as driver runs in the 4K verifier.
+
+```sh
+V4L2_VA_4K_LOOPS=10 V4L2_VA_4K_MIN_FPS=60 \
+  tools/verify-4k-decode.sh /path/to/driver
+python3 -m unittest discover -s tools/tests -v
+```
+
+A native decoder using `-stream_loop` can return success after only one clip.
+The verifier instead requires a complete single-clip native reference and
+compares every repeated driver record against that reference with continuous
+DTS/PTS. Short references, dropped/extra frames, pixel changes, and timestamp
+resets fail. The optional FPS threshold is checked only after correctness and
+kernel checks pass.
+
+The churn gate additionally checks complete frame counts against a software
+H.264/NV12 reference, requires successful FFmpeg completion, forces hardware
+output, disables mpv's software fallback, and verifies hardware-decoding logs.
+It requires kill legs to actually be interrupted and does not hide a failed
+GStreamer run with a retry. Existing historical 7/7 results remain evidence for
+the older gate; the stricter gate must be rerun before lifecycle closure.

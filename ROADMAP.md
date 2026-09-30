@@ -558,3 +558,14 @@ Exit criteria:
    documented in PROGRESS.md (`V4L2_VA_SAMPLE=one-frame.mp4` is a low-stress
    true-EOS variant).
 9. Keep `tools/verify-session-churn.sh` in the pre-browser regression set so the cross-session wedge stays covered; keep `-nostdin` on ffmpeg invocations run from automation.
+
+### Kernel memory-safety blocker (2026-10-01)
+
+A 600-frame 4K H.264 run is pixel/timestamp exact but fails kernel memory
+safety: Iris capture fallback reads `tss[32]` after the metadata writer reaches
+its array boundary. See [candidate patch and regression](kernel/README.md).
+The original source reproduces under UBSAN; the patched extracted functions
+pass 4,096 inputs. Production closure requires booting the matching patched
+kernel and rerunning long 4K/lifecycle checks, not merely waiting for warnings
+to stop repeating. The kernel wrapper now fails on memory faults/warnings.
+The tightened churn gate passes 7/7; strict GL still fails one missing frame.

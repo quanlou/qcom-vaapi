@@ -1,0 +1,26 @@
+media: iris: wrap timestamp metadata index before capture completion
+
+metadata_idx is incremented after storing each input buffer, but previously
+wrapped only when the next input arrived. A capture completion with no matching
+timestamp in that interval uses metadata_idx directly in iris_get_ts_metadata.
+After the 32nd input this reads beyond tss[32]. UBSAN reports both fallback
+accesses in iris_buffer.c during repeated 4K H.264 decoding.
+
+Wrap immediately after advancing so the fallback index remains in bounds.
+Retain the existing defensive check before storing metadata. This preserves
+the current next-slot fallback policy; selecting different timestamp metadata
+is a separate semantic change.
+
+This is a candidate kernel patch, not installed on the test host.
+
+--- a/drivers/media/platform/qcom/iris/iris_common.c
++++ b/drivers/media/platform/qcom/iris/iris_common.c
+@@ -44,6 +44,8 @@
+ 	inst->tss[inst->metadata_idx].ts_ns = vb->timestamp;
+ 
+ 	inst->metadata_idx++;
++	if (inst->metadata_idx == ARRAY_SIZE(inst->tss))
++		inst->metadata_idx = 0;
+ }
+ 
+ int iris_process_streamon_input(struct iris_inst *inst)

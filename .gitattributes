@@ -1,0 +1,2 @@
+# Unified patches preserve literal context prefixes and upstream indentation.
+kernel/*.patch -whitespace

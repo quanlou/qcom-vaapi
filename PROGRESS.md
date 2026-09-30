@@ -25,7 +25,16 @@ short and update it whenever a task starts, finishes, or gets blocked.
   metadata remains necessary for full-stream parity. Strict GL missing-frame
   coverage and browser throughput stay in the parallel top-down lane. H.264,
   HEVC/Main10, and VP9 4K correctness and 4K H.264 churn are verified below.
-  Small H.264 follow-up: hardware probe complete; lease released; a hardening guard in
+  Small H.264 follow-up: bounded probe complete; firmware blocker recorded.
+  Completing: harden kernel-fault and repeated-frame verification; candidate
+  Iris metadata-index patch with an isolated UBSAN reproducer. Claiming
+  `capture-iris-kernel-log.sh`, `verify-4k-decode.sh`, standalone quality tests,
+  and `verify-session-churn.sh` (its old self-reference and ignored FFmpeg
+  status could falsely certify partial/software playback). Claiming `v4l2/submit.rs`: drain replay occurred after
+  the free-OUTPUT check and could fill every slot before new-frame QBUF.
+  Resume before pacing, and skip replay when a fresh keyframe replaces the
+  old reference chain. Browser/compositor throughput stays top-down.
+  A hardening guard in
   `poll.rs` rejected Iris's empty ERROR-marked SOURCE_CHANGE completion
   before existing marker handling could run. Restrict ERROR rejection to
   nonempty pixels; empty completions still follow drain/source-change/fatal
@@ -117,6 +126,29 @@ short and update it whenever a task starts, finishes, or gets blocked.
   session.
 
 ## Completed recently
+
+- Bottom-up quality gate hardening (codex, 2026-10-01): repeated 4K H.264
+  output is byte-exact across 600 frames with continuous DTS/PTS, checked
+  against the full native 60-frame reference. Overall run FAILED: kernel
+  UBSAN index-32 reads at `iris_buffer.c:869/870`. Candidate immediate-wrap
+  kernel patch and extracted-function sanitizer runner are in `kernel/` and
+  `tools/verify-iris-metadata.py`; baseline reproduced, patched 4096-input
+  regression passed. Kernel installation/boot validation requires host sudo
+  access, which is unavailable noninteractively. Do not treat suppressed
+  repeat UBSAN reports as a clean bill of health for the old kernel.
+  Kernel capture now fails on faults/warnings or missing journal observation;
+  4K references are counted before driver probes and repeated comparisons
+  verify all records. Churn now rejects fallback, partial/failed output,
+  unexercised signals, and hidden timeout retries.
+  Validation: 19 dedicated acceptance regressions and 7 parallel-owner
+  verifier regressions passed; Rust 164 tests passed with 16 threads, fmt
+  and strict clippy passed. Required matrix rerun passes H.264 1/30/full,
+  then fails strict GL (missing=1, tolerated=0). Hardened churn passes 7/7
+  with kernel-bugs=0. Logs: `/tmp/libva-v4l2-quality-strict-fixed-{rust-driver,session-churn}-20261001.log`.
+  Matrix rerun first exposed a concurrent test counter race (3 mappings
+  counted instead of 2); thread-local teardown instrumentation fixes this
+  without changing production behavior. Only this test hunk in `v4l2.rs`
+  is owned here; preserve the parallel queue-hardening changes.
 
 - Bottom-up quality fixes (codex, 2026-10-01): corrected AV1 quantizer values,
   restoration enums, hidden-reference materialization, integer-motion flag

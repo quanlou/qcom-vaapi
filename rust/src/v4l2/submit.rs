@@ -75,6 +75,9 @@ impl V4l2Session {
         if self.aborted {
             self.recover()?;
         }
+        // Drain recovery can queue a complete replay prefix. Do it before
+        // pacing and waiting for a free OUTPUT slot for the new access unit.
+        self.maybe_resume_after_drain(keyframe)?;
         let mut attempts = 0;
         while self.out_queued() >= output_inflight_limit(self.source_change_flush) {
             if self.aborted && self.recover().is_ok() {
@@ -112,7 +115,6 @@ impl V4l2Session {
             let ready = self.pump(2);
             self.ready.extend(ready);
         }
-        self.maybe_resume_after_drain()?;
         if self.stable_capture {
             // Reserved slots must never enter the kernel queue (the firmware
             // would write someone else's frame into an exported dma-buf).
@@ -220,7 +222,7 @@ impl V4l2Session {
         res.map(|_| idx)
     }
 
-    fn maybe_resume_after_drain(&mut self) -> Result<(), ()> {
+    fn maybe_resume_after_drain(&mut self, keyframe: bool) -> Result<(), ()> {
         if !self.eos && !self.draining {
             return Ok(());
         }
@@ -244,6 +246,12 @@ impl V4l2Session {
                 eprintln!("msm_drv_video_rs: DECODER_CMD START after drain failed");
             }
             return Err(());
+        }
+
+        // Random-access pictures replace the reference chain themselves.
+        // Replaying the previous GOP wastes buffers and decode bandwidth.
+        if keyframe {
+            return Ok(());
         }
 
         // STOP releases frames that the stateful decoder withheld while a
