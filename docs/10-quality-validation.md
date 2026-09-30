@@ -75,3 +75,21 @@ The HEVC malformed-tile-array regression from the host stress audit is fixed.
 Counts must fit the supplied arrays, and explicit tile widths/heights must leave
 space for a nonempty final tile in the coded picture. The isolated host stress
 runner now passes all four stress checks and its parallel test suite.
+
+## Small H.264 firmware trace
+
+The PPS fix does not close the 320x240 B-frame blocker. A bounded retest still
+reports Iris session-fatal `0x4000003`. Noninteractive sudo authentication is
+unavailable in this environment, so dynamic-debug evidence remains pending.
+The prepared trace command is:
+
+```sh
+sudo tools/capture-iris-dynamic-debug.sh /path/to/driver
+```
+
+It runs native and driver 720p baselines followed by one small driver probe,
+keeps decode clients under the original user, takes the hardware lock, captures
+kernel logs, and restores the exact original print-enabled callsites on exit.
+It stops at the first failure rather than retrying poisoned sessions. Logging
+is limited to the available Qualcomm Iris callsites; deeper HFI payload tracing
+may still require kernel instrumentation.

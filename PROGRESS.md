@@ -25,7 +25,12 @@ short and update it whenever a task starts, finishes, or gets blocked.
   metadata remains necessary for full-stream parity. Strict GL missing-frame
   coverage and browser throughput stay in the parallel top-down lane. H.264,
   HEVC/Main10, and VP9 4K correctness and 4K H.264 churn are verified below.
-  Hardware lease is released; coordinate future runs using
+  Small H.264 follow-up: hardware probe complete; lease released; a hardening guard in
+  `poll.rs` rejected Iris's empty ERROR-marked SOURCE_CHANGE completion
+  before existing marker handling could run. Restrict ERROR rejection to
+  nonempty pixels; empty completions still follow drain/source-change/fatal
+  classification. Leave this integration hunk with the queue owner.
+  Coordinate future runs using
   `/tmp/libva-v4l2-hardware.lock` and this file. Integration note for the queue
   hardening owner: preserve `setup.rs`'s provisional Main10 NV12 exception;
   final P010 is validated before STREAMON. The temporary borrow-check fix in
@@ -1092,6 +1097,17 @@ short and update it whenever a task starts, finishes, or gets blocked.
   deadlock; shell syntax still passes, with hardware validation pending.
 
 ## Known blockers
+
+- Small H.264 follow-up (codex, 2026-10-01): the PPS correction closes 4K
+  correctness but not `bframes-240p`. Latest bounded probe on
+  `/tmp/libva-v4l2-quality-small-20261001` still reports five session-fatal
+  `0x4000003`, zero system-fatal faults; log
+  `/tmp/libva-v4l2-small-fixed-20261001.log`. Noninteractive sudo requires
+  authentication, so no dynamic-debug flags were modified. Prepared
+  `tools/capture-iris-dynamic-debug.sh` for the root trace, with callsite
+  restoration and decoder execution as the original user. Source-change
+  empty ERROR completions must reach the marker handling in the shared queue
+  hardening branch; nonempty damaged pixels remain rejected.
 
 - Phase 3 zero-copy export produces ZERO decoded frames (claude/opus agent,
   2026-09-19, on committed c15992c+e0ddcd9): `verify-resolution-churn.sh` times
