@@ -13,6 +13,11 @@ driver_dir="${1:-/tmp/libva-v4l2-rust-driver}"
 sample="${V4L2_VA_SAMPLE:-/home/mq/tmp/vaatest/test_720p.mp4}"
 drm_device="${V4L2_VA_DRM_DEVICE:-/dev/dri/renderD128}"
 work_dir="${V4L2_VA_CHURN_DIR:-/tmp/libva-v4l2-churn}"
+cut_frames="${V4L2_VA_CHURN_CUT_FRAMES:-60}"
+if [[ ! "$cut_frames" =~ ^[1-9][0-9]*$ ]]; then
+    echo "session-churn: fail reason=invalid_cut_frames value=$cut_frames"
+    exit 1
+fi
 gst_env=(GST_VA_ALL_DRIVERS=1 GST_VAAPI_ALL_DRIVERS=1)
 reference_md5="$work_dir/reference.md5"
 
@@ -94,7 +99,7 @@ check() { # <label> — full decode + parity for the round
 # 2. mpv mid-stream cut (leaves frames in flight) x3, each followed by GStreamer.
 for i in 1 2 3; do
     timeout 90s env LIBVA_DRIVERS_PATH="$driver_dir" \
-        mpv --hwdec=vaapi-copy --vo=null --ao=null --frames=60 "$sample" \
+        mpv --hwdec=vaapi-copy --vo=null --ao=null --frames="$cut_frames" "$sample" \
         >"$work_dir/mpv-$i.log" 2>&1
     mpv_status=$?
     run_gst_decode "$work_dir/gst-$i.log"

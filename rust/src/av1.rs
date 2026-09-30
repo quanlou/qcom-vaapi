@@ -1,43 +1,19 @@
-//! AV1 access-unit synthesis for the stateful V4L2 decoder.
+//! AV1 OBU assembly for the stateful V4L2 decoder.
 //!
-//! AV1 uses OBU (Open Bitstream Unit) framing rather than H.264/HEVC's
-//! Annex-B start codes. VA-API delivers picture parameters and per-tile
-//! payloads separately (`VADecPictureParameterBufferAV1` +
-//! `VASliceDataBufferAV1`), so before iris can decode a frame the driver
-//! must rebuild:
+//! VA supplies picture parameters and tile payloads separately. This module
+//! writes sequence and frame headers and wraps those payloads in OBUs.
+//! Bit-level framing, sequence syntax, and frame syntax have separate owners.
 //!
-//!   1. Temporal Delimiter OBU (`obu_type = 2`, no payload)
-//!   2. Sequence Header OBU (`obu_type = 1`, on keyframes)
-//!   3. Frame OBU (`obu_type = 6`, uncompressed_header + tile_group_obu
-//!      wrapping the tile payload)
-//!
-//! This module owns the bit-level writers (OBU header, LEB128 size, byte-
-//! aligned bit stream) plus the higher-level syntax helpers used by the
-//! frame assembler. Callers stay in `rust/src/codec/raw.rs`.
-//!
-//! Kept scope: this file implements the bit-writer + OBU framing primitives
-//! with unit coverage. The sequence syntax writer lives in `synth.rs` and
-//! the uncompressed_header (frame) syntax writer in `frame.rs`; both are
-//! pinned byte-exact against the real libsvtav1 sample. The advertisement
-//! in `rust/src/config.rs` stays gated on both V4L2 OUTPUT-format
-//! enumeration AND a passing native (or software) parity sample.
+//! The VA adapter in `codec/raw/av1.rs` still lacks authoritative reference
+//! refresh flags and some sequence fields. The path therefore requires an
+//! explicit experimental opt-in until full-stream parity is established.
 
-pub(crate) mod bitstream;
-pub(crate) mod frame;
-pub(crate) mod synth;
+mod bitstream;
+mod frame;
+mod synth;
 
-// Re-exports are pre-wired for the follow-up integration in `codec/raw.rs`
-// that emits TD + Sequence Header + Frame OBU around each AV1 access unit.
-// Keeping them here at introduction time means the AV1 lane can hook in
-// without shuffling paths; #[allow] silences the interim "unused" warning.
-#[allow(unused_imports)]
-pub(crate) use bitstream::{BitWriter, ObuType, ObuWriter, leb128_size, write_leb128};
-#[allow(unused_imports)]
+pub(crate) use bitstream::{BitWriter, ObuWriter};
 pub(crate) use frame::{
-    Av1SynthError, FrameHeaderInput, FrameType, synthesize_frame_obu,
-    synthesize_uncompressed_header,
+    FrameHeaderInput, FrameType, synthesize_frame_obu, synthesize_uncompressed_header,
 };
-#[allow(unused_imports)]
-pub(crate) use synth::{
-    ColorDescription, SeqProfile, SequenceHeaderInput, synthesize_sequence_header,
-};
+pub(crate) use synth::{SeqProfile, SequenceHeaderInput, synthesize_sequence_header};

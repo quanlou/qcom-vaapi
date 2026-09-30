@@ -21,6 +21,16 @@ short and update it whenever a task starts, finishes, or gets blocked.
 
 ## Active task
 
+- Bottom-up next task (codex, 2026-10-01): AV1 authoritative refresh/sequence
+  metadata remains necessary for full-stream parity. Strict GL missing-frame
+  coverage and browser throughput stay in the parallel top-down lane. H.264,
+  HEVC/Main10, and VP9 4K correctness and 4K H.264 churn are verified below.
+  Hardware lease is released; coordinate future runs using
+  `/tmp/libva-v4l2-hardware.lock` and this file. Integration note for the queue
+  hardening owner: preserve `setup.rs`'s provisional Main10 NV12 exception;
+  final P010 is validated before STREAMON. The temporary borrow-check fix in
+  `capture.rs` is also part of the parallel owner's working changes.
+
 - Post-merge production hardening / agent split (codex agent, 2026-09-20): continue on `main` after merging Phase 4/5 at `fd2987b`. Phase 4 is complete for the covered gates: H.264 sample-1/30/full, mixed-resolution CPU-copy, long playback, seek stress, and repeated-open lifecycle all have passing evidence. Phase 5 is complete for HEVC Main, HEVC Main10, and VP9 Profile 0; AV1 remains intentionally hidden until the missing OBU synthesis exists.
 
 - Bottom-up AV1 lane (codex agent, 2026-09-20): work from the existing raw AV1
@@ -102,6 +112,36 @@ short and update it whenever a task starts, finishes, or gets blocked.
   session.
 
 ## Completed recently
+
+- Bottom-up quality fixes (codex, 2026-10-01): corrected AV1 quantizer values,
+  restoration enums, hidden-reference materialization, integer-motion flag
+  syntax, and 128x128 restoration shift syntax; added a shadow-reference guard
+  and experimental profile opt-in. Moved VA mapping out of `codec/raw.rs`
+  and split the 1,300-line AV1 frame writer into types/header assembly,
+  syntax helpers, and fixture tests. Fixed H.264's encoder-specific PPS
+  reference default; original 4K PPS is pinned as a fixture. HEVC tile counts
+  and dimensions now reject malformed layouts before synthesis.
+  - `cargo test`: 164 pass; strict clippy and formatting pass.
+  - `tools/verify-host-stress.sh /tmp/libva-v4l2-host-stress-fixed-20261001`:
+    host stress pass; copied parallel suite 168 pass. Closes the audit's
+    excessive-HEVC-tile-count failure.
+  - `tools/verify-4k-decode.sh` with each of h264/hevc/hevc10/vp9:
+    3840x2160 1/30/full (60) frame reference parity and clean kernel windows.
+    Artifact `/tmp/libva-v4l2-quality-integrated-20261001`; logs
+    `/tmp/libva-v4l2-4k/{h264,hevc,hevc10,vp9}`. Hardware output/download is
+    required, so software fallback cannot pass. Main10 uses software P010
+    reference; the other three use native references.
+  - Same artifact: experimental codec expansion 4/4 at 30 frames, logs
+    `/tmp/libva-v4l2-quality-codecs-integrated-20261001`; 4K H.264 churn
+    `pass=7 fail=0` with 30-frame playback cuts and kills, logs
+    `/tmp/libva-v4l2-4k-churn-20261001`. Earlier 720p churn also 7/7.
+  - Full baseline `/tmp/libva-v4l2-quality-final-matrix-20261001.log`
+    passes required H.264 parity, then FAILS strict GL coverage
+    (`missing=1 tolerated=0`). This remains a release blocker, not a pass.
+  - AV1 full stream is still blocked: original trace has 43 refresh-flag
+    disagreements with the heuristic, first at order hint 64. Keep gated
+    until authoritative metadata exists. See `docs/10-quality-validation.md`.
+
 
 - AV1 uncompressed_header writer landed, byte-exact (claude agent, 2026-09-20):
   new `rust/src/av1/frame.rs` writes spec 5.9.1 `uncompressed_header()` (all

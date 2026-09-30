@@ -41,6 +41,7 @@ static ADVERTISED_PROFILES: OnceLock<&'static [VAProfile]> = OnceLock::new();
 fn advertised_profiles_from(
     output_fourccs: &[u32],
     capture_fourccs: &[u32],
+    experimental_av1: bool,
 ) -> &'static [VAProfile] {
     let mut profiles: Vec<VAProfile> = Vec::new();
     if output_fourccs.contains(&V4L2_PIX_FMT_H264) {
@@ -55,7 +56,8 @@ fn advertised_profiles_from(
     if output_fourccs.contains(&V4L2_PIX_FMT_VP9) {
         profiles.push(VAProfile::VAProfileVP9Profile0);
     }
-    if output_fourccs.contains(&V4L2_PIX_FMT_AV1) {
+    // AV1 keyframes match, but inter-frame parity remains unresolved.
+    if experimental_av1 && output_fourccs.contains(&V4L2_PIX_FMT_AV1) {
         profiles.push(VAProfile::VAProfileAV1Profile0);
     }
     if profiles.is_empty() {
@@ -71,6 +73,7 @@ pub(crate) fn advertised_profiles() -> &'static [VAProfile] {
         advertised_profiles_from(
             &crate::v4l2::enumerate_output_fourccs(),
             &crate::v4l2::enumerate_capture_fourccs(),
+            std::env::var("V4L2_VA_EXPERIMENTAL_AV1").is_ok_and(|value| value == "1"),
         )
     })
 }
@@ -440,24 +443,41 @@ mod tests {
             V4L2_PIX_FMT_VP9,
             crate::v4l2::V4L2_PIX_FMT_AV1,
         ];
-        let profiles = advertised_profiles_from(&all, &[V4L2_PIX_FMT_P010]);
-        assert_eq!(profiles.len(), 7);
-        // H.264 stays first and unchanged; validated HEVC, VP9, and AV1 follow.
+        let profiles = advertised_profiles_from(&all, &[V4L2_PIX_FMT_P010], false);
+        assert_eq!(profiles.len(), 6);
+        // Validated HEVC and VP9 follow H.264; AV1 needs explicit opt-in.
         assert_eq!(&profiles[..3], &SUPPORTED_PROFILES);
         assert_eq!(profiles[3], VAProfile::VAProfileHEVCMain);
         assert_eq!(profiles[4], VAProfile::VAProfileHEVCMain10);
         assert_eq!(profiles[5], VAProfile::VAProfileVP9Profile0);
-        assert_eq!(profiles[6], VAProfile::VAProfileAV1Profile0);
+        assert!(!profiles.contains(&VAProfile::VAProfileAV1Profile0));
 
-        let no_p010 = advertised_profiles_from(&all, &[]);
+        let no_p010 = advertised_profiles_from(&all, &[], false);
         assert!(!no_p010.contains(&VAProfile::VAProfileHEVCMain10));
+    }
+
+    #[test]
+    fn experimental_av1_requires_opt_in_and_kernel_support() {
+        let formats = [V4L2_PIX_FMT_H264, V4L2_PIX_FMT_AV1];
+        assert!(
+            !advertised_profiles_from(&formats, &[], false)
+                .contains(&VAProfile::VAProfileAV1Profile0)
+        );
+        assert!(
+            advertised_profiles_from(&formats, &[], true)
+                .contains(&VAProfile::VAProfileAV1Profile0)
+        );
+        assert!(
+            !advertised_profiles_from(&[V4L2_PIX_FMT_H264], &[], true)
+                .contains(&VAProfile::VAProfileAV1Profile0)
+        );
     }
 
     #[test]
     fn codec_table_advertises_only_v4l2_enumerated_codecs() {
         // Only VP9 exposed: no H.264, no HEVC, no AV1, and 10-bit VP9 stays
         // out of scope.
-        let vp9_only = advertised_profiles_from(&[V4L2_PIX_FMT_VP9], &[V4L2_PIX_FMT_P010]);
+        let vp9_only = advertised_profiles_from(&[V4L2_PIX_FMT_VP9], &[V4L2_PIX_FMT_P010], false);
         assert_eq!(vp9_only, &[VAProfile::VAProfileVP9Profile0]);
         assert!(!vp9_only.contains(&VAProfile::VAProfileH264Main));
         assert!(!vp9_only.contains(&VAProfile::VAProfileHEVCMain));
@@ -467,10 +487,13 @@ mod tests {
         // An enumeration with only unrecognized fourccs falls back to the
         // historical H.264-only table instead of advertising nothing.
         assert_eq!(
-            advertised_profiles_from(&[0x1234_5678], &[V4L2_PIX_FMT_P010]),
+            advertised_profiles_from(&[0x1234_5678], &[V4L2_PIX_FMT_P010], false),
             SUPPORTED_PROFILES.as_slice()
         );
-        assert_eq!(advertised_profiles_from(&[], &[]), SUPPORTED_PROFILES);
+        assert_eq!(
+            advertised_profiles_from(&[], &[], false),
+            SUPPORTED_PROFILES
+        );
     }
 
     #[test]
@@ -491,7 +514,7 @@ mod tests {
             V4L2_PIX_FMT_VP9,
             crate::v4l2::V4L2_PIX_FMT_AV1,
         ];
-        let table = advertised_profiles_from(&all, &[V4L2_PIX_FMT_P010]);
+        let table = advertised_profiles_from(&all, &[V4L2_PIX_FMT_P010], false);
         for profile in never {
             assert!(!table.contains(&profile));
             assert!(!supported_profile(profile));

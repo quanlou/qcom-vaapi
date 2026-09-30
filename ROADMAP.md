@@ -409,10 +409,30 @@ required SPS-resident syntax is not available from VA buffers. VP9 Profile 0
 forwards complete frame payloads and matches native `vp9_v4l2m2m` for 30
 frames.
 
-AV1 remains hidden: VA provides tile payloads, but Iris needs temporal
-delimiter, sequence, and frame OBU headers. The conformance sample has a
-41-byte header prefix before the first tile, which identifies the remaining
-synthesis work.
+AV1 is experimental: sequence/frame OBU synthesis and 30-frame reference
+parity now work, including retained hidden references. Full-stream refresh
+metadata is still missing from the VA contract. See Quality closure below
+and `docs/10-quality-validation.md`; full-stream parity remains mandatory.
+
+## Quality closure (2026-10-01)
+
+Passing a baseline gate does not close a known correctness or reliability gap.
+Production acceptance still requires the small H.264 cases, strict GL frame
+coverage, AV1 full-stream reference parity, and sustained 4K browser playback.
+
+- H.264, HEVC Main/Main10, and VP9 4K correctness now pass
+  `tools/verify-4k-decode.sh`: 3840x2160,
+  1/30/full (60) frames byte-exact against native or software references, no Iris
+  faults. Fixed an encoder-specific PPS reference-count assumption. This
+  does not establish 4K60 throughput or browser performance.
+- AV1 sequence/frame writers exist and experimental 30-frame parity passes
+  after restoration enum conversion and hidden-surface output corrections.
+  Full-stream refresh inference still fails: VA omits refresh flags and some
+  sequence syntax. AV1 is gated behind `V4L2_VA_EXPERIMENTAL_AV1=1`; inferred
+  reference maps are checked before submission. The remaining work requires
+  authoritative header information, not more encoder-specific guesses.
+- The strict GL gate currently reports one missing frame with zero tolerance.
+  Keep this as an open quality blocker; preserve the strict criterion.
 
 ## Phased plan
 
@@ -501,10 +521,9 @@ Exit criteria:
   rejected.
 - VP9 Profile 0: complete-frame forwarding, coded-format setup, and 30-frame
   native V4L2 parity are implemented.
-- AV1 remains hidden: VA supplies tile payloads, while Iris needs the omitted
-  temporal, sequence, and frame OBU headers. The conformance sample has a
-  41-byte header prefix before the first tile, establishing the remaining
-  synthesis work.
+- AV1 OBU synthesis and experimental 30-frame parity are implemented.
+  Full-stream parity and authoritative refresh/sequence metadata remain open;
+  keep production advertisement gated.
 
 ## Immediate next tasks
 

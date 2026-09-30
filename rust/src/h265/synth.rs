@@ -43,6 +43,7 @@ pub(crate) fn synthesize_parameter_sets(
             "HEVC scaling lists or long-term references",
         ));
     }
+    validate_tiles(pp)?;
     let profile_idc = if pp.bit_depth_luma_minus8 > 0 { 2 } else { 1 };
     let reorder = if pic.NoPicReorderingFlag() != 0 {
         0
@@ -64,6 +65,40 @@ pub(crate) fn synthesize_parameter_sets(
     headers.extend_from_slice(&sps);
     headers.extend_from_slice(&pps);
     Ok(headers)
+}
+
+// The last tile dimension is inferred. Explicit dimensions must fit both
+// the fixed VA arrays and the coded picture, leaving a nonempty final tile.
+fn validate_tiles(pp: &VAPictureParameterBufferHEVC) -> Result<(), Error> {
+    if unsafe { pp.pic_fields.bits }.tiles_enabled_flag() == 0 {
+        return Ok(());
+    }
+    let columns = usize::from(pp.num_tile_columns_minus1);
+    let rows = usize::from(pp.num_tile_rows_minus1);
+    if columns > pp.column_width_minus1.len() || rows > pp.row_height_minus1.len() {
+        return Err(Error::OutOfRange("HEVC tile counts exceed VA arrays"));
+    }
+    let log2_ctb = u32::from(pp.log2_min_luma_coding_block_size_minus3)
+        + 3
+        + u32::from(pp.log2_diff_max_min_luma_coding_block_size);
+    if !(4..=6).contains(&log2_ctb) {
+        return Err(Error::OutOfRange("HEVC coding tree block size"));
+    }
+    let ctb_size = 1u32 << log2_ctb;
+    let picture_columns = u32::from(pp.pic_width_in_luma_samples).div_ceil(ctb_size);
+    let picture_rows = u32::from(pp.pic_height_in_luma_samples).div_ceil(ctb_size);
+    let explicit_columns: u32 = pp.column_width_minus1[..columns]
+        .iter()
+        .map(|width| u32::from(*width) + 1)
+        .sum();
+    let explicit_rows: u32 = pp.row_height_minus1[..rows]
+        .iter()
+        .map(|height| u32::from(*height) + 1)
+        .sum();
+    if explicit_columns >= picture_columns || explicit_rows >= picture_rows {
+        return Err(Error::OutOfRange("HEVC tiles exceed coded picture"));
+    }
+    Ok(())
 }
 
 fn write_profile_tier_level(writer: &mut BitWriter, profile_idc: u8, level_idc: u8) {
@@ -254,4 +289,46 @@ fn synthesize_pps(pp: &VAPictureParameterBufferHEVC, pps_id: u32) -> Vec<u8> {
     );
     writer.put(0, 1); // pps_extension_present_flag
     nal(34, writer)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tiled_picture() -> VAPictureParameterBufferHEVC {
+        let mut pp: VAPictureParameterBufferHEVC = unsafe { std::mem::zeroed() };
+        pp.pic_width_in_luma_samples = 3840;
+        pp.pic_height_in_luma_samples = 2160;
+        pp.log2_diff_max_min_luma_coding_block_size = 3;
+        let mut fields = unsafe { pp.pic_fields.bits };
+        fields.set_tiles_enabled_flag(1);
+        pp.pic_fields.bits = fields;
+        pp
+    }
+
+    #[test]
+    fn tile_counts_are_bounded_by_va_storage() {
+        let mut pp = tiled_picture();
+        pp.num_tile_columns_minus1 = pp.column_width_minus1.len() as u8;
+        pp.num_tile_rows_minus1 = pp.row_height_minus1.len() as u8;
+        assert!(synthesize_parameter_sets(&pp, 0).is_ok());
+        pp.num_tile_columns_minus1 += 1;
+        assert!(synthesize_parameter_sets(&pp, 0).is_err());
+        pp.num_tile_columns_minus1 = 0;
+        pp.num_tile_rows_minus1 += 1;
+        assert!(synthesize_parameter_sets(&pp, 0).is_err());
+    }
+
+    #[test]
+    fn explicit_tiles_leave_room_for_the_final_tile() {
+        let mut pp = tiled_picture();
+        pp.num_tile_columns_minus1 = 1;
+        pp.column_width_minus1[0] = 59; // consumes all 60 CTU columns
+        assert!(synthesize_parameter_sets(&pp, 0).is_err());
+        pp.column_width_minus1[0] = 58;
+        assert!(synthesize_parameter_sets(&pp, 0).is_ok());
+        pp.num_tile_rows_minus1 = 1;
+        pp.row_height_minus1[0] = 33; // consumes all 34 CTU rows
+        assert!(synthesize_parameter_sets(&pp, 0).is_err());
+    }
 }

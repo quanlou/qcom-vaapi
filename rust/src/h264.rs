@@ -281,12 +281,11 @@ fn write_pps_rbsp(
 ) -> bool {
     let pic = unsafe { pp.pic_fields.bits };
     let profile_idc = profile_to_idc(profile);
-    let mut l0_default = sp.num_ref_idx_l0_active_minus1;
-    if pp.num_ref_frames >= 3 {
-        l0_default = 2;
-    } else if pp.num_ref_frames > 0 && l0_default >= pp.num_ref_frames {
-        l0_default = pp.num_ref_frames - 1;
-    }
+    // When a slice omits the override flag, VA's active counts are the
+    // original PPS defaults. When it includes the flag, the firmware reads
+    // the explicit counts anyway. Emit the current slice's counts instead of
+    // assuming an encoder-specific default from the DPB size.
+    let l0_default = sp.num_ref_idx_l0_active_minus1;
 
     bw.put_ue(0);
     bw.put_ue(0);
@@ -378,7 +377,8 @@ mod tests {
 
     fn slice() -> VASliceParameterBufferH264 {
         let mut sp: VASliceParameterBufferH264 = zeroed();
-        sp.num_ref_idx_l0_active_minus1 = 0;
+        // Historical header fixtures use three default L0 references.
+        sp.num_ref_idx_l0_active_minus1 = 2;
         sp.num_ref_idx_l1_active_minus1 = 0;
         sp
     }
@@ -393,6 +393,40 @@ mod tests {
 
     fn bytes_from_array<const N: usize>(data: [u8; N]) -> Vec<u8> {
         data.to_vec()
+    }
+
+    #[test]
+    fn pps_matches_original_4k_x264_sample() {
+        let mut pp = set_common(240, 135);
+        pp.pic_init_qp_minus26 = -4;
+        let mut fields = unsafe { pp.pic_fields.bits };
+        fields.set_weighted_pred_flag(1);
+        fields.set_weighted_bipred_idc(2);
+        fields.set_transform_8x8_mode_flag(1);
+        pp.pic_fields.bits = fields;
+        let mut sp = slice();
+        sp.num_ref_idx_l0_active_minus1 = 0;
+        // Original Annex-B PPS from quality4k/h264-2160p.mp4.
+        assert_eq!(
+            synth_pps(&pp, &sp, VAProfile::VAProfileH264High).unwrap(),
+            bytes("0000000168ef84f2c0")
+        );
+    }
+
+    #[test]
+    fn pps_reference_defaults_follow_slice_counts_not_dpb_size() {
+        let pp = set_common(240, 135);
+        let mut sp = slice();
+        sp.num_ref_idx_l0_active_minus1 = 0;
+        assert_eq!(
+            synth_pps(&pp, &sp, VAProfile::VAProfileH264Main).unwrap(),
+            bytes("0000000168ee3c80")
+        );
+        sp.num_ref_idx_l0_active_minus1 = 2;
+        assert_eq!(
+            synth_pps(&pp, &sp, VAProfile::VAProfileH264Main).unwrap(),
+            bytes("0000000168eb8f20")
+        );
     }
 
     #[test]

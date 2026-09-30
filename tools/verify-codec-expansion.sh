@@ -101,13 +101,14 @@ first_frame_line() { # <framemd5 file>
 # Decode one bounded leg through the driver under the kernel-log wrapper.
 # Sets leg_status; caller captures it immediately.
 leg_status=0
-decode_leg() { # <frames> <out.md5> <log> <file>
+decode_leg() { # <frames> <out.md5> <log> <file> <download format>
     set +e
     timeout 120s "$kernel_tool" -- \
         env V4L2_VA_DEBUG=1 LIBVA_DRIVERS_PATH="$driver_dir" \
         ffmpeg -y -nostdin -hide_banner -v error \
-        -hwaccel vaapi -hwaccel_device "$drm_device" \
-        -i "$4" -map 0:v:0 -frames:v "$1" -f framemd5 "$2" \
+        -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device "$drm_device" \
+        -i "$4" -map 0:v:0 -frames:v "$1" \
+        -vf "hwdownload,format=$5" -f framemd5 "$2" \
         > "$3" 2>&1
     leg_status=$?
     set -e
@@ -152,13 +153,20 @@ run_codec() { # <name> <profile> <file> <pattern> <reference decoder> <reference
         return 2
     fi
 
+    local reference_count
+    reference_count="$(awk '!/^#/ && NF {n++} END {print n+0}' "$reference_md5")"
+    if [[ "$reference_count" != "$codec_frames" ]]; then
+        echo "codec_$name=fail reason=reference_frame_count decoded=$reference_count expected=$codec_frames log=$reference_log"
+        return 1
+    fi
+
     # Leg 1: single-frame self-reference through the driver.
-    decode_leg 1 "$ref_md5" "$ref_log" "$file"
+    decode_leg 1 "$ref_md5" "$ref_log" "$file" "${reference_pix_fmt:-nv12}"
     ref_status=$leg_status
     read -r ref_session ref_system <<< "$(kernel_counts "$ref_log")"
 
     # Leg 2: N-frame decode through the driver.
-    decode_leg "$codec_frames" "$n_md5" "$n_log" "$file"
+    decode_leg "$codec_frames" "$n_md5" "$n_log" "$file" "${reference_pix_fmt:-nv12}"
     n_status=$leg_status
     read -r n_session n_system <<< "$(kernel_counts "$n_log")"
 
