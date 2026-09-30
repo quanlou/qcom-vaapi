@@ -52,11 +52,13 @@ for leg in 1 30 full; do
     if [[ "$leg" != full ]]; then
         frame_args=(-frames:v "$leg")
     fi
+    # The rawvideo checksum encoder otherwise auto-threads across frames,
+    # retaining a large backlog of downloaded 4K frames unrelated to decode.
     reference="$work_dir/native-$leg.md5"
     actual="$work_dir/driver-$leg.md5"
     timeout -k 5s 120s "$repo_root/tools/capture-iris-kernel-log.sh" -- ffmpeg -y -nostdin -hide_banner -v error \
         -c:v "$reference_decoder" -i "$sample" -map 0:v:0 "${frame_args[@]}" "${reference_args[@]}" \
-        -f framemd5 "$reference" > "$work_dir/native-$leg.log" 2>&1 || {
+        -threads:v 1 -f framemd5 "$reference" > "$work_dir/native-$leg.log" 2>&1 || {
         echo "decode_4k=fail leg=$leg reason=native_decode log=$work_dir/native-$leg.log"
         exit 1
     }
@@ -78,7 +80,7 @@ for leg in 1 30 full; do
         /usr/bin/time -f '%e %M' -o "$work_dir/driver-$leg.time" \
         ffmpeg -y -nostdin -hide_banner -v error \
         -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device "$drm_device" "${input_args[@]}" -i "$sample" \
-        -map 0:v:0 "${frame_args[@]}" -vf "hwdownload,format=$format" -f framemd5 "$actual" \
+        -map 0:v:0 "${frame_args[@]}" -vf "hwdownload,format=$format" -threads:v 1 -f framemd5 "$actual" \
         > "$work_dir/driver-$leg.log" 2>&1 || {
         echo "decode_4k=fail leg=$leg reason=driver_decode log=$work_dir/driver-$leg.log"
         exit 1

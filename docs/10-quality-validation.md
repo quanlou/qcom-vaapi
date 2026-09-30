@@ -129,3 +129,29 @@ output, disables mpv's software fallback, and verifies hardware-decoding logs.
 It requires kill legs to actually be interrupted and does not hide a failed
 GStreamer run with a retry. Existing historical 7/7 results remain evidence for
 the older gate; the stricter gate must be rerun before lifecycle closure.
+
+## CPU image-copy follow-up
+
+`vaGetImage` now borrows the immutable published snapshot under the driver
+lock instead of deep-cloning it before the destination copy. This removes one
+full-frame allocation/copy per image read. `vaDeriveImage` still owns a distinct
+mutable image buffer, copying only the declared layout rather than cloning
+unused capture padding. Regression coverage checks visible NV12/P010 pixels,
+padding, snapshot immutability, and mapped-image survival after surface removal.
+Image tests are separated into `rust/src/image/tests.rs`.
+
+The 1.3 GiB benchmark peak is not established as a driver leak. The installed
+FFmpeg rawvideo encoder advertises frame threading, and automatic encoder
+threading can retain a backlog of downloaded frames. The 4K verifier now uses
+one checksum-encoder thread for both reference and driver output so future
+measurements have bounded encoder buffering. The old timing/RSS figures above
+used automatic output threading; do not compare them directly to new figures.
+Fresh 4K throughput/RSS qualification still requires the kernel bounds fix.
+
+After the image changes, 166 Rust tests and strict clippy pass. H.264 1/30/full
+pixels pass and HEVC/Main10/VP9/experimental AV1 30-frame parity passes 4/4.
+The main matrix still fails strict GL (one missing frame), and its native
+single-frame reference also triggered Iris system-fatal `0x5000003` with a
+vb2 warning before its fallback succeeded. The wrapper correctly fails that
+whole window. This is additional evidence that firmware reliability remains
+mandatory work; later successful codec runs do not erase the earlier crash.

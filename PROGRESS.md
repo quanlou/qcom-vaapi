@@ -26,7 +26,7 @@ short and update it whenever a task starts, finishes, or gets blocked.
   coverage and browser throughput stay in the parallel top-down lane. H.264,
   HEVC/Main10, and VP9 4K correctness and 4K H.264 churn are verified below.
   Small H.264 follow-up: bounded probe complete; firmware blocker recorded.
-  Completing: harden kernel-fault and repeated-frame verification; candidate
+  Completed in `6ef214a`: kernel-fault and repeated-frame verification; candidate
   Iris metadata-index patch with an isolated UBSAN reproducer. Claiming
   `capture-iris-kernel-log.sh`, `verify-4k-decode.sh`, standalone quality tests,
   and `verify-session-churn.sh` (its old self-reference and ignored FFmpeg
@@ -34,6 +34,14 @@ short and update it whenever a task starts, finishes, or gets blocked.
   the free-OUTPUT check and could fill every slot before new-frame QBUF.
   Resume before pacing, and skip replay when a fresh keyframe replaces the
   old reference chain. Browser/compositor throughput stays top-down.
+  CPU image-read allocation reduction complete: borrow the published
+  snapshot in `vaGetImage`; copy only the declared layout for independent
+  `vaDeriveImage` storage. Tests moved into `image/tests.rs` and cover NV12,
+  P010, immutable snapshots, and mapped-image lifetime after surface deletion.
+  4K checksum output now uses one rawvideo encoder thread; prior RSS may
+  include the encoder frame backlog and is not evidence of a driver leak.
+  Next: kernel boot validation, strict GL owner fix, authoritative AV1
+  metadata, and fresh bounded-buffer 4K/browser performance measurements.
   A hardening guard in
   `poll.rs` rejected Iris's empty ERROR-marked SOURCE_CHANGE completion
   before existing marker handling could run. Restrict ERROR rejection to
@@ -126,6 +134,18 @@ short and update it whenever a task starts, finishes, or gets blocked.
   session.
 
 ## Completed recently
+
+- CPU image read follow-up (codex, 2026-10-01): removed the redundant
+  full-frame `vaGetImage` clone under the driver lock. Derived images retain
+  independent storage. Rust 166 tests and strict clippy pass; hardware H.264
+  1/30/full pixels pass and codec-expansion parity passes 4/4. Required matrix
+  still FAILS strict GL missing=1; the same window also includes a native
+  one-frame Iris system-fatal plus vb2 warning. Kernel wrapper returns
+  failure despite a successful native fallback. Logs:
+  `/tmp/libva-v4l2-image-borrow-{rust-driver,codec-expansion}-20261001.log`.
+  4K rawvideo checksum output now pins one encoder thread for reproducible
+  memory measurements. No new 4K throughput/RSS claim: installed kernel is
+  still affected by the separately reproduced metadata-index bounds fault.
 
 - Bottom-up quality gate hardening (codex, 2026-10-01): repeated 4K H.264
   output is byte-exact across 600 frames with continuous DTS/PTS, checked

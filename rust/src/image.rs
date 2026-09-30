@@ -15,8 +15,8 @@ pub(crate) use layout::{
 use crate::bindings::*;
 use crate::pixel_format::DecodedFormat;
 use crate::state::{
-    Buffer, DRV_ID_BASE_BUFFER, DRV_ID_BASE_IMAGE, DRV_MAX_DIM, DRV_MIN_DIM, Image, SurfaceState,
-    buffer_index, image_index, surface_index,
+    Buffer, DRV_ID_BASE_BUFFER, DRV_ID_BASE_IMAGE, DRV_MAX_DIM, DRV_MIN_DIM, DriverState, Image,
+    SurfaceState, buffer_index, image_index, surface_index,
 };
 use crate::sync::sync_surface;
 use crate::{err, ok, state_from_ctx};
@@ -165,13 +165,22 @@ pub(crate) unsafe extern "C" fn get_image(
         Ok(g) => g,
         Err(_) => return err(VA_STATUS_ERROR_OPERATION_FAILED),
     };
-    let Some((surf_width, surf_height, surf_state, surf_frame)) = guard.surfaces[surf_idx]
+    // Surfaces and image buffers are disjoint tables. Borrow the immutable
+    // published snapshot while writing the image instead of cloning a whole
+    // decoded frame (about 12 MiB for 4K NV12) under the driver lock.
+    let DriverState {
+        surfaces,
+        images,
+        buffers,
+        ..
+    } = &mut *guard;
+    let Some((surf_width, surf_height, surf_state, surf_frame)) = surfaces[surf_idx]
         .as_ref()
-        .map(|s| (s.width, s.height, s.state, s.frame.clone()))
+        .map(|s| (s.width, s.height, s.state, s.frame.as_ref()))
     else {
         return err(VA_STATUS_ERROR_INVALID_SURFACE);
     };
-    let Some(img) = guard.images[img_idx].as_ref().cloned() else {
+    let Some(img) = images[img_idx].as_ref().cloned() else {
         return err(VA_STATUS_ERROR_INVALID_IMAGE);
     };
     if !region_within(
@@ -190,26 +199,28 @@ pub(crate) unsafe extern "C" fn get_image(
     // AV1 hidden-reference frames complete without display pixels; keep
     // vaGetImage consistent with vaDeriveImage by exposing a zeroed image
     // rather than turning a successful no-output decode into a hard error.
+    let zeroed_frame;
     let (cap, cap_stride, cap_h, frame_format) = if let Some(frame) = surf_frame {
-        (frame.data, frame.stride, frame.height, frame.format)
+        (
+            frame.data.as_slice(),
+            frame.stride,
+            frame.height,
+            frame.format,
+        )
     } else {
-        let format = guard.surfaces[surf_idx]
+        let format = surfaces[surf_idx]
             .as_ref()
             .map(|surface| surface.format)
             .unwrap_or(DecodedFormat::Nv12);
         let stride = aligned_pitch(format, surf_width as u32);
         let height = surf_height as u32;
-        (
-            vec![0; image_data_size(stride, height) as usize],
-            stride,
-            height,
-            format,
-        )
+        zeroed_frame = vec![0; image_data_size(stride, height) as usize];
+        (zeroed_frame.as_slice(), stride, height, format)
     };
     let Some(buf_idx) = buffer_index(img.image.buf) else {
         return err(VA_STATUS_ERROR_INVALID_BUFFER);
     };
-    let Some(buf) = guard.buffers[buf_idx].as_mut() else {
+    let Some(buf) = buffers[buf_idx].as_mut() else {
         return err(VA_STATUS_ERROR_INVALID_BUFFER);
     };
     // vaGetImage writes the destination image. Do not race a client that still
@@ -225,7 +236,7 @@ pub(crate) unsafe extern "C" fn get_image(
     }
     copy_semiplanar_region(
         frame_format,
-        &cap,
+        cap,
         cap_stride,
         cap_h,
         &mut buf.data,
@@ -263,7 +274,7 @@ pub(crate) unsafe extern "C" fn derive_image(
     };
     let Some((surf_width, surf_height, surf_state, surf_frame)) = guard.surfaces[surf_idx]
         .as_ref()
-        .map(|s| (s.width, s.height, s.state, s.frame.clone()))
+        .map(|s| (s.width, s.height, s.state, s.frame.as_ref()))
     else {
         return err(VA_STATUS_ERROR_INVALID_SURFACE);
     };
@@ -285,7 +296,7 @@ pub(crate) unsafe extern "C" fn derive_image(
         cap_h = frame.height;
         frame_format = frame.format;
         let data_size = image_data_size(pitch, cap_h);
-        data = frame.data.into_iter().take(data_size as usize).collect();
+        data = frame.data[..frame.data.len().min(data_size as usize)].to_vec();
     }
 
     let data_size = image_data_size(pitch, cap_h);
@@ -327,71 +338,4 @@ pub(crate) unsafe extern "C" fn derive_image(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::state::{Buffer, DRV_ID_BASE_BUFFER, DriverBox, Image};
-    use std::ffi::c_void;
-
-    #[test]
-    fn image_destroy_waits_for_mapped_backing_buffer() {
-        let raw = Box::into_raw(Box::new(DriverBox::new()));
-        let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
-        ctx.pDriverData = raw as *mut c_void;
-        let state = unsafe { &*raw };
-        let image_id = DRV_ID_BASE_IMAGE;
-        let buffer_id = DRV_ID_BASE_BUFFER;
-        state.lock.lock().unwrap().buffers[0] = Some(Buffer {
-            owner: VA_INVALID_ID,
-            type_: VABufferType::VAImageBufferType,
-            elem_size: 16,
-            num_elements: 1,
-            data: vec![0; 16],
-            mapped: true,
-        });
-        state.lock.lock().unwrap().images[0] = Some(Image {
-            image: make_image(
-                image_id,
-                buffer_id,
-                16,
-                16,
-                aligned_pitch(DecodedFormat::Nv12, 16),
-                16,
-                image_format(DecodedFormat::Nv12),
-            ),
-        });
-
-        assert_eq!(
-            unsafe { destroy_image(&mut ctx, image_id) },
-            VA_STATUS_ERROR_OPERATION_FAILED as VAStatus
-        );
-        assert!(state.lock.lock().unwrap().images[0].is_some());
-
-        state.lock.lock().unwrap().buffers[0]
-            .as_mut()
-            .unwrap()
-            .mapped = false;
-        assert_eq!(
-            unsafe { destroy_image(&mut ctx, image_id) },
-            VA_STATUS_SUCCESS as VAStatus
-        );
-        let guard = state.lock.lock().unwrap();
-        assert!(guard.images[0].is_none());
-        assert!(guard.buffers[0].is_none());
-        drop(guard);
-        unsafe { drop(Box::from_raw(raw)) };
-    }
-
-    #[test]
-    fn derive_image_rejects_null_output_before_syncing() {
-        let raw = Box::into_raw(Box::new(DriverBox::new()));
-        let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
-        ctx.pDriverData = raw as *mut c_void;
-
-        assert_eq!(
-            unsafe { derive_image(&mut ctx, VA_INVALID_ID, std::ptr::null_mut()) },
-            VA_STATUS_ERROR_INVALID_PARAMETER as VAStatus
-        );
-
-        unsafe { drop(Box::from_raw(raw)) };
-    }
-}
+mod tests;
