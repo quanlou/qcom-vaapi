@@ -226,6 +226,24 @@ impl V4l2Session {
         if !self.eos && !self.draining {
             return Ok(());
         }
+        // START destroys the decoder's references on this firmware. Check
+        // the complete published prefix before changing the device state;
+        // filtering out missing pictures can silently change later pixels.
+        let replay = if keyframe {
+            Vec::new()
+        } else if let Some(prefix) =
+            super::replay::drain_prefix(&self.replay_history, &self.published_timestamps)
+        {
+            prefix.to_vec()
+        } else {
+            self.abandoned = true;
+            if debug_enabled() {
+                eprintln!(
+                    "msm_drv_video_rs: drain resume lacks a complete keyframe reference chain"
+                );
+            }
+            return Err(());
+        };
         let mut cmd: v4l2_decoder_cmd = zeroed();
         cmd.cmd = V4L2_DEC_CMD_START;
         if xioctl(
@@ -260,12 +278,7 @@ impl V4l2Session {
         // already-published prefix before accepting the next client frame.
         // Replayed frames have no FIFO owner and are discarded at dequeue;
         // their only purpose is to reconstruct the decoder reference state.
-        let replay: Vec<ReplayChunk> = self
-            .replay_history
-            .iter()
-            .filter(|chunk| self.published_timestamps.contains(&chunk.timestamp))
-            .cloned()
-            .collect();
+
         for chunk in &replay {
             let mut attempts = 0;
             while self
@@ -450,6 +463,38 @@ mod tests {
         let fd = unsafe { open(path.as_ptr(), O_RDWR, 0) };
         assert!(fd >= 0, "could not open /dev/null for the sync-drain test");
         fd
+    }
+
+    #[test]
+    fn drain_resume_rejects_the_real_history_limit_before_starting_the_device() {
+        let mut session = streaming_session_with_pending_fifo(null_fd());
+        session.fifo.clear();
+        for timestamp in 0..65 {
+            session.remember_replay_chunk(&[1], timestamp, timestamp == 0, Some(0), true);
+            session.published_timestamps.push_back(timestamp);
+        }
+        assert_eq!(session.replay_history.len(), 64);
+        assert!(!session.replay_history[0].keyframe);
+        session.draining = true;
+        assert!(session.maybe_resume_after_drain(false).is_err());
+        assert!(
+            session.abandoned,
+            "missing reference history must latch failure"
+        );
+        assert!(
+            session.draining,
+            "do not clear drain state without a valid START"
+        );
+    }
+
+    #[test]
+    fn a_fresh_keyframe_does_not_require_old_reference_history() {
+        let mut session = streaming_session_with_pending_fifo(null_fd());
+        session.draining = true;
+        // /dev/null rejects START, but the empty old history must not abandon
+        // the session before that ioctl: this new picture replaces references.
+        assert!(session.maybe_resume_after_drain(true).is_err());
+        assert!(!session.abandoned);
     }
 
     #[test]

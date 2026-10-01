@@ -9,6 +9,7 @@ mod debug;
 mod poll;
 mod queue;
 mod recovery;
+mod replay;
 mod setup;
 mod submit;
 mod teardown;

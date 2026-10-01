@@ -569,3 +569,14 @@ pass 4,096 inputs. Production closure requires booting the matching patched
 kernel and rerunning long 4K/lifecycle checks, not merely waiting for warnings
 to stop repeating. The kernel wrapper now fails on memory faults/warnings.
 The tightened churn gate passes 7/7; strict GL still fails one missing frame.
+
+### Complete reference replay (2026-10-01)
+
+Drain/rebuild guards now reject truncated GOPs, missing published dependencies,
+and FIFO/OUTPUT byte or ownership mismatches before changing decoder state.
+Hidden reference pictures are preserved in the replay prefix. This closes an
+unsafe replay path but leaves a mandatory reliability item: retain a bounded
+complete GOP and restore consumed reference pictures during firmware rebuild.
+The existing 64-frame history cannot support arbitrary long-GOP recovery.
+Host validation passes; hardware matrix/churn are pending because decoder and
+render nodes are absent in the current execution environment.

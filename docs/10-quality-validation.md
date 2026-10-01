@@ -155,3 +155,29 @@ single-frame reference also triggered Iris system-fatal `0x5000003` with a
 vb2 warning before its fallback succeeded. The wrapper correctly fails that
 whole window. This is additional evidence that firmware reliability remains
 mandatory work; later successful codec runs do not erase the earlier crash.
+
+## Reference-chain recovery guard
+
+Drain resume now requires a retained keyframe and the complete published
+reference prefix in decode order. Hidden reference access units remain in the
+prefix even when they have no display output; a missing displayed dependency
+fails before `DECODER_CMD START`. A fresh incoming keyframe can reset references
+without replaying the old chain.
+
+Firmware rebuild additionally requires queued OUTPUT to contain the entire
+retained GOP, with bytes, timestamps, surface ownership, and output expectations
+matching every pending record. SPS/PPS alone cannot restore reference pictures
+already consumed by the failed decoder. An incomplete queue now returns a
+decoding error before reopening the device rather than risking incorrect pixels.
+
+The 64-access-unit history limit remains a reliability constraint. These checks
+prevent unsafe replay; they do not implement long-GOP recovery. Production
+closure still requires bounded storage of a complete reference chain and a
+rebuild that restores consumed references before publishing pending pictures.
+
+Validation of the isolated staged source: 169 Rust tests with 16 threads,
+strict clippy, and formatting passed. The required matrix and churn were
+attempted but stopped at hardware initialization: `/dev/dri/renderD128` and
+`/dev/video16` are absent in this execution environment. No hardware pass is
+claimed for these guards. Rerun both verifiers on the decoder host before
+marking queue/recovery validation complete.

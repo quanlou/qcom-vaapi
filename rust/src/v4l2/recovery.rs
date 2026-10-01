@@ -68,6 +68,16 @@ impl V4l2Session {
             }
             return Err(());
         }
+        // Parameter sets do not restore decoded reference pictures. The
+        // current rebuild can replay only queued OUTPUT, so it is safe only
+        // when that queue contains the complete retained GOP.
+        if !super::replay::rebuild_is_complete(&self.replay_history, &fifo_tail, &chunks) {
+            self.abandoned = true;
+            if debug_enabled() {
+                eprintln!("msm_drv_video_rs: rebuild lacks a queued keyframe reference chain");
+            }
+            return Err(());
+        }
         let headers = std::mem::take(&mut self.headers);
         let (w, h) = (self.out.width as i32, self.out.height as i32);
 
@@ -190,7 +200,7 @@ impl V4l2Session {
             }
             match self.qbuf_output_bytes(
                 &payload,
-                false,
+                i == 0,
                 pending.timestamp,
                 Some(pending.surface),
                 pending.expects_output,

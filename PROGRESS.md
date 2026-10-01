@@ -40,6 +40,15 @@ short and update it whenever a task starts, finishes, or gets blocked.
   P010, immutable snapshots, and mapped-image lifetime after surface deletion.
   4K checksum output now uses one rawvideo encoder thread; prior RSS may
   include the encoder frame backlog and is not evidence of a driver leak.
+  Reference-chain guard implemented in `v4l2/replay.rs` and `submit.rs`;
+  only the early validation and first-keyframe flag hunks in `recovery.rs`
+  are owned here. Reject incomplete GOPs and FIFO/payload mismatches before
+  START/reopen; preserve hidden reference pictures in decode order.
+  Isolated staged source: 169 Rust tests, strict clippy and fmt pass.
+  Hardware validation BLOCKED: renderD128/video16 do not exist here; matrix
+  and churn both stop at initialization. Do not call this hardware-verified.
+  Next bottom-up: bounded complete-GOP retention and rebuilding consumed
+  references; the 64-chunk history remains a reliability limit.
   Next: kernel boot validation, strict GL owner fix, authoritative AV1
   metadata, and fresh bounded-buffer 4K/browser performance measurements.
   A hardening guard in
@@ -134,6 +143,19 @@ short and update it whenever a task starts, finishes, or gets blocked.
   session.
 
 ## Completed recently
+
+- Reference-chain recovery guard (codex, 2026-10-01): truncated history can
+  lose its keyframe; published-only filtering can omit hidden dependencies;
+  pending OUTPUT alone can omit already-consumed reference pictures. Added
+  pure replay validation and fail-closed guards before START/reopen, plus
+  first-keyframe QBUF metadata during valid rebuilds. Eleven new tests cover
+  truncation, missing references, hidden pictures, ownership/byte mismatches,
+  and the actual 64-chunk limit. Isolated staged-source checks passed: 169
+  tests with 16 threads, clippy -D warnings, fmt. Snapshot:
+  `/tmp/libva-v4l2-replay-isolated-9l4pu9n_`. Required hardware attempts:
+  `/tmp/libva-v4l2-replay-guard-{rust-driver,session-churn}-20261001.log`;
+  both BLOCKED at initialization (renderD128/video16 absent). Full consumed
+  reference rebuild and long-GOP recovery remain mandatory pending work.
 
 - CPU image read follow-up (codex, 2026-10-01): removed the redundant
   full-frame `vaGetImage` clone under the driver lock. Derived images retain
