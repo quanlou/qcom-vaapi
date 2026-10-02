@@ -14,33 +14,27 @@ If the exported descriptor had wrong plane offsets, strides, or sizes, the
 GL-sampled pixels would not match the CPU-copy pixels and the per-frame
 hashes would diverge.
 
-The comparator's job is to prove LAYOUT correctness (plane offsets, strides,
-sizes), not to enforce byte-position match. gst-vaapi's pool warmup emits
-a handful of uniform frames before its first published decode, and
-gst-vah264dec's internal reorder for H.264 B-frames may reorder later
-output; both are downstream behavior, not driver defects. So the check is:
+Production qualification uses --ordered and compares the complete stream:
+frame count, display order, and every visible pixel must match the reference.
+Extra, missing, or reordered frames fail even if all reference hashes appear
+somewhere in the GL dump.
 
-  1. Derive stride via file size for each dump.
-  2. Hash every gl and ref frame stride-aware.
-  3. Confirm every ref frame's exact pixel content appears somewhere in gl
-     (byte-exact set membership). A tolerance parameter allows a small
-     number of pipeline drops.
-
-If the export layout were wrong at any plane offset/stride/size, no gl
-frame would match any ref frame; the set-membership check is a strict
-proof of layout correctness that survives ordering differences.
+Diagnostic comparisons may omit --ordered and compare a reference prefix by
+hash occurrence counts. This mode can isolate plane layout errors despite
+reordering, but it does not establish successful full-stream playback.
+Explicit --max-missing tolerance is diagnostic only; the shell release gate
+always requires zero missing frames.
 
 Both files are hashed stride-aware. ffmpeg's rawvideo encoder packs with
 alignment 1 (stride == width); GStreamer pools may pad the stride, so the
-GL side usually needs the derivation. When more than one stride pair
-divides evenly, the pair with the strongest set-membership match wins.
+GL side usually needs derivation. Ambiguous stride matches fail.
 
 This replaces the earlier PyGObject appsink design: the installed
 python3-gst bindings crash inside GstVideo boxed types on this host.
 
 Output: one "ref_index,hash,found_at_gl_index|missing" line per ref frame
-and a final "gl_roundtrip=pass|fail ..." summary. Exit 0 when every ref
-frame (minus tolerated drops) appears byte-exact in the gl dump.
+and a final "gl_roundtrip=pass|fail ..." summary. Exit 0 when the requested
+comparison contract is satisfied.
 """
 
 import argparse
@@ -116,6 +110,8 @@ def load_layout(path, width, height, forced_stride, label):
             "(size={} width={} height={}); pass --stride/--ref-stride"
             .format(path, size, width, height)
         )
+    if any(s < width or s % 2 or size % frame_bytes(s, height) for s in candidates):
+        raise SystemExit("gst_gl_roundtrip: invalid stride or truncated {} dump".format(label))
     layouts = [(s, size // frame_bytes(s, height)) for s in candidates]
     return data, layouts
 
@@ -133,11 +129,19 @@ def main():
                         help="force the GL dump stride")
     parser.add_argument("--ref-stride", type=int, default=0,
                         help="force the reference dump stride")
-    parser.add_argument("--max-missing", type=int, default=2,
+    parser.add_argument("--max-missing", type=int, default=0,
                         help="tolerate up to this many ref frames missing "
                              "from the gl set (gst-vaapi occasionally drops "
-                             "a frame under heavy pool churn; default: 2)")
+                             "a frame under heavy pool churn; default: 0)")
+    parser.add_argument("--ordered", action="store_true",
+                        help="require exactly the reference frames in display order")
     args = parser.parse_args()
+    if args.width <= 0 or args.height <= 0 or args.width % 2 or args.height % 2:
+        parser.error("I420 width and height must be positive and even")
+    if args.stride < 0 or args.ref_stride < 0:
+        parser.error("strides must be nonnegative")
+    if args.frames < 0 or args.max_missing < 0:
+        parser.error("--frames and --max-missing must be nonnegative")
 
     gl_data, gl_layouts = load_layout(
         args.gl_raw, args.width, args.height, args.stride, "GL"
@@ -198,20 +202,29 @@ def main():
 
     _, gl_stride, gl_frames, gl_hashes, ref_stride, ref_frames, ref_hashes = top
 
+    if args.frames > 0 and len(ref_hashes) != args.frames:
+        raise SystemExit("gst_gl_roundtrip: reference has {} frames, expected {}".format(
+            len(ref_hashes), args.frames))
+
+    if args.ordered and gl_hashes != ref_hashes:
+        print("gl_roundtrip=fail reason=display_order_or_frame_count "
+              "gl_frames={} ref_frames={}".format(len(gl_hashes), len(ref_hashes)))
+        return 1
+
     # Build the ref→gl position index once so per-frame lines report where
     # each ref frame landed in the gl dump (helpful for reorder audits).
     gl_index = {}
     for i, h in enumerate(gl_hashes):
-        gl_index.setdefault(h, i)
+        gl_index.setdefault(h, []).append(i)
 
     misses = 0
     for i, h in enumerate(ref_hashes):
         pos = gl_index.get(h)
-        if pos is None:
+        if not pos:
             misses += 1
             print("{},{},missing".format(i, h))
         else:
-            print("{},{},{}".format(i, h, pos))
+            print("{},{},{}".format(i, h, pos.pop(0)))
 
     total = len(ref_hashes)
     if args.frames > 0:
