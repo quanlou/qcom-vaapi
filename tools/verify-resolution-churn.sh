@@ -6,6 +6,7 @@ set -euo pipefail
 # verifies context replacement, teardown draining, and detached CPU snapshots.
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/tools/hardware-session.sh"
 driver_dir="${1:-/tmp/libva-v4l2-rust-driver}"
 high_sample="${V4L2_VA_RESOLUTION_HIGH_SAMPLE:-/home/mq/tmp/vaatest/test_720p.mp4}"
 low_sample="${V4L2_VA_RESOLUTION_LOW_SAMPLE:-}"
@@ -72,11 +73,11 @@ fi
 expected_frames=$((cycles * (low_frames + high_frames)))
 
 decode_one() { # <md5> <log>
-    timeout 60s env LIBVA_DRIVERS_PATH="$driver_dir" \
+    run_kernel_checked "$2" timeout -k 5s 60s env LIBVA_DRIVERS_PATH="$driver_dir" \
         ffmpeg -y -nostdin -hide_banner -v error \
         -hwaccel vaapi -hwaccel_device "$drm_device" \
-        -i "$high_sample" -map 0:v:0 -frames:v 1 -f framemd5 "$1" \
-        > "$2" 2>&1
+        -i "$high_sample" -map 0:v:0 -frames:v 1 -f framemd5 "$1"
+
 }
 
 before_md5="$work_dir/before.md5"
@@ -122,6 +123,8 @@ session_fatal="$(sed -n 's/.*session-fatal(0x4000003)=\([0-9]*\).*/\1/p' <<< "$k
 system_fatal="$(sed -n 's/.*system-fatal(0x5000003)=\([0-9]*\).*/\1/p' <<< "$kernel_line")"
 session_fatal="${session_fatal:-NA}"
 system_fatal="${system_fatal:-NA}"
+
+require_clean_kernel "$log"
 
 post_status=0
 decode_one "$after_md5" "$work_dir/after.log" || post_status=$?

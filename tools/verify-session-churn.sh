@@ -31,17 +31,30 @@ fi
 mkdir -p "$work_dir"
 rm -f "$work_dir"/round-*.md5
 
+# An outer release-window observer reports only after this script exits. Observe
+# each session as well so a fault cannot be followed by more decoder opens.
+kernel_tool="$repo_root/tools/capture-iris-kernel-log.sh"
+run_observed() { # <log> <expected command status> <command...>
+    local log="$1" expected_status="$2" status=0
+    shift 2
+    "$kernel_tool" -- "$@" > "$log" 2>&1 || status=$?
+    if [[ "$status" != "$expected_status" ]] ||
+       ! python3 "$repo_root/tools/check-playback-performance.py" kernel --log "$log"; then
+        echo "session-churn: fail stopped_before_next_session status=$status expected=$expected_status log=$log"
+        exit 1
+    fi
+}
+
 pass=0
 fail=0
 declare -a failed_rounds=()
 
 vaapi_decode() { # <out.md5> [extra ffmpeg args...]
     local out="$1"; shift
-    timeout 120s env LIBVA_DRIVERS_PATH="$driver_dir" \
+    run_observed "${out%.md5}.log" 0 timeout -k 5s 120s env LIBVA_DRIVERS_PATH="$driver_dir" \
         ffmpeg -y -nostdin -hide_banner -v error \
         -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device "$drm_device" \
-        -i "$sample" -map 0:v:0 -vf hwdownload,format=nv12 -f framemd5 "$out" "$@" \
-        >"$work_dir/last-leg.log" 2>&1
+        -i "$sample" -map 0:v:0 -vf hwdownload,format=nv12 -f framemd5 "$out" "$@"
 }
 
 full_decode_ok() { # <label> <md5>
@@ -72,10 +85,9 @@ run_gst_decode() { # <log> [debug]
     if [[ "$debug" == debug ]]; then
         env_args+=("V4L2_VA_DEBUG=1")
     fi
-    timeout 60s env "${env_args[@]}" \
+    run_observed "$log" 0 timeout -k 5s 60s env "${env_args[@]}" \
         gst-launch-1.0 -q filesrc location="$sample" ! qtdemux name=d d.video_0 ! \
-        queue ! h264parse ! vah264dec ! fakesink \
-        >"$log" 2>&1
+        queue ! h264parse ! vah264dec ! fakesink
 }
 
 # 1. Reference decode (also warms nothing: fresh session).
@@ -89,7 +101,7 @@ if vaapi_decode "$reference_md5" && full_decode_ok "reference" "$reference_md5";
     note_result "reference-full-decode" ok
 else
     note_result "reference-full-decode" fail
-    echo "FATAL: reference decode failed; aborting (see $work_dir/last-leg.log)"
+    echo "FATAL: reference decode failed; aborting (see $work_dir/reference.log)"
     exit 1
 fi
 
@@ -102,58 +114,41 @@ check() { # <label> — full decode + parity for the round
         note_result "after-$label" ok
     else
         note_result "after-$label" fail
+        echo "session-churn: fail stopped_before_next_session reason=parity_failure label=$label"
+        exit 1
     fi
 }
 
 # 2. mpv mid-stream cut (leaves frames in flight) x3, each followed by GStreamer.
 for i in 1 2 3; do
-    timeout 90s env LIBVA_DRIVERS_PATH="$driver_dir" \
-        mpv --hwdec=vaapi-copy --hwdec-software-fallback=no --vo=null --ao=null --frames="$cut_frames" "$sample" \
-        >"$work_dir/mpv-$i.log" 2>&1
-    mpv_status=$?
-    run_gst_decode "$work_dir/gst-$i.log"
-    gst_status=$?
-    if [[ $mpv_status == 0 && $gst_status == 0 ]] &&
-       rg -q 'Using hardware decoding \(vaapi-copy\)' "$work_dir/mpv-$i.log"; then
-        note_result "mpv-cut-followed-by-gst ($i)" ok
-    else
-        note_result "mpv-cut-followed-by-gst ($i) mpv=$mpv_status gst=$gst_status" fail
+    run_observed "$work_dir/mpv-$i.log" 0 timeout -k 5s 90s env LIBVA_DRIVERS_PATH="$driver_dir" \
+        mpv --hwdec=vaapi-copy --hwdec-software-fallback=no --vo=null --ao=null --frames="$cut_frames" "$sample"
+    if ! rg -q 'Using hardware decoding \(vaapi-copy\)' "$work_dir/mpv-$i.log"; then
+        echo "session-churn: fail stopped_before_next_session reason=mpv_not_hardware"
+        exit 1
     fi
+    run_gst_decode "$work_dir/gst-$i.log"
+    note_result "mpv-cut-followed-by-gst ($i)" ok
 done
 
 # 3. SIGKILL ffmpeg mid-decode (device left with queued work) then recover.
 #    The sample decodes in about a second, so 0.5s guarantees a mid-decode kill.
-timeout --preserve-status -s KILL 0.5s env LIBVA_DRIVERS_PATH="$driver_dir" \
+run_observed "$work_dir/kill-leg.log" 137 timeout --preserve-status -s KILL 0.5s env LIBVA_DRIVERS_PATH="$driver_dir" \
     ffmpeg -y -nostdin -hide_banner -v error \
     -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device "$drm_device" \
-    -i "$sample" -map 0:v:0 -vf hwdownload,format=nv12 -f framemd5 "$work_dir/killed.md5" \
-    >"$work_dir/kill-leg.log" 2>&1
-kill_status=$?
-if [[ "$kill_status" != 137 ]]; then
-    note_result "sigkill-mid-decode not-interrupted status=$kill_status" fail
-fi
+    -i "$sample" -map 0:v:0 -vf hwdownload,format=nv12 -f framemd5 "$work_dir/killed.md5"
 check "sigkill-mid-decode"
 
 # 4. SIGKILL GStreamer mid-decode then recover.
-timeout --preserve-status -s KILL 0.5s env "${gst_env[@]}" LIBVA_DRIVERS_PATH="$driver_dir" \
+run_observed "$work_dir/gst-kill.log" 137 timeout --preserve-status -s KILL 0.5s env "${gst_env[@]}" LIBVA_DRIVERS_PATH="$driver_dir" \
     gst-launch-1.0 -q filesrc location="$sample" ! qtdemux name=d d.video_0 ! \
-    queue ! h264parse ! vah264dec ! fakesink \
-    >"$work_dir/gst-kill.log" 2>&1
-kill_status=$?
-if [[ "$kill_status" != 137 ]]; then
-    note_result "sigkill-gst not-interrupted status=$kill_status" fail
-fi
+    queue ! h264parse ! vah264dec ! fakesink
 check "sigkill-gst"
 
 # 5. SIGTERM GStreamer mid-decode (graceful-ish teardown path) then recover.
-timeout -s TERM 0.5s env "${gst_env[@]}" LIBVA_DRIVERS_PATH="$driver_dir" \
+run_observed "$work_dir/gst-term.log" 124 timeout -k 5s -s TERM 0.5s env "${gst_env[@]}" LIBVA_DRIVERS_PATH="$driver_dir" \
     gst-launch-1.0 -q filesrc location="$sample" ! qtdemux name=d d.video_0 ! \
-    queue ! h264parse ! vah264dec ! fakesink \
-    >"$work_dir/gst-term.log" 2>&1
-term_status=$?
-if [[ "$term_status" != 124 ]]; then
-    note_result "sigterm-gst not-interrupted status=$term_status" fail
-fi
+    queue ! h264parse ! vah264dec ! fakesink
 check "sigterm-gst"
 
 echo

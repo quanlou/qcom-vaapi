@@ -8,7 +8,7 @@ set -uo pipefail
 # surface sync/drop cycles and continuous re-submission, so the probe drives
 # REAL seeks through mpv's JSON IPC socket with --hwdec=vaapi-copy:
 #   phase 720p   N seeks on the 720p sample
-#   phase mixed  M seeks on a 960x640 + 1280x720 mpegts concat, so seeks
+#   phase mixed  M seeks on a 960x640 + 1280x720 indexed Matroska concat, so seeks
 #                cross resolution boundaries (context reconfiguration)
 # Each phase is wrapped in tools/capture-iris-kernel-log.sh so any iris
 # firmware session/system error raised during the storm is attributed to it,
@@ -18,6 +18,7 @@ set -uo pipefail
 # This probe never retries: a wedged node must be reported, not hammered.
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/tools/hardware-session.sh"
 driver_dir="${1:-/tmp/libva-v4l2-rust-driver}"
 sample="${V4L2_VA_SAMPLE:-/home/mq/tmp/vaatest/test_720p.mp4}"
 low_sample="${V4L2_VA_RESOLUTION_LOW_SAMPLE:-}"
@@ -53,15 +54,18 @@ fi
 # hit the Rust driver; export once so the exported run_storm() sees it too.
 export LIBVA_DRIVERS_PATH="$driver_dir"
 
-mixed_ts="$work_dir/mixed.ts"
+# Preserve the compressed video while providing a keyframe index. Seeking the
+# copied TS can resume without the correct parameter sets/reference prefix;
+# the same errors also occur with mpv's software decoder.
+mixed_file="$work_dir/mixed.mkv"
 build_mixed=0
 if [[ -z "$low_sample" ]]; then
     low_sample="$work_dir/low-960x640.mp4"
     set +e
-    timeout 90s ffmpeg -y -nostdin -hide_banner -v error \
+    timeout -k 5s 90s ffmpeg -y -nostdin -hide_banner -v error \
         -i "$sample" -map 0:v:0 -t 3 \
         -vf scale=960:640 -an -c:v libx264 -pix_fmt yuv420p \
-        -profile:v high -level:v 4.1 -g 30 -keyint_min 30 -sc_threshold 0 -bf 0 \
+        -profile:v high -level:v 4.1 -g 30 -keyint_min 30 -sc_threshold 0 -bf 0 -x264-params sps-id=1 \
         "$low_sample" > "$work_dir/low-build.log" 2>&1
     low_status=$?
     set -e
@@ -73,13 +77,13 @@ if [[ -n "$low_sample" && -f "$low_sample" ]]; then
     printf "file '%s'\nfile '%s'\n" "$low_sample" "$sample" \
         > "$work_dir/concat.txt"
     set +e
-    timeout 60s ffmpeg -nostdin -hide_banner -v error \
+    timeout -k 5s 60s ffmpeg -y -nostdin -hide_banner -v error \
         -f concat -safe 0 -i "$work_dir/concat.txt" \
-        -c copy -f mpegts "$mixed_ts" \
+        -c copy -f matroska "$mixed_file" \
         > "$work_dir/concat.log" 2>&1
     concat_status=$?
     set -e
-    if [[ "$concat_status" -eq 0 && -s "$mixed_ts" ]]; then
+    if [[ "$concat_status" -eq 0 && -s "$mixed_file" ]]; then
         build_mixed=1
     fi
 fi
@@ -88,14 +92,15 @@ fi
 # before the storm, so a post-storm failure is attributable to the storm.
 before_md5="$work_dir/before.md5"
 set +e
-timeout 60s env LIBVA_DRIVERS_PATH="$driver_dir" \
-    ffmpeg -nostdin -hide_banner -v error \
-    -hwaccel vaapi -hwaccel_device "$drm_device" \
-    -i "$sample" -map 0:v:0 -frames:v 1 -f framemd5 "$before_md5" \
-    > "$work_dir/before.log" 2>&1
+run_kernel_checked "$work_dir/before.log" timeout -k 5s 60s env LIBVA_DRIVERS_PATH="$driver_dir" \
+    ffmpeg -y -nostdin -hide_banner -v error \
+    -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device "$drm_device" \
+    -i "$sample" -map 0:v:0 -frames:v 1 -vf hwdownload,format=nv12 -f framemd5 "$before_md5"
+
 pre_status=$?
 set -e
-if [[ "$pre_status" -ne 0 || ! -s "$before_md5" ]]; then
+if [[ "$pre_status" -ne 0 || ! -s "$before_md5" ]] ||
+   [[ "$(awk '/^[0-9]+,/ {n++} END {print n+0}' "$before_md5" 2>/dev/null)" != 1 ]]; then
     echo "seek_storm=skip reason=node_unhealthy_pre_decode status=$pre_status log=$work_dir/before.log"
     exit 77
 fi
@@ -104,16 +109,20 @@ fi
 # 124 when mpv had to be killed for not exiting after quit.
 run_storm() { # <file> <count> <sock> <log>
     local file="$1" count="$2" sock="$3" log="$4"
-    local duration drive_rc i
+    local duration drive_rc mpv_rc i
     duration="$(ffprobe -v error -show_entries format=duration \
         -of csv=p=0 "$file" 2>/dev/null || echo 0)"
     rm -f "$sock"
-    mpv --no-config --hwdec=vaapi-copy --vo=null --ao=null --loop=inf \
+    mpv --no-config --hwdec=vaapi-copy --hwdec-software-fallback=no --vo=null --ao=null --loop=inf \
         --input-ipc-server="$sock" --no-terminal \
+        --log-file="${log%.log}-player.log" \
         "$file" > "$log" 2>&1 &
     local pid=$!
     python3 "$STORM_DRIVER" "$sock" "$count" "$duration" >> "$log" 2>&1
     drive_rc=$?
+    if [[ "$drive_rc" -ne 0 ]]; then
+        kill -TERM "$pid" 2>/dev/null || true
+    fi
     for i in $(seq 1 30); do
         kill -0 "$pid" 2>/dev/null || break
         sleep 1
@@ -126,12 +135,18 @@ run_storm() { # <file> <count> <sock> <log>
         return 124
     fi
     wait "$pid"
-    return "$?"
+    mpv_rc=$?
+    if [[ "$drive_rc" -ne 0 ]]; then return "$drive_rc"; fi
+    return "$mpv_rc"
 }
 export -f run_storm
 export STORM_DRIVER="$repo_root/tools/mpv_seek_drive.py"
 
-sock="$work_dir/mpv-ipc.sock"
+# Unix-domain socket names have a small fixed byte limit. Disk-backed result
+# paths can exceed it, so keep IPC private and short independently of logs.
+ipc_dir="$(mktemp -d /tmp/libva-seek-ipc.XXXXXX)"
+sock="$ipc_dir/mpv-ipc.sock"
+trap 'rm -f "$sock"; rmdir "$ipc_dir"' EXIT
 declare -a phase_results=()
 overall=0
 
@@ -142,11 +157,13 @@ storm_phase() { # <name> <file> <count>
     local status kernel_line session_fatal system_fatal verdict
 
     set +e
-    timeout 180s "$kernel_tool" -- \
+    timeout -k 5s 180s "$kernel_tool" -- \
         bash -c 'run_storm "$@"' _ "$file" "$count" "$sock" "$mpv_log" \
         > "$phase_log" 2>&1
     status=$?
     set -e
+
+    require_clean_kernel "$phase_log"
 
     kernel_line="$(grep -m1 'summary:' "$phase_log" || true)"
     session_fatal="$(sed -n 's/.*session-fatal(0x4000003)=\([0-9]*\).*/\1/p' <<< "$kernel_line")"
@@ -175,23 +192,25 @@ storm_phase() { # <name> <file> <count>
 
 storm_phase 720p "$sample" "$seeks720" || true
 if (( overall == 0 )) && (( build_mixed == 1 )); then
-    storm_phase mixed "$mixed_ts" "$seeks_mixed" || true
+    storm_phase mixed "$mixed_file" "$seeks_mixed" || true
 elif (( build_mixed == 0 )); then
-    phase_results+=("mixed=skipped reason=mixed_ts_unavailable")
+    phase_results+=("mixed=skipped reason=mixed_fixture_unavailable")
+    if [[ "${V4L2_VA_STRICT:-0}" == 1 ]]; then overall=1; fi
 fi
 
 # Post-storm sanity: the same single-frame decode must still pass and match.
 after_md5="$work_dir/after.md5"
 sanity="ok"
 set +e
-timeout 60s env LIBVA_DRIVERS_PATH="$driver_dir" \
-    ffmpeg -nostdin -hide_banner -v error \
-    -hwaccel vaapi -hwaccel_device "$drm_device" \
-    -i "$sample" -map 0:v:0 -frames:v 1 -f framemd5 "$after_md5" \
-    > "$work_dir/after.log" 2>&1
+run_kernel_checked "$work_dir/after.log" timeout -k 5s 60s env LIBVA_DRIVERS_PATH="$driver_dir" \
+    ffmpeg -y -nostdin -hide_banner -v error \
+    -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device "$drm_device" \
+    -i "$sample" -map 0:v:0 -frames:v 1 -vf hwdownload,format=nv12 -f framemd5 "$after_md5"
+
 post_status=$?
 set -e
-if [[ "$post_status" -ne 0 || ! -s "$after_md5" ]] || ! cmp -s "$after_md5" "$before_md5"; then
+if [[ "$post_status" -ne 0 || ! -s "$after_md5" ]] ||
+   [[ "$(awk '/^[0-9]+,/ {n++} END {print n+0}' "$after_md5" 2>/dev/null)" != 1 ]] || ! cmp -s "$after_md5" "$before_md5"; then
     sanity="fail"
     overall=1
 fi

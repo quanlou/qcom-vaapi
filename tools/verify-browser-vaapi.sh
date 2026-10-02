@@ -5,17 +5,35 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 driver_dir="${1:-/tmp/libva-v4l2-rust-driver}"
 sample="${V4L2_VA_SAMPLE:-/home/mq/tmp/vaatest/test_720p.mp4}"
 browser="${V4L2_VA_BROWSER:-chromium}"
-duration="${V4L2_VA_BROWSER_SECONDS:-20}"
+duration="${V4L2_VA_BROWSER_SECONDS:-30}"
 work_dir="${V4L2_VA_BROWSER_WORK_DIR:-$HOME/.cache/libva-v4l2-browser-verify}"
-chromium_mode="${V4L2_VA_BROWSER_CHROMIUM_MODE:-auto}"
+chromium_mode="${V4L2_VA_BROWSER_CHROMIUM_MODE:-native}"
+strict="${V4L2_VA_BROWSER_STRICT:-${V4L2_VA_STRICT:-0}}"
+if [[ ! "$duration" =~ ^[0-9]+$ || "$duration" -lt 20 || "$duration" -gt 300 ||
+      ( "$strict" != 0 && "$strict" != 1 ) ]]; then
+    echo "browser_vaapi_probe=fail reason=invalid_duration_or_strict_mode"
+    exit 1
+fi
+if [[ "${LIBVA_DRIVER_NAME:-msm}" != msm ]]; then
+    echo "browser_vaapi_probe=fail reason=incorrect_driver"
+    exit 1
+fi
+measurement_args=(--minimum-fps "${V4L2_VA_BROWSER_MIN_FPS:-0}"
+    --maximum-rss-kib "${V4L2_VA_BROWSER_MAX_RSS_KIB:-0}"
+    --minimum-seconds "${V4L2_VA_BROWSER_MIN_SECONDS:-0}")
+[[ "$strict" == 0 ]] || measurement_args+=(--strict)
+python3 "$repo_root/tools/check-playback-performance.py" thresholds "${measurement_args[@]}"
+missing() {
+    echo "browser_vaapi_probe=blocked reason=$1 qualification=not_proven"
+    [[ "$strict" == 0 ]] && exit 77
+    exit 1
+}
 
 if [[ ! -f "$sample" ]]; then
-    echo "browser_vaapi_probe=skip missing_sample=$sample"
-    exit 77
+    missing "missing_sample:$sample"
 fi
 if [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
-    echo "browser_vaapi_probe=skip reason=no-graphical-session"
-    exit 77
+    missing no-graphical-session
 fi
 
 find_browser() {
@@ -34,14 +52,24 @@ find_browser() {
 
 browser_bin="$(find_browser || true)"
 if [[ -z "$browser_bin" ]]; then
-    echo "browser_vaapi_probe=skip reason=browser-not-found browser=$browser"
-    exit 77
+    missing "browser-not-found:$browser"
+fi
+browser_kind="${V4L2_VA_BROWSER_KIND:-}"
+if [[ -z "$browser_kind" ]]; then
+    case "$(basename "$browser_bin")" in
+        *firefox*) browser_kind=firefox ;;
+        *) browser_kind=chromium ;;
+    esac
+fi
+if [[ "$browser_kind" != firefox && "$browser_kind" != chromium ]]; then
+    echo "browser_vaapi_probe=fail reason=invalid_browser_kind"
+    exit 1
 fi
 
 # Ubuntu's /usr/bin/firefox is a wrapper around the Firefox snap. Resolve that
 # wrapper here so the sample, profile, and driver all live in snap-visible
 # storage instead of producing a misleading "no page request" result.
-if [[ "$browser" == firefox && "$browser_bin" == /usr/bin/firefox && -x /snap/bin/firefox ]]; then
+if [[ "$browser_kind" == firefox && "$browser_bin" == /usr/bin/firefox && -x /snap/bin/firefox ]]; then
     browser_bin="/snap/bin/firefox"
 fi
 
@@ -52,6 +80,12 @@ if [[ -z "${V4L2_VA_BROWSER_WORK_DIR:-}" && "$browser_bin" == /snap/* ]]; then
     work_dir="$HOME/snap/$browser/common/libva-v4l2-browser-verify"
 fi
 mkdir -p "$work_dir"
+exec 9>/tmp/libva-v4l2-hardware.lock
+flock -n 9 || { echo "browser_vaapi_probe=fail reason=hardware_busy"; exit 1; }
+if [[ "$strict" == 1 && ( ! -c "${V4L2_VA_DEVICE:-/dev/video16}" || ! -c "${V4L2_VA_DRM_DEVICE:-/dev/dri/renderD128}" ) ]]; then
+    echo "browser_vaapi_probe=blocked reason=missing_hardware qualification=not_proven"
+    exit 1
+fi
 
 # Chromium installed as a snap cannot reliably see /tmp from the host namespace.
 # Build/copy the driver under $HOME so the sandboxed browser can at least try to
@@ -63,6 +97,7 @@ fi
 
 run_dir="$work_dir/run-$(date +%s)-$$"
 mkdir -p "$run_dir"
+run_id="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
 cp "$sample" "$run_dir/sample.mp4"
 
 html="$run_dir/video.html"
@@ -72,25 +107,71 @@ cat > "$html" <<HTML
 <video id="v" src="/sample.mp4" autoplay muted loop playsinline controls></video>
 <script>
 const v = document.getElementById('v');
-v.play().catch(e => console.log('play failed', e));
-setInterval(() => console.log('video', v.readyState, v.currentTime), 1000);
+const started = performance.now();
+let seekStarted = false, seekFinished = false, afterSeek = false;
+let playing = false, soughtTime = 0, finished = false;
+let reports = Promise.resolve();
+function report(event, extra={}) {
+  const q = v.getVideoPlaybackQuality();
+  const payload = {event, run_id:'$run_id', time:v.currentTime, elapsed:(performance.now()-started)/1000,
+    total:q.totalVideoFrames, dropped:q.droppedVideoFrames, ready:v.readyState, ...extra};
+  reports = reports.then(() => fetch('/telemetry', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}))
+    .then(response => {if (!response.ok) throw new Error('telemetry rejected');});
+  return reports;
+}
+v.addEventListener('playing', () => {if (!playing) {playing=true; report('playing');}});
+v.addEventListener('error', () => report('error', {message:'video error'}));
+v.addEventListener('seeked', () => {
+  if (seekStarted && !seekFinished) {seekFinished=true; soughtTime=v.currentTime; report('seeked');}
+});
+const tick = setInterval(() => {
+  const elapsed = (performance.now()-started)/1000;
+  if (!seekStarted && playing && elapsed >= 5 && Number.isFinite(v.duration) && v.duration > 8) {
+    report('before_seek');
+    const target = v.currentTime < v.duration/2 ? v.duration*0.75 : v.duration*0.25;
+    seekStarted=true; report('seek_requested', {target}); v.currentTime=target;
+  }
+  if (seekFinished && !afterSeek && v.currentTime-soughtTime >= 1.5) {
+    afterSeek=true; report('after_seek');
+  }
+  if (!finished && elapsed >= $((duration - 5))) {
+    finished=true; clearInterval(tick); v.pause();
+    report('finished').then(() => {
+      v.removeAttribute('src'); v.load();
+      report('close_requested').then(() => {
+        try {window.close();} catch (e) {report('close_error', {message:String(e)});}
+        setTimeout(() => report('close_still_open', {hidden:document.hidden}), 1000);
+      });
+    });
+  }
+}, 100);
+v.play().catch(e => report('error', {message:String(e)}));
 </script>
 HTML
 
-port="$(python3 - <<'PY'
-import socket
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-    s.bind(("127.0.0.1", 0))
-    print(s.getsockname()[1])
-PY
-)"
 server_log="$run_dir/http.log"
-python3 -m http.server "$port" --bind 127.0.0.1 --directory "$run_dir" > "$server_log" 2>&1 &
+python3 "$repo_root/tools/browser-playback-server.py" --directory "$run_dir" \
+    --events "$run_dir/events.jsonl" --port-file "$run_dir/port" > "$server_log" 2>&1 &
 server_pid=$!
 cleanup() {
+    if [[ -n "${monitor_pid:-}" ]]; then
+        kill "$monitor_pid" >/dev/null 2>&1 || true
+        wait "$monitor_pid" 2>/dev/null || true
+    fi
     kill "$server_pid" >/dev/null 2>&1 || true
+    wait "$server_pid" 2>/dev/null || true
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+for _ in {1..50}; do
+    [[ ! -f "$run_dir/port" ]] || break
+    kill -0 "$server_pid" 2>/dev/null || { echo "browser_vaapi_probe=fail reason=server_start_failed"; exit 1; }
+    sleep 0.1
+done
+[[ -f "$run_dir/port" ]] || { echo "browser_vaapi_probe=fail reason=server_start_timeout"; exit 1; }
+port="$(cat "$run_dir/port")"
 
 log="$run_dir/$browser.log"
 profile="$run_dir/$browser-profile"
@@ -98,15 +179,29 @@ mkdir -p "$profile"
 url="http://127.0.0.1:$port/video.html"
 
 status=0
-case "$browser" in
+# The configured launch deadline includes the five-second natural-close window.
+# Cleanup after a timeout cannot turn a timed-out process into a passing exit.
+measure=(python3 "$repo_root/tools/measure-process-tree.py" --seconds "$duration" --output "$run_dir/measurement.json" --run-id "$run_id" --)
+kernel=()
+[[ "$strict" == 0 ]] || kernel=("$repo_root/tools/capture-iris-kernel-log.sh" --)
+case "$browser_kind" in
     firefox)
         cat > "$profile/user.js" <<'JS'
 user_pref("media.ffmpeg.vaapi.enabled", true);
 user_pref("media.hardware-video-decoding.force-enabled", true);
 user_pref("media.autoplay.default", 0);
+user_pref("dom.allow_scripts_to_close_windows", true);
+user_pref("browser.aboutwelcome.enabled", false);
+// A background first-run privacy tab otherwise survives the video window.
+user_pref("datareporting.policy.firstRunURL", "");
+user_pref("browser.startup.homepage_override.mstone", "ignore");
+user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("browser.sessionstore.resume_from_crash", false);
+user_pref("browser.warnOnQuit", false);
+user_pref("browser.tabs.warnOnClose", false);
 JS
         set +e
-        timeout "$duration"s env \
+        "${kernel[@]}" "${measure[@]}" env \
             LIBVA_DRIVERS_PATH="$driver_dir" \
             LIBVA_DRIVER_NAME=msm \
             V4L2_VA_DEBUG=1 \
@@ -114,8 +209,11 @@ JS
             MOZ_DISABLE_RDD_SANDBOX=1 \
             MOZ_LOG="PlatformDecoderModule:5,DMABUF:5,FFmpegVideo:5" \
             "$browser_bin" --no-remote --profile "$profile" "$url" \
-            > "$log" 2>&1
+            > "$log" 2>&1 &
+        monitor_pid=$!
+        wait "$monitor_pid"
         status=$?
+        monitor_pid=""
         set -e
         ;;
     *)
@@ -129,6 +227,7 @@ JS
             --enable-logging=stderr
             --vmodule='*vaapi*=3,*video*=2,*media*=2'
             --ozone-platform="${XDG_SESSION_TYPE:-wayland}"
+            --app="$url"
         )
         # GL backend selection. On this host GL/EGL (freedreno) and Vulkan
         # (turnip) both work natively (see docs/09-browser-vaapi.md), so a snap
@@ -163,26 +262,44 @@ JS
                 chromium_flags+=(--in-process-gpu)
                 ;;
             *)
-                echo "browser_vaapi_probe=skip reason=unknown-chromium-mode mode=$chromium_mode"
-                exit 77
+                echo "browser_vaapi_probe=fail reason=unknown-chromium-mode mode=$chromium_mode"
+                exit 1
                 ;;
         esac
         set +e
-        timeout "$duration"s env \
+        "${kernel[@]}" "${measure[@]}" env \
             LIBVA_DRIVERS_PATH="$driver_dir" \
             LIBVA_DRIVER_NAME=msm \
             V4L2_VA_DEBUG=1 \
-            "$browser_bin" "${chromium_flags[@]}" "$url" \
-            > "$log" 2>&1
+            "$browser_bin" "${chromium_flags[@]}" \
+            > "$log" 2>&1 &
+        monitor_pid=$!
+        wait "$monitor_pid"
         status=$?
+        monitor_pid=""
         set -e
         ;;
 esac
 
-# Success: our libva driver was actually loaded by the browser's GPU/decode
-# process (its version string appears in the log).
+# Strict qualification uses progressing video, a real seek, actual driver
+# CAPTURE publications, no fallback, a bounded memory budget and clean exit.
+if [[ "$strict" == 1 ]]; then
+    if [[ "$status" != 0 ]] || ! python3 "$repo_root/tools/check-playback-performance.py" browser \
+        "${measurement_args[@]}" --log "$log" --events "$run_dir/events.jsonl" \
+        --run-id "$run_id" \
+        --measurement "$run_dir/measurement.json" \
+        --maximum-drop-ratio "${V4L2_VA_BROWSER_MAX_DROP_RATIO:-0.01}" --output "$run_dir/performance.json"; then
+        echo "browser_vaapi_probe=fail reason=deployment_evidence_incomplete status=$status log=$log telemetry=$run_dir/events.jsonl"
+        exit 1
+    fi
+    echo "browser_vaapi_probe=pass qualification=playback_seek_and_clean_exit browser=$browser log=$log"
+    exit 0
+fi
+
+# A diagnostic load result says only that the driver was opened. It does not
+# satisfy production browser playback, seek or teardown qualification.
 if grep -q 'msm_drv_video_rs' "$log"; then
-    echo "browser_vaapi_probe=reached_driver browser=$browser status=$status log=$log"
+    echo "browser_vaapi_probe=reached_driver qualification=not_proven browser=$browser status=$status log=$log"
     exit 0
 fi
 

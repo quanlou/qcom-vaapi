@@ -162,7 +162,7 @@ class ChurnAcceptanceTests(unittest.TestCase):
     def test_failed_decode_cannot_pass_with_complete_output(self):
         result = self.run_churn(driver_status=9)
         self.assertEqual(result.returncode, 1)
-        self.assertIn('FATAL: reference decode failed', result.stdout)
+        self.assertIn('session-churn: fail stopped_before_next_session status=9 expected=0', result.stdout)
         self.assertNotIn('unexpected:', result.stderr)
 
 

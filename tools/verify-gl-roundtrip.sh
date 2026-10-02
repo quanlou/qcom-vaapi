@@ -17,11 +17,21 @@ set -euo pipefail
 # sizes in vaExportSurfaceHandle's descriptor.
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/tools/hardware-session.sh"
 driver_dir="${1:-/tmp/libva-v4l2-rust-driver}"
 sample="${V4L2_VA_SAMPLE:-/home/mq/tmp/vaatest/test_720p.mp4}"
 drm_device="${V4L2_VA_DRM_DEVICE:-/dev/dri/renderD128}"
 work_dir="${V4L2_VA_GL_RT_DIR:-/tmp/libva-v4l2-gl-roundtrip}"
 frames="${V4L2_VA_GL_RT_FRAMES:-30}"
+reference_limit=(-frames:v "$frames")
+comparison_args=()
+if [[ "${V4L2_VA_STRICT:-0}" == 1 ]]; then
+    # The GL pipeline always runs to EOS. Its strict reference must do the
+    # same; a 30-frame prefix cannot certify a complete 300-frame stream.
+    reference_limit=()
+    frames=0
+    comparison_args+=(--ordered)
+fi
 
 mkdir -p "$work_dir"
 
@@ -77,12 +87,12 @@ fi
 ref_log="$work_dir/ffmpeg-ref.log"
 rm -f "$work_dir/ref.raw" "$ref_log"
 set +e
-timeout 120s env "${gst_env[@]}" \
+run_kernel_checked "$ref_log" timeout -k 5s 120s env "${gst_env[@]}" \
     ffmpeg -nostdin -hide_banner -v warning \
-    -hwaccel vaapi -hwaccel_device "$drm_device" \
-    -i "$sample" -map 0:v:0 -frames:v "$frames" \
-    -pix_fmt yuv420p -f rawvideo "$work_dir/ref.raw" \
-    > "$ref_log" 2>&1
+    -hwaccel vaapi -hwaccel_device "$drm_device" -hwaccel_output_format vaapi \
+    -i "$sample" -map 0:v:0 "${reference_limit[@]}" \
+    -vf 'hwdownload,format=nv12,format=yuv420p' -threads:v 1 -f rawvideo "$work_dir/ref.raw"
+
 ref_status=$?
 set -e
 if [[ "$ref_status" -ne 0 ]]; then
@@ -94,12 +104,12 @@ fi
 gl_log="$work_dir/gst-gl.log"
 rm -f "$work_dir/gl.raw" "$gl_log"
 set +e
-timeout 180s env "${gst_env[@]}" V4L2_VA_DEBUG=1 \
+run_kernel_checked "$gl_log" timeout -k 5s 180s env "${gst_env[@]}" V4L2_VA_DEBUG=1 \
     gst-launch-1.0 -q -e \
     filesrc location="$sample" ! qtdemux ! h264parse ! queue ! vah264dec ! \
     glupload ! gldownload ! videoconvert ! \
-    video/x-raw,format=I420 ! filesink location="$work_dir/gl.raw" \
-    > "$gl_log" 2>&1
+    video/x-raw,format=I420 ! filesink location="$work_dir/gl.raw"
+
 gl_status=$?
 set -e
 if ! grep -q 'msm_drv_video_rs: ExportSurfaceHandle succeeded' "$gl_log"; then
@@ -124,12 +134,13 @@ if [[ "$gl_status" -ne 0 ]]; then
     set +e
     python3 "$repo_root/tools/gst_gl_roundtrip.py" \
         "$work_dir/gl.raw" "$work_dir/ref.raw" \
-        --width "$width" --height "$height" --frames "$frames"
+        --width "$width" --height "$height" --frames "$frames" --max-missing 0 "${comparison_args[@]}"
     layout_status=$?
     set -e
     if [[ "$layout_status" -eq 0 ]]; then
         echo "gl_roundtrip=partial_layout_pass pipeline_status=$gl_status log=$gl_log"
-        exit 0
+        # Correct partial pixels cannot certify successful playback.
+        exit 1
     fi
     echo "gl_roundtrip=fail reason=layout_mismatch pipeline_status=$gl_status"
     exit "$layout_status"
@@ -137,4 +148,4 @@ fi
 
 python3 "$repo_root/tools/gst_gl_roundtrip.py" \
     "$work_dir/gl.raw" "$work_dir/ref.raw" \
-    --width "$width" --height "$height" --frames "$frames"
+    --width "$width" --height "$height" --frames "$frames" --max-missing 0 "${comparison_args[@]}"

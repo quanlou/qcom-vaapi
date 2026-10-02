@@ -31,6 +31,7 @@ set -uo pipefail
 # parks on a non-EOF stdin under SIGTERM and ignores the timeout).
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/tools/hardware-session.sh"
 driver_dir="${1:-/tmp/libva-v4l2-rust-driver}"
 drm_device="${V4L2_VA_DRM_DEVICE:-/dev/dri/renderD128}"
 codec5_dir="${V4L2_VA_CODEC5_DIR:-/home/mq/tmp/vaatest/codec5}"
@@ -112,6 +113,7 @@ decode_leg() { # <frames> <out.md5> <log> <file> <download format>
         > "$3" 2>&1
     leg_status=$?
     set -e
+    require_clean_kernel "$3"
 }
 
 run_codec() { # <name> <profile> <file> <pattern> <reference decoder> <reference pix_fmt>
@@ -142,10 +144,10 @@ run_codec() { # <name> <profile> <file> <pattern> <reference decoder> <reference
     fi
 
     set +e
-    timeout 120s ffmpeg -y -nostdin -hide_banner -v error \
+    run_kernel_checked "$reference_log" timeout -k 5s 120s ffmpeg -y -nostdin -hide_banner -v error \
         -c:v "$reference_decoder" -i "$file" -map 0:v:0 \
-        -frames:v "$codec_frames" "${reference_pix_args[@]}" -f framemd5 "$reference_md5" \
-        > "$reference_log" 2>&1
+        -frames:v "$codec_frames" "${reference_pix_args[@]}" -f framemd5 "$reference_md5"
+
     reference_status=$?
     set -e
     if [[ "$reference_status" -ne 0 || ! -s "$reference_md5" ]]; then
