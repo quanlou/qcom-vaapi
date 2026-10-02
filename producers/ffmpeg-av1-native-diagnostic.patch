@@ -1,0 +1,147 @@
+diff --git a/configure b/configure
+index 60e33e26e4..8bec9d480b 100755
+--- a/configure
++++ b/configure
+@@ -3620,6 +3620,7 @@ vp9_vaapi_encoder_deps="VAEncPictureParameterBufferVP9"
+ vp9_vaapi_encoder_select="vaapi_encode"
+ vp9_qsv_encoder_deps="libmfx MFX_CODEC_VP9"
+ vp9_qsv_encoder_select="qsvenc"
++av1_v4l2m2m_decoder_deps="v4l2_m2m av1_v4l2_m2m"
+ vp9_v4l2m2m_decoder_deps="v4l2_m2m vp9_v4l2_m2m"
+ vvc_qsv_decoder_select="vvc_mp4toannexb_bsf qsvdec"
+ 
+@@ -7522,6 +7523,7 @@ if enabled v4l2_m2m; then
+     check_cc h263_v4l2_m2m linux/videodev2.h "int i = V4L2_PIX_FMT_H263;"
+     check_cc h264_v4l2_m2m linux/videodev2.h "int i = V4L2_PIX_FMT_H264;"
+     check_cc vp8_v4l2_m2m linux/videodev2.h "int i = V4L2_PIX_FMT_VP8;"
++    check_cc av1_v4l2_m2m linux/videodev2.h "int i = V4L2_PIX_FMT_AV1;"
+     check_cc vp9_v4l2_m2m linux/videodev2.h "int i = V4L2_PIX_FMT_VP9;"
+ fi
+ 
+diff --git a/libavcodec/Makefile b/libavcodec/Makefile
+index 3d60347a19..4440a45ad8 100644
+--- a/libavcodec/Makefile
++++ b/libavcodec/Makefile
+@@ -830,6 +830,7 @@ OBJS-$(CONFIG_VP9_RKMPP_DECODER)       += rkmppdec.o
+ OBJS-$(CONFIG_VP9_VAAPI_ENCODER)       += vaapi_encode_vp9.o
+ OBJS-$(CONFIG_VP9_QSV_ENCODER)         += qsvenc_vp9.o
+ OBJS-$(CONFIG_VPLAYER_DECODER)         += textdec.o ass.o
++OBJS-$(CONFIG_AV1_V4L2M2M_DECODER)     += v4l2_m2m_dec.o
+ OBJS-$(CONFIG_VP9_V4L2M2M_DECODER)     += v4l2_m2m_dec.o
+ OBJS-$(CONFIG_VQA_DECODER)             += vqavideo.o
+ OBJS-$(CONFIG_VQC_DECODER)             += vqcdec.o
+diff --git a/libavcodec/allcodecs.c b/libavcodec/allcodecs.c
+index 042b07c895..5845ac07b4 100644
+--- a/libavcodec/allcodecs.c
++++ b/libavcodec/allcodecs.c
+@@ -857,6 +857,7 @@ extern const FFCodec ff_amrwb_mediacodec_decoder;
+ extern const FFCodec ff_h263_v4l2m2m_encoder;
+ extern const FFCodec ff_libaom_av1_decoder;
+ /* hwaccel hooks only, so prefer external decoders */
++extern const FFCodec ff_av1_v4l2m2m_decoder;
+ extern const FFCodec ff_av1_decoder;
+ extern const FFCodec ff_av1_cuvid_decoder;
+ extern const FFCodec ff_av1_d3d12va_encoder;
+diff --git a/libavcodec/v4l2_context.c b/libavcodec/v4l2_context.c
+index be1df3785b..61d9f93dc6 100644
+--- a/libavcodec/v4l2_context.c
++++ b/libavcodec/v4l2_context.c
+@@ -396,6 +396,30 @@ dequeue:
+             return NULL;
+         }
+ 
++        /* Iris may return an empty AV1 CAPTURE buffer for a non-display
++         * picture. Never publish mapped bytes when no payload was returned.
++         * ERROR also covers real corruption: keep an explicit diagnostic,
++         * and require full displayed-frame parity outside this experiment.
++         */
++        if (ctx->av_codec_id == AV_CODEC_ID_RAWVIDEO &&
++            ctx_to_m2mctx(ctx)->avctx->codec_id == AV_CODEC_ID_AV1 &&
++            !V4L2_TYPE_IS_OUTPUT(ctx->type) &&
++            (buf.flags & V4L2_BUF_FLAG_ERROR) &&
++            !(buf.flags & V4L2_BUF_FLAG_LAST) &&
++            (V4L2_TYPE_IS_MULTIPLANAR(buf.type) ?
++             buf.m.planes[0].bytesused : buf.bytesused) == 0) {
++            avbuf = &ctx->buffers[buf.index];
++            avbuf->status = V4L2BUF_AVAILABLE;
++            avbuf->buf = buf;
++            if (V4L2_TYPE_IS_MULTIPLANAR(ctx->type)) {
++                memcpy(avbuf->planes, planes, sizeof(planes));
++                avbuf->buf.m.planes = avbuf->planes;
++            }
++            av_log(logger(ctx), AV_LOG_WARNING,
++                   "AV1 diagnostic: empty ERROR capture recycled; no pixels published\n");
++            return avbuf;
++        }
++
+         if (ctx_to_m2mctx(ctx)->draining && !V4L2_TYPE_IS_OUTPUT(ctx->type)) {
+             int bytesused = V4L2_TYPE_IS_MULTIPLANAR(buf.type) ?
+                             buf.m.planes[0].bytesused : buf.bytesused;
+@@ -641,6 +665,20 @@ int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* frame, int timeout)
+         return AVERROR(EAGAIN);
+     }
+ 
++    if (ctx_to_m2mctx(ctx)->avctx->codec_id == AV_CODEC_ID_AV1 &&
++        !V4L2_TYPE_IS_OUTPUT(ctx->type) &&
++        (avbuf->buf.flags & V4L2_BUF_FLAG_ERROR) &&
++        !(avbuf->buf.flags & V4L2_BUF_FLAG_LAST) &&
++        (V4L2_TYPE_IS_MULTIPLANAR(ctx->type) ?
++         avbuf->buf.m.planes[0].bytesused : avbuf->buf.bytesused) == 0) {
++        /* The receive-frame core consumes DISCARD internally and asks for
++         * another packet. EAGAIN here can violate send/receive progress.
++         * Never map or expose bytes belonging to an empty completion.
++         */
++        frame->flags |= AV_FRAME_FLAG_DISCARD;
++        return ff_v4l2_buffer_enqueue(avbuf);
++    }
++
+     return ff_v4l2_buffer_buf_to_avframe(frame, avbuf);
+ }
+ 
+diff --git a/libavcodec/v4l2_fmt.c b/libavcodec/v4l2_fmt.c
+index 6df47e3f5a..1cadf35db4 100644
+--- a/libavcodec/v4l2_fmt.c
++++ b/libavcodec/v4l2_fmt.c
+@@ -98,6 +98,9 @@ static const struct fmt_conversion {
+ #ifdef V4L2_PIX_FMT_VP8
+     { AV_FMT(NONE),        AV_CODEC(VP8),         V4L2_FMT(VP8) },
+ #endif
++#ifdef V4L2_PIX_FMT_AV1
++    { AV_FMT(NONE),        AV_CODEC(AV1),         V4L2_FMT(AV1) },
++#endif
+ #ifdef V4L2_PIX_FMT_VP9
+     { AV_FMT(NONE),        AV_CODEC(VP9),         V4L2_FMT(VP9) },
+ #endif
+diff --git a/libavcodec/v4l2_m2m.c b/libavcodec/v4l2_m2m.c
+index 07c7500000..66209353ca 100644
+--- a/libavcodec/v4l2_m2m.c
++++ b/libavcodec/v4l2_m2m.c
+@@ -295,6 +295,18 @@ av_cold int ff_v4l2_m2m_codec_init(V4L2m2mPriv *priv)
+ 
+     V4L2m2mContext *s = priv->context;
+ 
++    /* AV1 diagnostic must not probe unrelated camera nodes. */
++    if (s->avctx->codec_id == AV_CODEC_ID_AV1) {
++        const char *node = getenv("V4L2_VA_DEVICE");
++        if (!node || !*node || strlen(node) >= sizeof(s->devname))
++            return AVERROR(EINVAL);
++        memcpy(s->devname, node, strlen(node) + 1);
++        ret = v4l2_probe_driver(s);
++        if (ret)
++            return ret;
++        av_log(s->avctx, AV_LOG_INFO, "Using selected AV1 device %s\n", s->devname);
++        return v4l2_configure_contexts(s);
++    }
+     dirp = opendir("/dev");
+     if (!dirp)
+         return AVERROR(errno);
+diff --git a/libavcodec/v4l2_m2m_dec.c b/libavcodec/v4l2_m2m_dec.c
+index ba1fe769e0..b39da62e71 100644
+--- a/libavcodec/v4l2_m2m_dec.c
++++ b/libavcodec/v4l2_m2m_dec.c
+@@ -266,3 +266,5 @@ M2MDEC(h263,  "H.263", AV_CODEC_ID_H263,       NULL);
+ M2MDEC(vc1 ,  "VC1",   AV_CODEC_ID_VC1,        NULL);
+ M2MDEC(vp8,   "VP8",   AV_CODEC_ID_VP8,        NULL);
+ M2MDEC(vp9,   "VP9",   AV_CODEC_ID_VP9,        NULL);
++
++M2MDEC(av1, "AV1", AV_CODEC_ID_AV1, NULL);
