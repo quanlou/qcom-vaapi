@@ -22,6 +22,11 @@ pub(crate) fn apply_ready_captures(guard: &mut DriverState, ready: Vec<ReadyCapt
         if let Some(idx) = surface_index(r.surface)
             && let Some(s) = guard.surfaces[idx].as_mut()
         {
+            if r.failed {
+                s.frame = None;
+                s.state = SurfaceState::Dead;
+                continue;
+            }
             if std::env::var_os("V4L2_VA_DEBUG").is_some() {
                 eprintln!(
                     "msm_drv_video_rs: publish surface={} cap_idx={:?} previous_state={:?} previous_cap={:?} export_fds={}",
@@ -76,7 +81,11 @@ pub(crate) unsafe extern "C" fn sync_surface2(
         return err(VA_STATUS_ERROR_INVALID_SURFACE);
     };
     let start = std::time::Instant::now();
-    let deadline = start + std::time::Duration::from_nanos(timeout_ns.max(1));
+    let deadline = if timeout_ns == VA_TIMEOUT_INFINITE as u64 {
+        None
+    } else {
+        start.checked_add(std::time::Duration::from_nanos(timeout_ns))
+    };
     let mut compatibility_drain_started = false;
     loop {
         let mut guard = match state.lock.lock() {
@@ -109,14 +118,19 @@ pub(crate) unsafe extern "C" fn sync_surface2(
         // a tight loop can starve the submitter that will make this surface
         // ready.
         let ready = if let Some(v4l2) = c.v4l2.as_mut() {
-            let mut ready = v4l2.pump(2);
+            let poll_ms = deadline.map_or(2, |deadline| {
+                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                remaining.as_millis().min(2) as i32
+            });
+            let mut ready = v4l2.pump(poll_ms);
             if ready.is_empty()
+                && timeout_ns != 0
                 && !compatibility_drain_started
                 && start.elapsed() >= std::time::Duration::from_millis(20)
             {
                 compatibility_drain_started = v4l2.maybe_start_sync_drain();
                 if compatibility_drain_started {
-                    ready.extend(v4l2.pump(2));
+                    ready.extend(v4l2.pump(0));
                 }
             }
             ready
@@ -151,7 +165,7 @@ pub(crate) unsafe extern "C" fn sync_surface2(
             }
             return err(VA_STATUS_ERROR_DECODING_ERROR);
         }
-        let timed_out = std::time::Instant::now() >= deadline;
+        let timed_out = deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline);
         if timed_out && va_debug_enabled() {
             // Snapshot while the lock is still held: surface bookkeeping plus
             // the owning session's OUTPUT/CAPTURE queue state. This is the
@@ -217,6 +231,7 @@ mod tests {
         apply_ready_captures(
             &mut guard,
             vec![ReadyCapture {
+                failed: false,
                 surface: surf_id,
                 cap_idx: Some(3),
                 frame: None,
@@ -230,6 +245,31 @@ mod tests {
     }
 
     #[test]
+    fn discarded_completion_marks_surface_dead_and_preserves_reservation() {
+        let mut guard = state_with_empty_surfaces();
+        guard.surfaces[7] = Some(surface_with(SurfaceState::Pending, Some(3)));
+        guard.surfaces[7].as_mut().unwrap().frame = Some(crate::state::SurfaceFrame {
+            data: std::sync::Arc::new(vec![1; 384]),
+            stride: 16,
+            height: 16,
+            format: crate::pixel_format::DecodedFormat::Nv12,
+        });
+        apply_ready_captures(
+            &mut guard,
+            vec![ReadyCapture {
+                surface: DRV_ID_BASE_SURFACE + 7,
+                failed: true,
+                cap_idx: None,
+                frame: None,
+            }],
+        );
+        let surface = guard.surfaces[7].as_ref().unwrap();
+        assert_eq!(surface.state, SurfaceState::Dead);
+        assert!(surface.frame.is_none());
+        assert_eq!(surface.cap_idx, Some(3));
+    }
+
+    #[test]
     fn publish_ignores_unknown_and_destroyed_surfaces() {
         let mut guard = state_with_empty_surfaces();
         guard.surfaces[2] = Some(surface_with(SurfaceState::Ready, Some(1)));
@@ -238,11 +278,13 @@ mod tests {
             &mut guard,
             vec![
                 ReadyCapture {
+                    failed: false,
                     surface: DRV_ID_BASE_SURFACE + 9_999,
                     cap_idx: Some(0),
                     frame: None,
                 },
                 ReadyCapture {
+                    failed: false,
                     surface: VA_INVALID_ID,
                     cap_idx: Some(1),
                     frame: None,
@@ -263,6 +305,7 @@ mod tests {
         apply_ready_captures(
             &mut guard,
             vec![ReadyCapture {
+                failed: false,
                 surface: DRV_ID_BASE_SURFACE,
                 cap_idx: Some(11),
                 frame: None,
@@ -293,6 +336,7 @@ mod tests {
         apply_ready_captures(
             &mut guard,
             vec![ReadyCapture {
+                failed: false,
                 surface: DRV_ID_BASE_SURFACE,
                 cap_idx: Some(4),
                 frame: None,
@@ -312,6 +356,7 @@ mod tests {
         apply_ready_captures(
             &mut guard,
             vec![ReadyCapture {
+                failed: false,
                 surface: DRV_ID_BASE_SURFACE + 5,
                 cap_idx: None,
                 frame: None,

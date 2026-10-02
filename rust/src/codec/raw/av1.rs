@@ -43,6 +43,11 @@ pub(super) fn av1_sequence_header_input(
 ) -> Result<crate::av1::SequenceHeaderInput, ()> {
     let seq = unsafe { pp.seq_info_fields.fields };
     let pic = unsafe { pp.pic_info_fields.bits };
+    // Sequence synthesis runs before frame synthesis. Validate the shared
+    // syntax widths here as well, before masked bit writes can hide them.
+    if pp.order_hint_bits_minus_1 > 7 {
+        return Err(());
+    }
     let seq_profile = match pp.profile {
         0 => crate::av1::SeqProfile::Main,
         1 => crate::av1::SeqProfile::High,
@@ -98,6 +103,31 @@ pub(super) fn av1_frame_header_input(
     ref_order_hint: [u16; 8],
 ) -> Result<crate::av1::FrameHeaderInput, ()> {
     let pic = unsafe { pp.pic_info_fields.bits };
+    // Reject values the bit writer would otherwise truncate or assert on.
+    // VA metadata is untrusted client input, including on the diagnostic path.
+    let hints_fit = pp.order_hint_bits_minus_1 <= 7
+        && (unsafe { pp.seq_info_fields.fields }.enable_order_hint() == 0
+            || u16::from(pp.order_hint) < (1u16 << (pp.order_hint_bits_minus_1 + 1)));
+    if !hints_fit
+        || pp.primary_ref_frame > 7
+        || pp.ref_frame_idx.iter().any(|&index| index >= 8)
+        || pp.interp_filter > 4
+        || tile_size_bytes_minus_1 > 3
+        || pp.cdef_bits > 3
+        || pic.large_scale_tile() != 0
+        || (pic.use_superres() != 0 && !(9..=16).contains(&pp.superres_scale_denominator))
+        || [
+            pp.y_dc_delta_q,
+            pp.u_dc_delta_q,
+            pp.u_ac_delta_q,
+            pp.v_dc_delta_q,
+            pp.v_ac_delta_q,
+        ]
+        .iter()
+        .any(|&delta| !(-64..=63).contains(&delta))
+    {
+        return Err(());
+    }
     let frame_type = match pic.frame_type() {
         0 => crate::av1::FrameType::Key,
         1 => crate::av1::FrameType::Inter,
@@ -289,6 +319,24 @@ fn hierarchical_refresh_frame_flags(order_hint: u8) -> u8 {
     1 << slot
 }
 
+/// Validate both coordinates before linearizing: an out-of-range column
+/// must not alias column zero of the next row.
+pub(super) fn tile_index(
+    picture: &VADecPictureParameterBufferAV1,
+    tile: &VASliceParameterBufferAV1,
+) -> Result<usize, ()> {
+    if picture.tile_cols == 0 || picture.tile_rows == 0
+        || tile.tile_column >= u16::from(picture.tile_cols)
+        || tile.tile_row >= u16::from(picture.tile_rows)
+        // This path assembles complete tiles; partial-tile flags cannot
+        // be reinterpreted as independent complete payloads.
+        || tile.slice_data_flag != 0
+    {
+        return Err(());
+    }
+    Ok(usize::from(tile.tile_row) * usize::from(picture.tile_cols) + usize::from(tile.tile_column))
+}
+
 pub(super) fn av1_tile_size_bytes_minus_1(chunks: &[Vec<u8>]) -> Result<u8, ()> {
     let max_size = chunks
         .iter()
@@ -318,7 +366,12 @@ pub(super) fn av1_tile_group_data(
     let tile_count = usize::from(pp.tile_cols)
         .checked_mul(usize::from(pp.tile_rows))
         .ok_or(())?;
-    if tile_count == 0 || ranges.len() != chunks.len() || chunks.len() != tile_count {
+    if tile_size_bytes_minus_1 > 3
+        || tile_count == 0
+        || ranges.len() != chunks.len()
+        || chunks.len() != tile_count
+        || chunks.iter().any(Vec::is_empty)
+    {
         return Err(());
     }
     let mut by_tile = vec![None; tile_count];
@@ -341,6 +394,9 @@ pub(super) fn av1_tile_group_data(
         let tile = tile.ok_or(())?;
         if tile_index + 1 != tile_count {
             let size_minus_1 = tile.len().checked_sub(1).ok_or(())?;
+            if (size_minus_1 as u64) >= (1u64 << (8 * tile_size_bytes)) {
+                return Err(());
+            }
             for byte in 0..tile_size_bytes {
                 out.push(((size_minus_1 >> (8 * byte)) & 0xff) as u8);
             }
@@ -353,6 +409,69 @@ pub(super) fn av1_tile_group_data(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tile_coordinates_cannot_alias_another_row_or_use_partial_payloads() {
+        let mut picture: VADecPictureParameterBufferAV1 = unsafe { std::mem::zeroed() };
+        picture.tile_cols = 2;
+        picture.tile_rows = 2;
+        let mut tile: VASliceParameterBufferAV1 = unsafe { std::mem::zeroed() };
+        tile.tile_row = 1;
+        tile.tile_column = 1;
+        assert_eq!(tile_index(&picture, &tile), Ok(3));
+        tile.tile_row = 0;
+        tile.tile_column = 2; // formerly aliased valid tile (1, 0)
+        assert_eq!(tile_index(&picture, &tile), Err(()));
+        tile.tile_column = 0;
+        tile.tile_row = 2;
+        assert_eq!(tile_index(&picture, &tile), Err(()));
+        tile.tile_row = 0;
+        tile.slice_data_flag = 1;
+        assert_eq!(tile_index(&picture, &tile), Err(()));
+    }
+
+    #[test]
+    fn tile_group_rejects_empty_tiles_and_unrepresentable_size_prefixes() {
+        let mut picture: VADecPictureParameterBufferAV1 = unsafe { std::mem::zeroed() };
+        picture.tile_cols = 2;
+        picture.tile_rows = 1;
+        let ranges = [
+            DataRange {
+                offset: 0,
+                size: 1,
+                tile_index: Some(0),
+            },
+            DataRange {
+                offset: 1,
+                size: 1,
+                tile_index: Some(1),
+            },
+        ];
+        assert!(av1_tile_group_data(&picture, &ranges, &[vec![], vec![1]], 0).is_err());
+        assert!(av1_tile_group_data(&picture, &ranges, &[vec![1; 257], vec![1]], 0).is_err());
+        assert!(av1_tile_group_data(&picture, &ranges, &[vec![1], vec![]], 0).is_err());
+        assert!(av1_tile_group_data(&picture, &ranges, &[vec![1], vec![1]], 4).is_err());
+        assert!(av1_tile_group_data(&picture, &ranges, &[vec![1; 256], vec![1]], 0).is_ok());
+    }
+
+    #[test]
+    fn invalid_va_fields_are_rejected_before_bit_truncation_or_debug_assertions() {
+        let mut picture: VADecPictureParameterBufferAV1 = unsafe { std::mem::zeroed() };
+        assert!(av1_frame_header_input(&picture, 0, 255, [0; 8]).is_ok());
+        picture.ref_frame_idx[0] = 8;
+        assert!(av1_frame_header_input(&picture, 0, 255, [0; 8]).is_err());
+        picture.ref_frame_idx[0] = 0;
+        picture.primary_ref_frame = 8;
+        assert!(av1_frame_header_input(&picture, 0, 255, [0; 8]).is_err());
+        picture.primary_ref_frame = 0;
+        picture.y_dc_delta_q = 64;
+        assert!(av1_frame_header_input(&picture, 0, 255, [0; 8]).is_err());
+        picture.y_dc_delta_q = -64;
+        assert!(av1_frame_header_input(&picture, 0, 255, [0; 8]).is_ok());
+        picture.order_hint_bits_minus_1 = 255;
+        assert!(av1_sequence_header_input(&picture).is_err());
+        assert!(av1_frame_header_input(&picture, 0, 255, [0; 8]).is_err());
+    }
 
     #[test]
     fn reference_map_divergence_is_detected_before_next_submission() {

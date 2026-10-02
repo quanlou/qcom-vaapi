@@ -1,6 +1,7 @@
 use super::{VIDEO_MAX_PLANES_USIZE, zeroed};
 use crate::bindings::*;
 use std::ffi::c_void;
+use std::os::fd::OwnedFd;
 use std::ptr;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -31,6 +32,9 @@ pub(super) struct V4l2Buffer {
     /// reused); this counter exists so surface-release ordering is
     /// observable and enforced, not to pin slots.
     pub(super) export_refs: u32,
+    /// One CLOEXEC handle for cache maintenance and waiting for importer
+    /// fences when CPU copies refresh this stable allocation.
+    pub(super) sync_fd: Option<OwnedFd>,
 }
 
 impl V4l2Buffer {
@@ -43,6 +47,7 @@ impl V4l2Buffer {
             len: [0; VIDEO_MAX_PLANES_USIZE],
             planes: [zeroed(); VIDEO_MAX_PLANES_USIZE],
             export_refs: 0,
+            sync_fd: None,
         }
     }
 }

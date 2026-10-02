@@ -70,6 +70,10 @@ pub(super) const VIDIOC_QUERYCAP: c_ulong = ior::<v4l2_capability>(b'V' as c_ulo
 pub(super) const VIDIOC_ENUM_FMT: c_ulong = iowr::<v4l2_fmtdesc>(b'V' as c_ulong, 2);
 pub(super) const VIDIOC_G_FMT: c_ulong = iowr::<v4l2_format>(b'V' as c_ulong, 4);
 pub(super) const VIDIOC_S_FMT: c_ulong = iowr::<v4l2_format>(b'V' as c_ulong, 5);
+pub(super) const VIDIOC_G_CTRL: c_ulong = iowr::<v4l2_control>(b'V' as c_ulong, 27);
+pub(super) const VIDIOC_CREATE_BUFS: c_ulong = iowr::<v4l2_create_buffers>(b'V' as c_ulong, 92);
+pub(super) const VIDIOC_S_CTRL: c_ulong = iowr::<v4l2_control>(b'V' as c_ulong, 28);
+pub(super) const VIDIOC_QUERYCTRL: c_ulong = iowr::<v4l2_queryctrl>(b'V' as c_ulong, 36);
 pub(super) const VIDIOC_REQBUFS: c_ulong = iowr::<v4l2_requestbuffers>(b'V' as c_ulong, 8);
 pub(super) const VIDIOC_QUERYBUF: c_ulong = iowr::<v4l2_buffer>(b'V' as c_ulong, 9);
 pub(super) const VIDIOC_QBUF: c_ulong = iowr::<v4l2_buffer>(b'V' as c_ulong, 15);
@@ -81,6 +85,10 @@ pub(super) const VIDIOC_DQEVENT: c_ulong = ior::<v4l2_event>(b'V' as c_ulong, 89
 pub(super) const VIDIOC_SUBSCRIBE_EVENT: c_ulong =
     iow::<v4l2_event_subscription>(b'V' as c_ulong, 90);
 pub(super) const VIDIOC_DECODER_CMD: c_ulong = iowr::<v4l2_decoder_cmd>(b'V' as c_ulong, 96);
+
+pub(super) const DMA_BUF_IOCTL_SYNC: c_ulong = iow::<u64>(b'b' as c_ulong, 0);
+pub(super) const DMA_BUF_SYNC_WRITE: u64 = 2;
+pub(super) const DMA_BUF_SYNC_END: u64 = 4;
 
 #[repr(C)]
 pub(super) struct PollFd {
@@ -110,6 +118,13 @@ pub(super) fn zeroed<T>() -> T {
 }
 
 pub(super) fn xioctl(fd: c_int, request: c_ulong, arg: *mut c_void) -> Result<(), ()> {
-    let ret = unsafe { ioctl(fd, request, arg) };
-    if ret < 0 { Err(()) } else { Ok(()) }
+    loop {
+        let ret = unsafe { ioctl(fd, request, arg) };
+        if ret >= 0 {
+            return Ok(());
+        }
+        if std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+            return Err(());
+        }
+    }
 }

@@ -67,7 +67,13 @@ pub(crate) unsafe extern "C" fn create_context(
             let Some(surface_idx) = surface_index(surface_id) else {
                 return err(VA_STATUS_ERROR_INVALID_SURFACE);
             };
-            if guard.surfaces[surface_idx].is_none() {
+            let Some(surface) = guard.surfaces[surface_idx].as_ref() else {
+                return err(VA_STATUS_ERROR_INVALID_SURFACE);
+            };
+            if surface.format != cfg.format
+                || surface.width < picture_width
+                || surface.height < picture_height
+            {
                 return err(VA_STATUS_ERROR_INVALID_SURFACE);
             }
         }
@@ -273,7 +279,7 @@ mod tests {
             state: SurfaceState::Ready,
             cap_idx: Some(4),
             frame: Some(SurfaceFrame {
-                data: vec![1, 2, 3, 4],
+                data: std::sync::Arc::new(vec![1, 2, 3, 4]),
                 stride: 2,
                 height: 2,
                 format: crate::pixel_format::DecodedFormat::Nv12,
@@ -294,7 +300,7 @@ mod tests {
         assert_eq!(surface.cap_idx, None);
         assert_eq!(surface.state, SurfaceState::Ready);
         let frame = surface.frame.as_ref().unwrap();
-        assert_eq!(frame.data, [1, 2, 3, 4]);
+        assert_eq!(frame.data.as_slice(), [1, 2, 3, 4]);
         assert_eq!(frame.stride, 2);
         assert_eq!(frame.height, 2);
         drop(guard);

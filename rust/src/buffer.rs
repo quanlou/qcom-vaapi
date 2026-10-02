@@ -75,29 +75,27 @@ pub(crate) unsafe extern "C" fn create_buffer(
     if total > DRV_MAX_BUFFER_BYTES {
         return err(VA_STATUS_ERROR_MAX_NUM_EXCEEDED);
     }
-    let mut bytes = vec![0u8; total];
+    let Some(idx) = guard.buffers.iter().position(Option::is_none) else {
+        return err(VA_STATUS_ERROR_MAX_NUM_EXCEEDED);
+    };
+    let mut bytes = Vec::new();
+    if bytes.try_reserve_exact(total).is_err() {
+        return err(VA_STATUS_ERROR_ALLOCATION_FAILED);
+    }
+    bytes.resize(total, 0);
     if !data.is_null() && total > 0 {
         unsafe { bytes.copy_from_slice(slice::from_raw_parts(data as *const u8, total)) };
     }
-    if let Some((idx, slot)) = guard
-        .buffers
-        .iter_mut()
-        .enumerate()
-        .find(|(_, v)| v.is_none())
-    {
-        *slot = Some(Buffer {
-            owner: context,
-            type_,
-            elem_size: size,
-            num_elements,
-            data: bytes,
-            mapped: false,
-        });
-        unsafe { *buf_id = DRV_ID_BASE_BUFFER + idx as u32 };
-        ok()
-    } else {
-        err(VA_STATUS_ERROR_MAX_NUM_EXCEEDED)
-    }
+    guard.buffers[idx] = Some(Buffer {
+        owner: context,
+        type_,
+        elem_size: size,
+        num_elements,
+        data: bytes,
+        mapped: false,
+    });
+    unsafe { *buf_id = DRV_ID_BASE_BUFFER + idx as u32 };
+    ok()
 }
 
 pub(crate) unsafe extern "C" fn destroy_buffer(
@@ -151,17 +149,18 @@ pub(crate) unsafe extern "C" fn buffer_set_num_elements(
     if buf.mapped {
         return err(VA_STATUS_ERROR_OPERATION_FAILED);
     }
-    if num_elements > buf.num_elements {
-        return err(VA_STATUS_ERROR_INVALID_PARAMETER);
-    }
     let Some(new_len) = buffer_storage_len(buf.elem_size, num_elements) else {
         return err(VA_STATUS_ERROR_INVALID_PARAMETER);
     };
     if new_len > DRV_MAX_BUFFER_BYTES {
         return err(VA_STATUS_ERROR_MAX_NUM_EXCEEDED);
     }
+    if new_len > buf.data.len() {
+        return err(VA_STATUS_ERROR_INVALID_PARAMETER);
+    }
+    // This changes the valid element count, not the original allocation.
+    // Clients can shrink/reset a reusable buffer and grow back to capacity.
     buf.num_elements = num_elements;
-    buf.data.truncate(new_len);
     ok()
 }
 
@@ -399,5 +398,60 @@ mod tests {
         );
 
         unsafe { drop(Box::from_raw(raw)) };
+    }
+    #[test]
+    fn reusable_buffer_restores_original_capacity_after_shrink_and_zero_count() {
+        let state = DriverBox::new();
+        let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
+        ctx.pDriverData = &state as *const DriverBox as *mut c_void;
+        state.lock.lock().unwrap().contexts[0] = Some(context_for_test());
+        let mut initial = [11u8, 12, 21, 22, 31, 32];
+        let mut id = VA_INVALID_ID;
+        assert_eq!(
+            unsafe {
+                create_buffer(
+                    &mut ctx,
+                    DRV_ID_BASE_CONTEXT,
+                    VABufferType::VASliceDataBufferType,
+                    2,
+                    3,
+                    initial.as_mut_ptr().cast(),
+                    &mut id,
+                )
+            },
+            ok()
+        );
+        for count in [1, 0, 2, 3] {
+            assert_eq!(
+                unsafe { buffer_set_num_elements(&mut ctx, id, count) },
+                ok()
+            );
+            let mut mapped = ptr::null_mut();
+            assert_eq!(unsafe { map_buffer(&mut ctx, id, &mut mapped) }, ok());
+            assert_eq!(
+                unsafe { slice::from_raw_parts(mapped.cast::<u8>(), initial.len()) },
+                &initial
+            );
+            assert_eq!(unsafe { unmap_buffer(&mut ctx, id) }, ok());
+            let mut type_ = VABufferType::VAImageBufferType;
+            let (mut size, mut elements) = (0, 0);
+            assert_eq!(
+                unsafe { buffer_info(&mut ctx, id, &mut type_, &mut size, &mut elements) },
+                ok()
+            );
+            assert_eq!((size, elements), (2, count));
+        }
+        assert_eq!(
+            unsafe { buffer_set_num_elements(&mut ctx, id, 4) },
+            err(VA_STATUS_ERROR_INVALID_PARAMETER)
+        );
+        assert_eq!(
+            state.lock.lock().unwrap().buffers[buffer_index(id).unwrap()]
+                .as_ref()
+                .unwrap()
+                .num_elements,
+            3
+        );
+        assert_eq!(unsafe { destroy_buffer(&mut ctx, id) }, ok());
     }
 }

@@ -38,7 +38,8 @@ pub(crate) fn aligned_pitch(format: DecodedFormat, width: u32) -> u32 {
 }
 
 pub(crate) fn image_data_size(pitch: u32, height: u32) -> u32 {
-    pitch.saturating_mul(height).saturating_mul(3) / 2
+    // Subsampled chroma needs a whole row for an odd final luma row.
+    pitch.saturating_mul(height.saturating_add(height.div_ceil(2)))
 }
 
 pub(crate) fn make_image(
@@ -80,43 +81,72 @@ pub(crate) fn copy_semiplanar_region(
     y: usize,
     w: usize,
     h: usize,
-) {
+) -> bool {
     let bytes_per_sample = format.bytes_per_sample() as usize;
     let cap_stride = cap_stride as usize;
     let cap_h = cap_h as usize;
     let img_pitch = img_pitch as usize;
     let img_plane1_off = img_plane1_off as usize;
-    let x_bytes = x.saturating_mul(bytes_per_sample);
-    let w_bytes = w.saturating_mul(bytes_per_sample);
+    let Some((x_bytes, y_end, luma_bytes, chroma_bytes)) = x
+        .checked_mul(bytes_per_sample)
+        .zip(y.checked_add(h))
+        .zip(w.checked_mul(bytes_per_sample))
+        .zip(
+            w.div_ceil(2)
+                .checked_mul(2)
+                .and_then(|n| n.checked_mul(bytes_per_sample)),
+        )
+        .map(|(((x_bytes, y_end), luma_bytes), chroma_bytes)| {
+            (x_bytes, y_end, luma_bytes, chroma_bytes)
+        })
+    else {
+        return false;
+    };
+    let Some(source_size) = cap_h
+        .checked_add(cap_h.div_ceil(2))
+        .and_then(|rows| rows.checked_mul(cap_stride))
+    else {
+        return false;
+    };
+    let Some(luma_size) = h.checked_mul(img_pitch) else {
+        return false;
+    };
+    let Some(destination_size) = h
+        .div_ceil(2)
+        .checked_mul(img_pitch)
+        .and_then(|size| img_plane1_off.checked_add(size))
+    else {
+        return false;
+    };
+    if w == 0
+        || h == 0
+        || !x.is_multiple_of(2)
+        || !y.is_multiple_of(2)
+        || y_end > cap_h
+        || source_size > cap.len()
+        || x_bytes
+            .checked_add(chroma_bytes)
+            .is_none_or(|end| end > cap_stride)
+        || chroma_bytes > img_pitch
+        || img_plane1_off < luma_size
+        || destination_size > dst.len()
+    {
+        // Validate the entire operation before touching the destination.
+        // Silent partial copies must never be reported as successful frames.
+        return false;
+    }
     for row in 0..h {
-        let src_off = (y + row).saturating_mul(cap_stride).saturating_add(x_bytes);
-        let dst_off = row.saturating_mul(img_pitch);
-        let Some(src_end) = src_off.checked_add(w_bytes) else {
-            continue;
-        };
-        let Some(dst_end) = dst_off.checked_add(w_bytes) else {
-            continue;
-        };
-        if src_end <= cap.len() && dst_end <= dst.len() {
-            dst[dst_off..dst_end].copy_from_slice(&cap[src_off..src_end]);
-        }
+        let src_off = (y + row) * cap_stride + x_bytes;
+        let dst_off = row * img_pitch;
+        dst[dst_off..dst_off + luma_bytes].copy_from_slice(&cap[src_off..src_off + luma_bytes]);
     }
-    let chroma_src = cap_stride.saturating_mul(cap_h);
-    for row in 0..(h / 2) {
-        let src_off = chroma_src
-            .saturating_add((y / 2 + row).saturating_mul(cap_stride))
-            .saturating_add(x_bytes);
-        let dst_off = img_plane1_off.saturating_add(row.saturating_mul(img_pitch));
-        let Some(src_end) = src_off.checked_add(w_bytes) else {
-            continue;
-        };
-        let Some(dst_end) = dst_off.checked_add(w_bytes) else {
-            continue;
-        };
-        if src_end <= cap.len() && dst_end <= dst.len() {
-            dst[dst_off..dst_end].copy_from_slice(&cap[src_off..src_end]);
-        }
+    let chroma_src = cap_stride * cap_h;
+    for row in 0..h.div_ceil(2) {
+        let src_off = chroma_src + (y / 2 + row) * cap_stride + x_bytes;
+        let dst_off = img_plane1_off + row * img_pitch;
+        dst[dst_off..dst_off + chroma_bytes].copy_from_slice(&cap[src_off..src_off + chroma_bytes]);
     }
+    true
 }
 
 pub(crate) fn region_within(
@@ -129,7 +159,9 @@ pub(crate) fn region_within(
     let (image_width, image_height) = image;
     let (x, y) = origin;
     let (width, height) = size;
-    if x < 0 || y < 0 || width == 0 || height == 0 {
+    // Arbitrary chroma phase shifts require resampling, which this raw-copy
+    // path does not implement. Never shift the interleaved U/V pair by a byte.
+    if x < 0 || y < 0 || x % 2 != 0 || y % 2 != 0 || width == 0 || height == 0 {
         return false;
     }
     let x = x as u32;
@@ -206,14 +238,14 @@ mod tests {
             4,
             12,
             2,
-            1,
+            2,
             4,
             2,
         );
 
-        assert_eq!(&image[0..4], &[10, 11, 12, 13]);
-        assert_eq!(&image[4..8], &[18, 19, 20, 21]);
-        assert_eq!(&image[12..16], &[34, 35, 36, 37]);
+        assert_eq!(&image[0..4], &[18, 19, 20, 21]);
+        assert_eq!(&image[4..8], &[26, 27, 28, 29]);
+        assert_eq!(&image[12..16], &[42, 43, 44, 45]);
     }
 
     #[test]
@@ -242,5 +274,66 @@ mod tests {
             2,
         );
         assert_eq!(image, vec![0; 8]);
+    }
+    #[test]
+    fn odd_sized_images_copy_the_complete_final_chroma_row_and_uv_pair() {
+        for format in [DecodedFormat::Nv12, DecodedFormat::P010] {
+            let pitch = aligned_pitch(format, 17);
+            let rows = 17 + 9;
+            assert_eq!(image_data_size(pitch, 17), pitch * rows);
+            let source: Vec<u8> = (0..pitch * rows)
+                .map(|i| (i as u8).wrapping_add(1))
+                .collect();
+            let mut dest = vec![0xEE; source.len()];
+            copy_semiplanar_region(
+                format,
+                &source,
+                pitch,
+                17,
+                &mut dest,
+                pitch,
+                pitch * 17,
+                0,
+                0,
+                17,
+                17,
+            );
+            let start = (pitch * 25) as usize;
+            let chroma_bytes = 18 * format.bytes_per_sample() as usize;
+            assert_eq!(
+                &dest[start..start + chroma_bytes],
+                &source[start..start + chroma_bytes]
+            );
+            let luma_bytes = 17 * format.bytes_per_sample() as usize;
+            assert_eq!(&dest[..luma_bytes], &source[..luma_bytes]);
+            assert_eq!(dest[luma_bytes], 0xEE);
+        }
+    }
+
+    #[test]
+    fn truncated_copy_leaves_the_whole_destination_untouched() {
+        let source = vec![0xA5; 128 * 24 - 1];
+        let mut dest = vec![0xEE; 128 * 24];
+        copy_semiplanar_region(
+            DecodedFormat::Nv12,
+            &source,
+            128,
+            16,
+            &mut dest,
+            128,
+            128 * 16,
+            0,
+            0,
+            16,
+            16,
+        );
+        assert!(dest.iter().all(|byte| *byte == 0xEE));
+    }
+
+    #[test]
+    fn crop_rejects_chroma_phase_changes_that_would_swap_uv_bytes() {
+        assert!(!region_within((32, 32), (16, 16), (1, 0), (16, 16)));
+        assert!(!region_within((32, 32), (16, 16), (0, 1), (16, 16)));
+        assert!(region_within((32, 32), (17, 17), (2, 2), (17, 17)));
     }
 }

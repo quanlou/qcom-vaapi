@@ -7,6 +7,51 @@
 use super::{PendingFrame, ReplayChunk};
 use std::collections::VecDeque;
 
+/// Bound both compressed storage and replay work per session. Retain a whole
+/// GOP, or nothing: a suffix without its random-access picture is unusable.
+pub(super) const MAX_REPLAY_CHUNKS: usize = 1024;
+pub(super) const MAX_REPLAY_BYTES: usize = 32 * 1024 * 1024;
+
+pub(super) fn remember(
+    history: &mut Vec<ReplayChunk>,
+    data: &[u8],
+    timestamp: u64,
+    keyframe: bool,
+    surface: Option<u32>,
+    expects_output: bool,
+) -> bool {
+    if keyframe {
+        history.clear();
+    } else if history.is_empty() {
+        // Initial inter picture, or an overflowed GOP: wait for random access.
+        return false;
+    }
+    let bytes = history.iter().try_fold(data.len(), |total, chunk| {
+        total.checked_add(chunk.data.len())
+    });
+    if history.len() >= MAX_REPLAY_CHUNKS
+        || bytes.is_none_or(|bytes| bytes > MAX_REPLAY_BYTES)
+        || history.iter().any(|chunk| chunk.timestamp == timestamp)
+    {
+        history.clear();
+        return false;
+    }
+    let mut retained = Vec::new();
+    if retained.try_reserve_exact(data.len()).is_err() || history.try_reserve(1).is_err() {
+        history.clear();
+        return false;
+    }
+    retained.extend_from_slice(data);
+    history.push(ReplayChunk {
+        data: retained,
+        timestamp,
+        keyframe,
+        surface,
+        expects_output,
+    });
+    true
+}
+
 /// Retain decode order, including hidden reference pictures. A hole in the
 /// published prefix cannot be repaired by simply omitting that access unit.
 pub(super) fn drain_prefix<'a>(
@@ -19,6 +64,15 @@ pub(super) fn drain_prefix<'a>(
     let last = history
         .iter()
         .rposition(|chunk| published.contains(&chunk.timestamp))?;
+    // A trailing hidden picture can be a reference for the next submission,
+    // but published timestamps cannot prove whether it completed. Omitting it
+    // would change references; replaying it could retire a pending hidden owner.
+    if history[last + 1..]
+        .iter()
+        .any(|chunk| !chunk.expects_output)
+    {
+        return None;
+    }
     let prefix = &history[..=last];
     if prefix
         .iter()
@@ -70,6 +124,104 @@ mod tests {
     }
 
     #[test]
+    fn chunk_limit_discards_whole_gop_and_waits_for_next_keyframe() {
+        let mut history = Vec::new();
+        for timestamp in 0..MAX_REPLAY_CHUNKS as u64 {
+            assert!(remember(
+                &mut history,
+                &[1],
+                timestamp,
+                timestamp == 0,
+                Some(1),
+                true
+            ));
+        }
+        assert_eq!(history.len(), MAX_REPLAY_CHUNKS);
+        assert!(history[0].keyframe);
+        assert!(!remember(
+            &mut history,
+            &[1],
+            MAX_REPLAY_CHUNKS as u64,
+            false,
+            Some(1),
+            true
+        ));
+        assert!(history.is_empty());
+        assert!(!remember(&mut history, &[1], 2000, false, Some(1), true));
+        assert!(history.is_empty());
+        assert!(remember(&mut history, &[2], 2001, true, Some(1), true));
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].data, [2]);
+    }
+
+    #[test]
+    fn byte_limit_retains_exact_budget_and_never_a_truncated_suffix() {
+        let mut history = Vec::new();
+        let full_budget = vec![1; MAX_REPLAY_BYTES];
+        assert!(remember(&mut history, &full_budget, 0, true, Some(1), true));
+        assert!(!remember(&mut history, &[2], 1, false, Some(1), true));
+        assert!(history.is_empty());
+        assert!(!remember(&mut history, &[3], 2, false, Some(1), true));
+        assert!(remember(&mut history, &[4], 3, true, Some(1), true));
+        assert_eq!(history[0].timestamp, 3);
+    }
+
+    #[test]
+    fn reused_timestamps_invalidate_the_chain_instead_of_aliasing_output() {
+        let mut history = Vec::new();
+        assert!(remember(&mut history, &[1], 7, true, Some(1), true));
+        assert!(!remember(&mut history, &[2], 7, false, Some(2), true));
+        assert!(history.is_empty());
+        assert!(!remember(&mut history, &[3], 8, false, Some(3), true));
+    }
+
+    #[test]
+    fn long_gop_consumed_dependencies_cannot_be_rebuilt_from_queued_tail() {
+        let mut history = Vec::new();
+        for timestamp in 0..300 {
+            assert!(remember(
+                &mut history,
+                &[timestamp as u8],
+                timestamp,
+                timestamp == 0,
+                Some(timestamp as u32),
+                timestamp % 3 != 1
+            ));
+        }
+        let tail = PendingFrame {
+            surface: 299,
+            timestamp: 299,
+            expects_output: true,
+        };
+        assert!(!rebuild_is_complete(
+            &history,
+            &[tail],
+            &[vec![299_u64 as u8]]
+        ));
+        let mut owners: Vec<_> = history
+            .iter()
+            .map(|chunk| PendingFrame {
+                surface: chunk.surface.unwrap(),
+                timestamp: chunk.timestamp,
+                expects_output: chunk.expects_output,
+            })
+            .collect();
+        let queued: Vec<_> = history.iter().map(|chunk| chunk.data.clone()).collect();
+        assert!(rebuild_is_complete(&history, &owners, &queued));
+        // An older GOP owner still pending when a new keyframe starts must
+        // not be silently dropped to make the queued/history lengths fit.
+        owners.insert(
+            0,
+            PendingFrame {
+                surface: 999,
+                timestamp: 999,
+                expects_output: true,
+            },
+        );
+        assert!(!rebuild_is_complete(&history, &owners, &queued));
+    }
+
+    #[test]
     fn published_prefix_keeps_decode_order() {
         let history = vec![
             chunk(0, true, true),
@@ -84,6 +236,12 @@ mod tests {
                 .collect::<Vec<_>>(),
             [0, 2, 1]
         );
+    }
+
+    #[test]
+    fn trailing_hidden_reference_without_completion_proof_fails_closed() {
+        let history = vec![chunk(0, true, true), chunk(1, false, false)];
+        assert!(drain_prefix(&history, &VecDeque::from([0])).is_none());
     }
 
     #[test]

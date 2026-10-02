@@ -7,7 +7,7 @@
 //! `va_drm.rs`.
 
 use std::ffi::{c_int, c_void};
-use std::os::fd::{FromRawFd, OwnedFd};
+use std::os::fd::{BorrowedFd, OwnedFd};
 
 use crate::bindings::*;
 use crate::state::{
@@ -19,7 +19,6 @@ use crate::va_drm::{DrmPrimeDescriptor, DrmPrimeLayout, VA_SURFACE_ATTRIB_MEM_TY
 use crate::{err, ok, state_from_ctx, va_debug_enabled};
 
 unsafe extern "C" {
-    fn dup(fd: c_int) -> c_int;
     fn close(fd: c_int) -> c_int;
 }
 
@@ -118,12 +117,14 @@ pub(crate) fn release_export_fds(surf: &mut Surface) -> usize {
 }
 
 fn duplicate_export_fd(fd: c_int) -> Result<OwnedFd, ()> {
-    let owned = unsafe { dup(fd) };
-    if owned >= 0 {
-        Ok(unsafe { OwnedFd::from_raw_fd(owned) })
-    } else {
-        Err(())
+    if fd < 0 {
+        return Err(());
     }
+    // Rust duplicates with CLOEXEC atomically, including in multithreaded
+    // media clients which may spawn helper processes while exporting.
+    unsafe { BorrowedFd::borrow_raw(fd) }
+        .try_clone_to_owned()
+        .map_err(|_| ())
 }
 
 fn close_export_fd(fd: c_int) {
@@ -182,24 +183,36 @@ pub(crate) fn export_ready_surface(
     } else {
         return Err(SurfaceExportError::InvalidContext);
     };
-    let stable_capture = guard.contexts[ctx_idx]
+    let stable_reservation = guard.contexts[ctx_idx]
         .as_ref()
         .and_then(|context| context.v4l2.as_ref())
-        .is_some_and(|v4l2| v4l2.stable_capture_mode());
-    if surface_state == SurfaceState::Ready && !stable_capture {
-        // Post-decode export from a legacy-flow session (Firefox exports
-        // only through the frame callback, after the frame was published).
-        // Preserve export identity by reserving a stable slot now and
-        // copying the completed frame into it; the copy source is the
-        // published working slot, whose bytes the firmware keeps until it
-        // refills that slot.
+        .is_some_and(|v4l2| {
+            existing_cap_idx.is_some() && v4l2.reserved_capture_for(surface_id) == existing_cap_idx
+        });
+    if surface_state == SurfaceState::Ready && !stable_reservation {
+        // Stable mode is session-wide; older published frames may still
+        // point to working slots after another surface enables it. Verify
+        // this surface owns its reservation before exporting.
+        // The working slot may already have been recycled by firmware.
+        // Stabilize from the saved pixels, never from a queued mapping.
         let Some(published) = existing_cap_idx else {
             return Err(SurfaceExportError::OperationFailed);
         };
-        let Some(cap_idx) = guard.contexts[ctx_idx]
+        let DriverState {
+            surfaces, contexts, ..
+        } = guard;
+        let snapshot = surfaces[surf_idx]
+            .as_ref()
+            .and_then(|surface| surface.frame.as_ref());
+        let Some(snapshot) = snapshot else {
+            return Err(SurfaceExportError::OperationFailed);
+        };
+        let Some(cap_idx) = contexts[ctx_idx]
             .as_mut()
             .and_then(|context| context.v4l2.as_mut())
-            .and_then(|v4l2| v4l2.stabilize_published_capture(published, surface_id))
+            .and_then(|v4l2| {
+                v4l2.stabilize_published_capture(published, surface_id, Some(snapshot))
+            })
         else {
             return Err(SurfaceExportError::OperationFailed);
         };
@@ -275,6 +288,7 @@ mod tests {
     use crate::state::{DRV_ID_BASE_SURFACE, DRV_MAX_SURFACES};
 
     const F_GETFD: c_int = 1;
+    const FD_CLOEXEC: c_int = 1;
 
     unsafe extern "C" {
         fn fcntl(fd: c_int, cmd: c_int, ...) -> c_int;
@@ -312,15 +326,35 @@ mod tests {
     }
 
     #[test]
-    fn dropping_surface_closes_tracked_export_fds() {
+    fn tracked_export_fd_is_close_on_exec() {
         let tracked = duplicate_export_fd(1).unwrap();
-        let tracked_raw = tracked.as_raw_fd();
+        assert_ne!(
+            unsafe { fcntl(tracked.as_raw_fd(), F_GETFD) } & FD_CLOEXEC,
+            0
+        );
+    }
+
+    #[test]
+    fn dropping_surface_closes_tracked_export_fds() {
+        use std::io::{ErrorKind, Read};
+        use std::os::unix::net::UnixStream;
+
+        let (mut reader, writer) = UnixStream::pair().unwrap();
+        reader.set_nonblocking(true).unwrap();
+        let tracked = duplicate_export_fd(writer.as_raw_fd()).unwrap();
+        drop(writer);
         let mut surf = surface_with(SurfaceState::Ready, Some(0));
         surf.export_fds.push(tracked);
 
-        assert!(unsafe { fcntl(tracked_raw, F_GETFD) } >= 0);
+        let mut byte = [0];
+        assert_eq!(
+            reader.read(&mut byte).unwrap_err().kind(),
+            ErrorKind::WouldBlock
+        );
         drop(surf);
-        assert_eq!(unsafe { fcntl(tracked_raw, F_GETFD) }, -1);
+        // EOF proves the last peer was closed, even if another test reuses
+        // its numeric fd between Drop and this read.
+        assert_eq!(reader.read(&mut byte).unwrap(), 0);
     }
 
     #[test]

@@ -71,7 +71,7 @@ fn decoded_surface(format: DecodedFormat) -> (Box<DriverBox>, VADriverContext) {
     let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
     ctx.pDriverData = (&*state as *const DriverBox).cast_mut().cast();
     let pitch = aligned_pitch(format, 16);
-    let data = (0..image_data_size(pitch, 16))
+    let data: Vec<u8> = (0..image_data_size(pitch, 16))
         .map(|index| (index as u8).wrapping_add(17))
         .collect();
     state.lock.lock().unwrap().surfaces[0] = Some(Surface {
@@ -81,7 +81,7 @@ fn decoded_surface(format: DecodedFormat) -> (Box<DriverBox>, VADriverContext) {
         state: SurfaceState::Ready,
         cap_idx: None,
         frame: Some(SurfaceFrame {
-            data,
+            data: std::sync::Arc::new(data),
             stride: pitch,
             height: 16,
             format,
@@ -192,5 +192,114 @@ fn derived_mapped_images_own_storage_after_the_surface_is_destroyed() {
         );
         assert_eq!(unsafe { destroy_image(&mut ctx, image.image_id) }, ok());
         assert!(state.lock.lock().unwrap().surfaces[0].is_none());
+    }
+}
+
+#[test]
+fn corrupt_surface_snapshot_fails_get_and_derive_without_partial_pixels() {
+    use crate::state::DRV_ID_BASE_SURFACE;
+    for format in SUPPORTED_IMAGE_FORMATS {
+        let (state, mut ctx) = decoded_surface(format);
+        let mut va_format = image_format(format);
+        let mut image = unsafe { std::mem::zeroed() };
+        assert_eq!(
+            unsafe { create_image(&mut ctx, &mut va_format, 16, 16, &mut image) },
+            ok()
+        );
+        {
+            let mut guard = state.lock.lock().unwrap();
+            let snapshot = &mut guard.surfaces[0]
+                .as_mut()
+                .unwrap()
+                .frame
+                .as_mut()
+                .unwrap()
+                .data;
+            std::sync::Arc::make_mut(snapshot).pop();
+            guard.buffers[buffer_index(image.buf).unwrap()]
+                .as_mut()
+                .unwrap()
+                .data
+                .fill(0xEE);
+        }
+        assert_eq!(
+            unsafe { get_image(&mut ctx, DRV_ID_BASE_SURFACE, 0, 0, 16, 16, image.image_id) },
+            err(VA_STATUS_ERROR_OPERATION_FAILED)
+        );
+        assert!(
+            state.lock.lock().unwrap().buffers[buffer_index(image.buf).unwrap()]
+                .as_ref()
+                .unwrap()
+                .data
+                .iter()
+                .all(|byte| *byte == 0xEE)
+        );
+        let mut derived: VAImage = unsafe { std::mem::zeroed() };
+        derived.image_id = VA_INVALID_ID;
+        assert_eq!(
+            unsafe { derive_image(&mut ctx, DRV_ID_BASE_SURFACE, &mut derived) },
+            err(VA_STATUS_ERROR_DECODING_ERROR)
+        );
+        assert_eq!(derived.image_id, VA_INVALID_ID);
+        assert_eq!(
+            state.lock.lock().unwrap().images.iter().flatten().count(),
+            1
+        );
+        assert_eq!(unsafe { destroy_image(&mut ctx, image.image_id) }, ok());
+    }
+}
+
+#[test]
+fn odd_image_dimensions_preserve_the_last_chroma_row_through_va_callbacks() {
+    use crate::state::DRV_ID_BASE_SURFACE;
+    for format in SUPPORTED_IMAGE_FORMATS {
+        let (state, mut ctx) = decoded_surface(format);
+        let pitch = aligned_pitch(format, 17);
+        let source: Vec<u8> = (0..pitch * 26).map(|i| (i as u8).wrapping_add(1)).collect();
+        {
+            let mut guard = state.lock.lock().unwrap();
+            let surface = guard.surfaces[0].as_mut().unwrap();
+            surface.width = 17;
+            surface.height = 17;
+            surface.frame = Some(crate::state::SurfaceFrame {
+                data: std::sync::Arc::new(source.clone()),
+                stride: pitch,
+                height: 17,
+                format,
+            });
+        }
+        let mut va_format = image_format(format);
+        let mut image = unsafe { std::mem::zeroed() };
+        assert_eq!(
+            unsafe { create_image(&mut ctx, &mut va_format, 17, 17, &mut image) },
+            ok()
+        );
+        assert_eq!(image.data_size, pitch * 26);
+        assert_eq!(
+            unsafe { get_image(&mut ctx, DRV_ID_BASE_SURFACE, 0, 0, 17, 17, image.image_id) },
+            ok()
+        );
+        let last = (pitch * 25) as usize;
+        let chroma_bytes = 18 * format.bytes_per_sample() as usize;
+        assert_eq!(
+            &state.lock.lock().unwrap().buffers[buffer_index(image.buf).unwrap()]
+                .as_ref()
+                .unwrap()
+                .data[last..last + chroma_bytes],
+            &source[last..last + chroma_bytes]
+        );
+        let mut derived = unsafe { std::mem::zeroed() };
+        assert_eq!(
+            unsafe { derive_image(&mut ctx, DRV_ID_BASE_SURFACE, &mut derived) },
+            ok()
+        );
+        assert_eq!(derived.data_size, pitch * 26);
+        assert_eq!(
+            state.lock.lock().unwrap().buffers[buffer_index(derived.buf).unwrap()]
+                .as_ref()
+                .unwrap()
+                .data,
+            source
+        );
     }
 }

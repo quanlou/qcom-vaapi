@@ -38,12 +38,8 @@ impl H264Decoder {
                 self.synth.set_picture_params(pp);
             }
             VABufferType::VAIQMatrixBufferType => {
-                if buffer.data.len() >= std::mem::size_of::<VAIQMatrixBufferH264>() {
-                    let iq = unsafe {
-                        ptr::read_unaligned(buffer.data.as_ptr() as *const VAIQMatrixBufferH264)
-                    };
-                    self.synth.set_iq_matrix(iq);
-                }
+                let iq = read_one::<VAIQMatrixBufferH264>(buffer)?;
+                self.synth.set_iq_matrix(iq);
             }
             VABufferType::VASliceParameterBufferType => self.read_slice_parameters(buffer)?,
             VABufferType::VASliceDataBufferType => self.read_slice_data(buffer)?,
@@ -63,10 +59,9 @@ impl H264Decoder {
             .synth
             .assemble_frame(&self.slices)
             .ok_or_else(|| err(VA_STATUS_ERROR_INVALID_PARAMETER))?;
-        let keyframe = frame
-            .bytes
-            .windows(5)
-            .any(|bytes| bytes == [0, 0, 0, 1, 0x65]);
+        // Slice NALs are validated by assembly. nal_ref_idc can differ while
+        // nal_unit_type 5 still identifies an IDR (0x25, 0x45 and 0x65).
+        let keyframe = self.slices.iter().any(|slice| slice.data[0] & 0x1f == 5);
         let poc = self.synth.pp.CurrPic.TopFieldOrderCnt;
         let timestamp_usec = normalized_timestamp(
             poc,
@@ -177,7 +172,34 @@ fn normalized_timestamp(
 
 #[cfg(test)]
 mod tests {
-    use super::normalized_timestamp;
+    use super::*;
+
+    #[test]
+    fn random_access_recognizes_all_reference_idr_nal_headers() {
+        for (header, expected) in [(0x25, true), (0x45, true), (0x65, true), (0x41, false)] {
+            let mut decoder = H264Decoder::new(VAProfile::VAProfileH264Main);
+            decoder
+                .synth
+                .set_picture_params(unsafe { std::mem::zeroed() });
+            decoder.slices.push(H264Slice {
+                sp: unsafe { std::mem::zeroed() },
+                data: vec![header, 0xb8],
+            });
+            assert_eq!(decoder.finish_picture().unwrap().keyframe, expected);
+        }
+        let mut decoder = H264Decoder::new(VAProfile::VAProfileH264Main);
+        decoder
+            .synth
+            .set_picture_params(unsafe { std::mem::zeroed() });
+        decoder.slices.push(H264Slice {
+            sp: unsafe { std::mem::zeroed() },
+            data: vec![0x05, 0xb8],
+        });
+        assert!(
+            decoder.finish_picture().is_err(),
+            "an IDR must be a reference NAL"
+        );
+    }
 
     #[test]
     fn timestamps_are_relative_to_first_poc() {

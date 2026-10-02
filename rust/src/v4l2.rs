@@ -6,6 +6,7 @@ use std::ptr;
 mod abi;
 mod capture;
 mod debug;
+mod dmabuf;
 mod poll;
 mod queue;
 mod recovery;
@@ -19,10 +20,9 @@ pub(crate) use abi::{
 };
 use queue::{BufferState, V4l2Buffer, V4l2Queue};
 
-const OUT_NUM_BUFFERS: u32 = 16;
+const OUT_NUM_BUFFERS: u32 = 4;
 const CAP_NUM_BUFFERS_MIN: u32 = 20;
 const CAP_NUM_BUFFERS_MAX: u32 = 128;
-const CAP_EXTRA_BUFFERS: u32 = 28;
 /// Cap on how many "working" (non-reserved) CAPTURE slots stay in the kernel
 /// queue at once, in stable-capture mode. Chromium exports its whole 22-frame
 /// pool one surface at a time and interleaves exports with decode; if the
@@ -55,6 +55,9 @@ thread_local! {
 #[derive(Clone)]
 pub(crate) struct ReadyCapture {
     pub(crate) surface: u32,
+    /// STOP completed without pixels for this owner (for example discarded
+    /// seek preroll). Report a picture error, never successful publication.
+    pub(crate) failed: bool,
     pub(crate) cap_idx: Option<usize>,
     /// Pixels copied at dequeue time. CAPTURE slots are recycled as soon as
     /// they are requeued, so late surface reads must use this snapshot rather
@@ -140,6 +143,11 @@ pub(crate) struct V4l2Session {
     /// START was already sent for this source-change boundary.
     source_change_start_sent: bool,
     drain_eos_grace: bool,
+    // STOP's empty CAPTURE marker can arrive after a following START.
+    drain_empty_grace: bool,
+    // START must follow userspace dequeue of STOP's LAST buffer: vb2 sets
+    // last_buffer_dequeued during DQBUF, and START clears that flag.
+    drain_last_seen: bool,
     /// Set when recovery is impossible or exhausted; sessions then fail like
     /// they did before recovery existed.
     abandoned: bool,
@@ -159,6 +167,11 @@ pub(crate) struct V4l2Session {
     headers: Vec<u8>,
     replay_history: Vec<ReplayChunk>,
     published_timestamps: VecDeque<u64>,
+    /// V4L2 timestamps route completions, not media time. Keep them unique
+    /// across seeks and device rebuilds so replay cannot publish into a new
+    /// picture with the same POC or presentation timestamp.
+    next_submission_timestamp: u64,
+    capture_metadata_ready: bool,
 }
 
 impl V4l2Session {
@@ -173,7 +186,7 @@ impl V4l2Session {
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "/dev/video16".to_string());
         let c_path = CString::new(devnode.as_str()).map_err(|_| ())?;
-        let fd = unsafe { open(c_path.as_ptr(), O_RDWR | O_NONBLOCK, 0) };
+        let fd = unsafe { open(c_path.as_ptr(), O_RDWR | O_NONBLOCK | O_CLOEXEC as c_int, 0) };
         if fd < 0 {
             return Err(());
         }
@@ -198,6 +211,8 @@ impl V4l2Session {
             source_change_eos_seen: false,
             source_change_start_sent: false,
             drain_eos_grace: false,
+            drain_empty_grace: false,
+            drain_last_seen: false,
             abandoned: false,
             sync_drain_failures: 0,
             stable_capture: false,
@@ -206,6 +221,8 @@ impl V4l2Session {
             headers: Vec::new(),
             replay_history: Vec::new(),
             published_timestamps: VecDeque::new(),
+            next_submission_timestamp: 0,
+            capture_metadata_ready: false,
         };
 
         if this.query_cap().is_err()
@@ -291,6 +308,11 @@ impl V4l2Session {
     fn mmap_queue(&mut self, output: bool) -> Result<(), ()> {
         let q = if output { &mut self.out } else { &mut self.cap };
         for (i, b) in q.buffers.iter_mut().enumerate() {
+            // CREATE_BUFS appends a tail. Never reset an existing mapping,
+            // queued state, reservation or export while discovering the tail.
+            if b.num_planes != 0 {
+                continue;
+            }
             let mut buf: v4l2_buffer = zeroed();
             b.planes = [zeroed(); VIDEO_MAX_PLANES_USIZE];
             buf.type_ = q.type_;
@@ -299,33 +321,52 @@ impl V4l2Session {
             buf.length = VIDEO_MAX_PLANES;
             buf.m.planes = b.planes.as_mut_ptr();
             xioctl(self.fd, VIDIOC_QUERYBUF, &mut buf as *mut _ as *mut c_void)?;
-            b.num_planes = b
-                .planes
-                .iter()
-                .take(buf.length as usize)
-                .filter(|p| p.length != 0)
-                .count()
-                .max(1);
+            // All supported coded formats and NV12/P010 use one memory
+            // plane. The copy/export paths address plane zero exclusively.
+            if buf.length != 1 || b.planes[0].length == 0 {
+                return Err(());
+            }
+            b.num_planes = 1;
             for p in 0..b.num_planes {
-                let length = b.planes[p].length as usize;
-                let offset = unsafe { b.planes[p].m.mem_offset } as isize;
-                let addr = unsafe {
-                    mmap(
-                        ptr::null_mut(),
-                        length,
-                        PROT_READ | PROT_WRITE,
-                        MAP_SHARED,
-                        self.fd,
-                        offset,
-                    )
-                };
-                if addr as isize == -1 {
-                    return Err(());
-                }
-                b.addr[p] = addr;
-                b.len[p] = length;
+                b.len[p] = b.planes[p].length as usize;
             }
             b.state = BufferState::Free;
+        }
+        // CPU download uses only the bounded working slots; map reservation
+        // spares when copied to, independently of the allocation policy.
+        if output {
+            for idx in 0..self.out.buffers.len() {
+                self.map_buffer(true, idx)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn map_buffer(&mut self, output: bool, idx: usize) -> Result<(), ()> {
+        let q = if output { &mut self.out } else { &mut self.cap };
+        let b = q.buffers.get_mut(idx).ok_or(())?;
+        if b.num_planes != 1 || b.len[0] == 0 {
+            return Err(());
+        }
+        for p in 0..b.num_planes {
+            if !b.addr[p].is_null() {
+                continue;
+            }
+            let offset = unsafe { b.planes[p].m.mem_offset } as isize;
+            let addr = unsafe {
+                mmap(
+                    ptr::null_mut(),
+                    b.len[p],
+                    PROT_READ | PROT_WRITE,
+                    MAP_SHARED,
+                    self.fd,
+                    offset,
+                )
+            };
+            if addr as isize == -1 {
+                return Err(());
+            }
+            b.addr[p] = addr;
         }
         Ok(())
     }
@@ -341,8 +382,7 @@ fn debug_enabled() -> bool {
 /// VIDIOC_ENUM_FMT on the OUTPUT (coded) queue. Nothing here negotiates a
 /// format, allocates buffers, or streams: no decode session is started, so it
 /// is safe to run while other clients decode. An empty result means the node
-/// could not be opened or exposed nothing; callers keep the historical
-/// H.264-only capability table in that case.
+/// could not be opened or exposed nothing; callers advertise no profiles.
 fn enumerate_queue_fourccs(queue_type: u32, label: &str) -> Vec<u32> {
     let devnode = std::env::var("V4L2_VA_DEVICE")
         .ok()
@@ -351,7 +391,7 @@ fn enumerate_queue_fourccs(queue_type: u32, label: &str) -> Vec<u32> {
     let Ok(c_path) = CString::new(devnode.as_str()) else {
         return Vec::new();
     };
-    let fd = unsafe { open(c_path.as_ptr(), O_RDWR | O_NONBLOCK, 0) };
+    let fd = unsafe { open(c_path.as_ptr(), O_RDWR | O_NONBLOCK | O_CLOEXEC as c_int, 0) };
     if fd < 0 {
         return Vec::new();
     }
@@ -439,6 +479,8 @@ mod tests {
             source_change_eos_seen: false,
             source_change_start_sent: false,
             drain_eos_grace: false,
+            drain_empty_grace: false,
+            drain_last_seen: false,
             abandoned: false,
             sync_drain_failures: 0,
             stable_capture: false,
@@ -447,6 +489,8 @@ mod tests {
             headers: Vec::new(),
             replay_history: Vec::new(),
             published_timestamps: VecDeque::new(),
+            next_submission_timestamp: 0,
+            capture_metadata_ready: false,
         };
         for q in [&mut s.out, &mut s.cap] {
             for _ in 0..2 {
@@ -470,6 +514,97 @@ mod tests {
             stride: 320,
         });
         s
+    }
+
+    #[test]
+    fn demand_mapping_preserves_ownership_and_leaves_unused_slots_unmapped() {
+        use std::os::fd::IntoRawFd;
+        use std::os::unix::fs::FileExt;
+        let path = std::env::temp_dir().join(format!(
+            "libva-mapping-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        std::fs::remove_file(path).unwrap();
+        file.set_len(8192).unwrap();
+        let reader = file.try_clone().unwrap();
+        let mut s = session_with_mapped_planes(file.into_raw_fd());
+        V4l2Session::release_queue_fd(s.fd, &mut s.cap);
+        for idx in 0..2 {
+            let mut b = V4l2Buffer::new();
+            b.num_planes = 1;
+            b.len[0] = 4096;
+            b.planes[0].length = 4096;
+            b.planes[0].m.mem_offset = idx * 4096;
+            s.cap.buffers.push(b);
+        }
+        s.cap.buffers[0].state = BufferState::Reserved;
+        s.cap.buffers[0].reserved_for = Some(123);
+        s.cap.buffers[0].export_refs = 3;
+        s.map_buffer(false, 0).unwrap();
+        let mapped = s.cap.buffers[0].addr[0];
+        unsafe {
+            *(mapped as *mut u8) = 0xa5;
+        }
+        s.map_buffer(false, 0).unwrap();
+        assert_eq!(s.cap.buffers[0].addr[0], mapped);
+        assert!(s.cap.buffers[0].state == BufferState::Reserved);
+        assert_eq!(s.cap.buffers[0].reserved_for, Some(123));
+        assert_eq!(s.cap.buffers[0].export_refs, 3);
+        assert!(s.cap.buffers[1].addr[0].is_null());
+        let mut data = [0];
+        reader.read_exact_at(&mut data, 0).unwrap();
+        assert_eq!(data, [0xa5]);
+        let before = UNMAPPED_PLANES.with(std::cell::Cell::get);
+        drop(s);
+        assert_eq!(UNMAPPED_PLANES.with(std::cell::Cell::get) - before, 4);
+    }
+
+    #[test]
+    fn demand_mapping_failure_retains_existing_allocations_and_reservation() {
+        let mut s = session_with_mapped_planes(-1);
+        let previous = s.cap.buffers[0].addr[0];
+        let mut spare = V4l2Buffer::new();
+        spare.num_planes = 1;
+        spare.len[0] = 4096;
+        spare.reserved_for = Some(123);
+        spare.export_refs = 3;
+        spare.state = BufferState::Reserved;
+        s.cap.buffers.push(spare);
+        assert!(s.map_buffer(false, 2).is_err());
+        assert_eq!(s.cap.buffers[0].addr[0], previous);
+        assert!(s.cap.buffers[2].addr[0].is_null());
+        assert_eq!(s.cap.buffers[2].len[0], 4096);
+        assert_eq!(s.cap.buffers[2].reserved_for, Some(123));
+        assert_eq!(s.cap.buffers[2].export_refs, 3);
+    }
+
+    #[test]
+    fn discovering_an_appended_tail_never_resets_existing_exports() {
+        let mut session = session_with_mapped_planes(-1);
+        let address = session.cap.buffers[0].addr[0];
+        session.cap.buffers[0].reserved_for = Some(123);
+        session.cap.buffers[0].export_refs = 3;
+        session.cap.buffers[0].state = BufferState::Reserved;
+        session.cap.buffers[1].state = BufferState::Queued;
+        // Existing entries are skipped even though this fd cannot QUERYBUF.
+        assert!(session.mmap_queue(false).is_ok());
+        session.cap.buffers.push(V4l2Buffer::new());
+        assert!(session.mmap_queue(false).is_err());
+        assert_eq!(session.cap.buffers[0].addr[0], address);
+        assert_eq!(session.cap.buffers[0].reserved_for, Some(123));
+        assert_eq!(session.cap.buffers[0].export_refs, 3);
+        assert!(session.cap.buffers[0].state == BufferState::Reserved);
+        assert!(session.cap.buffers[1].state == BufferState::Queued);
     }
 
     #[test]

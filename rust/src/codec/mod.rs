@@ -75,6 +75,13 @@ impl Decoder {
     }
 
     pub(crate) fn render_buffer(&mut self, buffer: &Buffer) -> Result<(), VAStatus> {
+        let active_bytes = (buffer.elem_size as usize).checked_mul(buffer.num_elements as usize);
+        if buffer.elem_size == 0
+            || buffer.num_elements == 0
+            || active_bytes.is_none_or(|length| length > buffer.data.len())
+        {
+            return Err(crate::err(VA_STATUS_ERROR_INVALID_PARAMETER));
+        }
         match self {
             Self::H264(decoder) => decoder.render_buffer(buffer),
             Self::Raw(decoder) => decoder.render_buffer(buffer),
@@ -86,5 +93,35 @@ impl Decoder {
             Self::H264(decoder) => decoder.finish_picture(),
             Self::Raw(decoder) => decoder.finish_picture(sequence),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_rejects_inactive_and_truncated_buffers_before_reading_parameters() {
+        let size = std::mem::size_of::<VAPictureParameterBufferH264>();
+        let mut decoder = Decoder::new(VAProfile::VAProfileH264Main).unwrap();
+        let mut buffer = Buffer {
+            owner: VA_INVALID_ID,
+            type_: VABufferType::VAPictureParameterBufferType,
+            elem_size: size as u32,
+            num_elements: 0,
+            data: vec![0; size],
+            mapped: false,
+        };
+        assert_eq!(
+            decoder.render_buffer(&buffer),
+            Err(crate::err(VA_STATUS_ERROR_INVALID_PARAMETER))
+        );
+        buffer.num_elements = 1;
+        assert_eq!(decoder.render_buffer(&buffer), Ok(()));
+        buffer.num_elements = 2;
+        assert_eq!(
+            decoder.render_buffer(&buffer),
+            Err(crate::err(VA_STATUS_ERROR_INVALID_PARAMETER))
+        );
     }
 }

@@ -63,7 +63,10 @@ pub(crate) enum SurfaceState {
 /// whatever the recycled slot holds by then.
 #[derive(Clone)]
 pub(crate) struct SurfaceFrame {
-    pub(crate) data: Vec<u8>,
+    /// Immutable pixel storage shared by completion aliases. Wrapping the
+    /// Vec preserves its existing allocation; cloning this handle never
+    /// duplicates pixels. Mutable VAImage buffers remain separate.
+    pub(crate) data: std::sync::Arc<Vec<u8>>,
     pub(crate) stride: u32,
     pub(crate) height: u32,
     pub(crate) format: DecodedFormat,
@@ -127,6 +130,7 @@ pub(crate) struct DriverState {
 }
 
 pub(crate) struct DriverBox {
+    pub(crate) profiles: Vec<VAProfile>,
     pub(crate) lock: Mutex<DriverState>,
 }
 
@@ -139,6 +143,7 @@ fn empty_slots<T>(len: usize) -> Vec<Option<T>> {
 impl DriverBox {
     pub(crate) fn new() -> Self {
         Self {
+            profiles: Vec::new(),
             lock: Mutex::new(DriverState {
                 configs: empty_slots(DRV_MAX_CONFIGS),
                 contexts: empty_slots(DRV_MAX_CONTEXTS),
@@ -179,6 +184,28 @@ pub(crate) fn image_index(id: VAImageID) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapshot_aliases_share_pixels_and_survive_owner_replacement() {
+        use std::sync::Arc;
+        let pixels = vec![0xa5; 4096];
+        let allocation = pixels.as_ptr();
+        let mut owner = SurfaceFrame {
+            data: Arc::new(pixels),
+            stride: 64,
+            height: 32,
+            format: DecodedFormat::Nv12,
+        };
+        let alias = owner.clone();
+        assert_eq!(owner.data.as_ptr(), allocation);
+        assert!(Arc::ptr_eq(&owner.data, &alias.data));
+        owner.data = Arc::new(vec![0x33; 4096]);
+        assert_eq!(alias.data.as_ptr(), allocation);
+        assert!(alias.data.iter().all(|byte| *byte == 0xa5));
+        drop(owner);
+        assert_eq!(Arc::strong_count(&alias.data), 1);
+        assert!(alias.data.iter().all(|byte| *byte == 0xa5));
+    }
 
     #[test]
     fn object_ids_accept_only_their_reserved_ranges() {

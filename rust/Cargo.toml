@@ -1,7 +1,9 @@
 [package]
-name = "msm_drv_video_rs"
+name = "qcom-vaapi"
 version = "0.1.0"
 edition = "2024"
+description = "A Rust VA-API backend for Qualcomm Iris video decoding through Linux V4L2."
+license = "MIT"
 
 [lib]
 name = "msm_drv_video"

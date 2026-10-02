@@ -1,7 +1,7 @@
 //! CAPTURE queue mode selection.
 //!
-//! CPU-copy clients expect the old V4L2 model: keep the whole CAPTURE queue
-//! supplied and match completed buffers to surfaces by timestamp. Pre-decode
+//! CPU-copy clients match completed working buffers to surfaces by timestamp.
+//! Both modes keep an unqueued spare pool for a first post-decode export. Pre-decode
 //! PRIME export needs a stricter model where one VA surface owns one CAPTURE
 //! slot before submission, so an exported dma-buf keeps backing the same
 //! surface. This module owns that split.
@@ -36,11 +36,42 @@ impl V4l2Session {
         if self.cap.buffers.is_empty() && self.capture_pool_setup().is_err() {
             return None;
         }
-        let idx = self
+        if let Some(existing) = self.reserved_capture_for(surface) {
+            return Some(existing);
+        }
+        let working = self
             .cap
             .buffers
             .iter()
-            .position(|b| b.state == BufferState::Free && b.reserved_for.is_none())?;
+            .filter(|b| b.reserved_for.is_none() && b.export_refs == 0)
+            .count();
+        if (working <= WORKING_QUEUE_MAX
+            || !self.cap.buffers.iter().any(|b| {
+                b.state == BufferState::Free && b.reserved_for.is_none() && b.export_refs == 0
+            }))
+            && self.grow_capture_pool().is_err()
+        {
+            return None;
+        }
+        let Some(idx) = self.cap.buffers.iter().position(|b| {
+            b.state == BufferState::Free && b.reserved_for.is_none() && b.export_refs == 0
+        }) else {
+            if debug_enabled() {
+                let queued = self
+                    .cap
+                    .buffers
+                    .iter()
+                    .filter(|b| b.state == BufferState::Queued)
+                    .count();
+                eprintln!(
+                    "msm_drv_video_rs: stable reservation unavailable surface={} slots={} queued={}",
+                    surface,
+                    self.cap.buffers.len(),
+                    queued
+                );
+            }
+            return None;
+        };
         self.stable_capture = true;
         if let Some(buffer) = self.cap.buffers.get_mut(idx) {
             buffer.state = BufferState::Reserved;
@@ -56,33 +87,96 @@ impl V4l2Session {
     /// Reserve a fresh stable slot for `surface`, copy the completed frame
     /// into it, and return the new client-visible reservation index. A still
     /// `Free` published slot is adopted in place instead. `None` means the
-    /// frame is unrecoverable (recycled reservation, non-live legacy index):
-    /// the caller must fail the export rather than hand out foreign bytes.
-    /// A `Queued` source still holds this frame's bytes in its mapped plane
-    /// until the firmware refills it, which needs roughly a full queue depth
-    /// of further decodes; copying within that window preserves the frame.
+    /// frame has no valid snapshot or live spare allocation: the caller must
+    /// fail rather than hand out foreign bytes. With a validated snapshot the
+    /// old slot may already belong to another surface; its mapping is ignored.
+    /// Requeued working buffers belong to firmware and may already contain
+    /// a later frame. Late exports must copy the dequeue-time CPU snapshot;
+    /// they must never read a Queued mapping, even when the queue is deep.
     pub(crate) fn stabilize_published_capture(
         &mut self,
         published_idx: usize,
         surface: u32,
+        snapshot: Option<&crate::state::SurfaceFrame>,
     ) -> Option<usize> {
         if !self.capture_is_live(published_idx) {
             return None;
         }
+        if let Some(existing) = self.reserved_capture_for(surface) {
+            // Repeated export is read-only. Never refresh an established
+            // reservation from another published index, or release it while
+            // unwinding a failed copy/cache operation. Importers can still
+            // hold this allocation even when the incoming snapshot differs.
+            return (existing == published_idx).then_some(existing);
+        }
         let live = published_idx - self.legacy_len();
-        if !matches!(
-            self.cap.buffers.get(live)?.state,
-            BufferState::Free | BufferState::Queued
-        ) {
+        let source_state = self.cap.buffers.get(live)?.state;
+        if snapshot.is_none()
+            && (source_state != BufferState::Free
+                || self.cap.buffers[live].reserved_for.is_some()
+                || self.cap.buffers[live].export_refs != 0)
+        {
             return None;
         }
-        let reserved = self.reserve_capture(surface)?;
-        if reserved == published_idx {
-            // The reservation adopted the published slot itself: the frame
-            // bytes are already in place, no copy needed.
-            return Some(reserved);
+        if let Some(frame) = snapshot {
+            let pix = unsafe { self.cap.fmt.fmt.pix_mp };
+            let required = (pix.height as usize)
+                .checked_add((pix.height as usize).div_ceil(2))
+                .and_then(|rows| rows.checked_mul(pix.plane_fmt[0].bytesperline as usize));
+            if frame.format.v4l2_fourcc() != self.capture_fourcc
+                || frame.stride != pix.plane_fmt[0].bytesperline
+                || frame.height != pix.height
+                || required.is_none_or(|size| size == 0 || frame.data.len() < size)
+            {
+                return None;
+            }
         }
-        self.copy_capture_slot(live, reserved - self.legacy_len());
+        let reserved = self.reserve_capture(surface)?;
+        if let Some(frame) = snapshot {
+            let live_index = reserved - self.legacy_len();
+            if self.map_buffer(false, live_index).is_err() {
+                self.release_capture_reservation(reserved);
+                return None;
+            }
+            let buffer = &mut self.cap.buffers[live_index];
+            if buffer.addr[0].is_null() || frame.data.len() > buffer.len[0] {
+                self.release_capture_reservation(reserved);
+                return None;
+            }
+            use std::os::fd::AsRawFd;
+            let Ok(access) = super::dmabuf::CpuWriteAccess::begin(
+                buffer.sync_fd.as_ref().map(AsRawFd::as_raw_fd),
+            ) else {
+                self.release_capture_reservation(reserved);
+                return None;
+            };
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    frame.data.as_ptr(),
+                    buffer.addr[0] as *mut u8,
+                    frame.data.len(),
+                );
+                std::ptr::write_bytes(
+                    (buffer.addr[0] as *mut u8).add(frame.data.len()),
+                    0,
+                    buffer.len[0] - frame.data.len(),
+                );
+            }
+            if access.finish().is_err() {
+                self.release_capture_reservation(reserved);
+                return None;
+            }
+            buffer.planes[0].bytesused = frame.data.len() as u32;
+        } else if reserved != published_idx {
+            // Only a dequeued buffer can be read without a snapshot.
+            if self
+                .copy_capture_slot(live, reserved - self.legacy_len())
+                .is_err()
+            {
+                self.release_capture_reservation(reserved);
+                return None;
+            }
+        }
         Some(reserved)
     }
 
@@ -97,19 +191,16 @@ impl V4l2Session {
             .map(|idx| base + idx)
     }
 
-    /// Queue every currently free CAPTURE buffer for the legacy CPU-copy
-    /// path. DQBUF returns slots to `Free`, so later submissions top the
-    /// queue back up without disturbing the timestamp-to-surface mapping.
+    /// Supply the CPU-copy working queue while retaining reservation slack.
+    /// Firefox only exports after a frame completes, so its first export must
+    /// be able to transition from CPU-copy mode without stealing a slot from
+    /// firmware or an earlier surface. Queueing the entire allocation here
+    /// consumes the spare slots requested specifically for stable exports.
     pub(super) fn queue_all_capture(&mut self) -> Result<(), ()> {
         if self.stable_capture {
             return Err(());
         }
-        for idx in 0..self.cap.buffers.len() {
-            if self.cap.buffers[idx].state == BufferState::Free {
-                self.qbuf_capture(idx)?;
-            }
-        }
-        Ok(())
+        self.queue_working_capture()
     }
 
     /// Queue free unreserved ("working") CAPTURE buffers up to
@@ -135,7 +226,8 @@ impl V4l2Session {
                 break;
             }
             let workable = self.cap.buffers[idx].state == BufferState::Free
-                && self.cap.buffers[idx].reserved_for.is_none();
+                && self.cap.buffers[idx].reserved_for.is_none()
+                && self.cap.buffers[idx].export_refs == 0;
             if workable {
                 self.qbuf_capture(idx)?;
                 queued += 1;
@@ -243,6 +335,8 @@ mod tests {
             source_change_eos_seen: false,
             source_change_start_sent: false,
             drain_eos_grace: false,
+            drain_empty_grace: false,
+            drain_last_seen: false,
             abandoned: false,
             sync_drain_failures: 0,
             stable_capture: false,
@@ -251,6 +345,8 @@ mod tests {
             headers: Vec::new(),
             replay_history: Vec::new(),
             published_timestamps: VecDeque::new(),
+            next_submission_timestamp: 0,
+            capture_metadata_ready: false,
         };
         session.cap.buffers.push(V4l2Buffer::new());
         session.legacy.push(super::super::LegacyPool {
@@ -260,6 +356,198 @@ mod tests {
             stride: 320,
         });
         session
+    }
+
+    fn synthetic_reservation_slack(session: &mut V4l2Session) {
+        // Ownership fixtures do not have a decoder capable of CREATE_BUFS.
+        // Model a pool with the required working slack before reserving.
+        let working = session
+            .cap
+            .buffers
+            .iter()
+            .filter(|b| b.reserved_for.is_none() && b.export_refs == 0)
+            .count();
+        session
+            .cap
+            .buffers
+            .extend((working..=WORKING_QUEUE_MAX).map(|_| V4l2Buffer::new()));
+    }
+
+    #[test]
+    fn append_failure_preserves_queued_slots_and_exports() {
+        let mut session = session_with_unmapped_capture(-1);
+        session.cap.buffers[0].state = BufferState::Queued;
+        session.cap.buffers[0].reserved_for = Some(7);
+        session.cap.buffers[0].export_refs = 3;
+        let before = session.cap.buffers.len();
+        assert!(session.grow_capture_pool().is_err());
+        assert_eq!(session.cap.buffers.len(), before);
+        assert!(session.cap.buffers[0].state == BufferState::Queued);
+        assert_eq!(session.cap.buffers[0].reserved_for, Some(7));
+        assert_eq!(session.cap.buffers[0].export_refs, 3);
+    }
+
+    #[test]
+    fn repeated_stabilization_never_refreshes_or_releases_an_existing_export() {
+        let mut session = session_with_unmapped_capture(-1);
+        let addr = unsafe {
+            super::super::mmap(
+                std::ptr::null_mut(),
+                4096,
+                super::super::PROT_READ | super::super::PROT_WRITE,
+                0x02 | 0x20,
+                -1,
+                0,
+            )
+        };
+        assert_ne!(addr as isize, -1);
+        unsafe { std::ptr::write_bytes(addr as *mut u8, 0x3C, 4096) };
+        let reserved = &mut session.cap.buffers[0];
+        reserved.state = BufferState::Reserved;
+        reserved.reserved_for = Some(7);
+        reserved.export_refs = 2;
+        reserved.addr[0] = addr;
+        reserved.len[0] = 4096;
+        reserved.num_planes = 1;
+        reserved.planes[0].bytesused = 384;
+        session.cap.buffers.push(V4l2Buffer::new());
+        session.cap.buffers[1].state = BufferState::Queued;
+        let mut pix: v4l2_pix_format_mplane = super::super::zeroed();
+        pix.height = 16;
+        pix.plane_fmt[0].bytesperline = 16;
+        session.cap.fmt.fmt.pix_mp = pix;
+        let frame = crate::state::SurfaceFrame {
+            data: std::sync::Arc::new(vec![0xA5; 384]),
+            stride: 16,
+            height: 16,
+            format: crate::pixel_format::DecodedFormat::Nv12,
+        };
+        // The surface already has live exported backing at client index1.
+        // A different published index cannot replace or refresh it implicitly.
+        synthetic_reservation_slack(&mut session);
+        assert_eq!(
+            session.stabilize_published_capture(2, 7, Some(&frame)),
+            None
+        );
+        // Repeating the export of the same backing is read-only/idempotent.
+        synthetic_reservation_slack(&mut session);
+        assert_eq!(
+            session.stabilize_published_capture(1, 7, Some(&frame)),
+            Some(1)
+        );
+        synthetic_reservation_slack(&mut session);
+        assert_eq!(session.stabilize_published_capture(1, 7, None), Some(1));
+        // A snapshot that would fail destination bounds must not undo an
+        // earlier reservation or cache synchronization owned by an importer.
+        let oversized = crate::state::SurfaceFrame {
+            data: std::sync::Arc::new(vec![0xA5; 8192]),
+            ..frame
+        };
+        synthetic_reservation_slack(&mut session);
+        assert_eq!(
+            session.stabilize_published_capture(2, 7, Some(&oversized)),
+            None
+        );
+        let reserved = &session.cap.buffers[0];
+        assert!(matches!(reserved.state, BufferState::Reserved));
+        assert_eq!(reserved.reserved_for, Some(7));
+        assert_eq!(reserved.export_refs, 2);
+        assert_eq!(reserved.planes[0].bytesused, 384);
+        assert_eq!(session.reserved_capture_for(7), Some(1));
+        assert!(
+            unsafe { std::slice::from_raw_parts(addr as *const u8, 4096) }
+                .iter()
+                .all(|byte| *byte == 0x3C)
+        );
+    }
+
+    #[test]
+    fn reservation_is_idempotent_for_a_live_surface_owner() {
+        let mut session = session_with_unmapped_capture(-1);
+        session.cap.buffers.push(V4l2Buffer::new());
+        synthetic_reservation_slack(&mut session);
+        assert_eq!(session.reserve_capture(7), Some(1));
+        synthetic_reservation_slack(&mut session);
+        assert_eq!(session.reserve_capture(7), Some(1));
+        assert_eq!(session.cap.buffers[1].reserved_for, None);
+        assert!(matches!(session.cap.buffers[1].state, BufferState::Free));
+    }
+
+    #[test]
+    fn legacy_topup_keeps_slack_for_the_first_post_decode_export() {
+        let mut session = session_with_unmapped_capture(-1);
+        session.cap.buffers.resize_with(32, V4l2Buffer::new);
+        for b in &mut session.cap.buffers[..WORKING_QUEUE_MAX] {
+            b.state = BufferState::Queued;
+        }
+        // fd=-1 and unmapped buffers: an attempt to QBUF the spare pool fails.
+        // A full working queue needs no ioctl and must leave export slack Free.
+        assert!(session.queue_all_capture().is_ok());
+        assert!(!session.stable_capture_mode());
+        synthetic_reservation_slack(&mut session);
+        assert_eq!(session.reserve_capture(7), Some(WORKING_QUEUE_MAX + 1));
+        assert_eq!(session.reserved_capture_for(7), Some(WORKING_QUEUE_MAX + 1));
+        assert_eq!(
+            session
+                .cap
+                .buffers
+                .iter()
+                .filter(|b| b.state == BufferState::Queued)
+                .count(),
+            WORKING_QUEUE_MAX
+        );
+    }
+
+    #[test]
+    fn delayed_snapshot_survives_its_old_slot_becoming_a_foreign_reservation() {
+        let mut session = session_with_unmapped_capture(-1);
+        session.cap.buffers[0].state = BufferState::Reserved;
+        session.cap.buffers[0].reserved_for = Some(9);
+        session.cap.buffers[0].export_refs = 2;
+        session.cap.buffers.push(V4l2Buffer::new());
+        let addr = unsafe {
+            super::super::mmap(
+                std::ptr::null_mut(),
+                4096,
+                super::super::PROT_READ | super::super::PROT_WRITE,
+                0x02 | 0x20,
+                -1,
+                0,
+            )
+        };
+        assert_ne!(addr as isize, -1);
+        session.cap.buffers[1].addr[0] = addr;
+        session.cap.buffers[1].len[0] = 4096;
+        session.cap.buffers[1].num_planes = 1;
+        let mut pix: v4l2_pix_format_mplane = super::super::zeroed();
+        pix.height = 16;
+        pix.plane_fmt[0].bytesperline = 16;
+        session.cap.fmt.fmt.pix_mp = pix;
+        let frame = crate::state::SurfaceFrame {
+            data: std::sync::Arc::new(vec![0xA5; 384]),
+            stride: 16,
+            height: 16,
+            format: crate::pixel_format::DecodedFormat::Nv12,
+        };
+        // Never borrow bytes from the foreign reservation; only our snapshot
+        // restores this frame into a different live backing allocation.
+        synthetic_reservation_slack(&mut session);
+        assert_eq!(session.stabilize_published_capture(1, 7, None), None);
+        synthetic_reservation_slack(&mut session);
+        assert_eq!(
+            session.stabilize_published_capture(1, 7, Some(&frame)),
+            Some(2)
+        );
+        assert_eq!(session.cap.buffers[0].reserved_for, Some(9));
+        assert_eq!(session.cap.buffers[0].export_refs, 2);
+        assert!(matches!(
+            session.cap.buffers[0].state,
+            BufferState::Reserved
+        ));
+        assert_eq!(session.reserved_capture_for(7), Some(2));
+        let restored = unsafe { std::slice::from_raw_parts(addr as *const u8, 4096) };
+        assert_eq!(&restored[..384], frame.data.as_slice());
+        assert!(restored[384..].iter().all(|byte| *byte == 0));
     }
 
     #[test]
@@ -272,6 +560,7 @@ mod tests {
         assert!(!session.stable_capture_mode());
         // The synthetic legacy pool occupies client-visible index zero, so
         // the first live slot must be returned at index one.
+        synthetic_reservation_slack(&mut session);
         assert_eq!(session.reserve_capture(7), Some(1));
         assert!(session.stable_capture_mode());
         assert!(matches!(
@@ -303,6 +592,7 @@ mod tests {
         session.cap.buffers.push(V4l2Buffer::new());
         // Live slot one (first free) becomes surface 7's reservation; live
         // slot two stays a working slot.
+        synthetic_reservation_slack(&mut session);
         assert_eq!(session.reserve_capture(7), Some(1));
 
         // The top-up only ever offers the free working slot to the kernel;
@@ -436,7 +726,56 @@ mod tests {
         session.cap.buffers[0].state = BufferState::Queued;
         assert!(!session.stable_capture_mode());
 
-        assert_eq!(session.stabilize_published_capture(1, 7), Some(2));
+        // A queued source has no mapping in this fixture: the function must
+        // use the snapshot, not read firmware-owned memory.
+        synthetic_reservation_slack(&mut session);
+        assert_eq!(session.stabilize_published_capture(1, 7, None), None);
+        let addr = unsafe {
+            super::super::mmap(
+                std::ptr::null_mut(),
+                4096,
+                super::super::PROT_READ | super::super::PROT_WRITE,
+                0x02 | 0x20,
+                -1,
+                0,
+            )
+        };
+        assert_ne!(addr as isize, -1);
+        session.cap.buffers[1].addr[0] = addr;
+        session.cap.buffers[1].len[0] = 4096;
+        session.cap.buffers[1].num_planes = 1;
+        let mut pix: v4l2_pix_format_mplane = super::super::zeroed();
+        pix.height = 16;
+        pix.plane_fmt[0].bytesperline = 16;
+        session.cap.fmt.fmt.pix_mp = pix;
+        let frame = crate::state::SurfaceFrame {
+            data: std::sync::Arc::new(vec![0xA5; 384]),
+            stride: 16,
+            height: 16,
+            format: crate::pixel_format::DecodedFormat::Nv12,
+        };
+        let mut truncated = frame.clone();
+        std::sync::Arc::make_mut(&mut truncated.data).pop();
+        synthetic_reservation_slack(&mut session);
+        assert_eq!(
+            session.stabilize_published_capture(1, 7, Some(&truncated)),
+            None
+        );
+        assert!(!session.stable_capture_mode());
+        assert_eq!(session.cap.buffers[1].reserved_for, None);
+        assert!(
+            unsafe { std::slice::from_raw_parts(addr as *const u8, 4096) }
+                .iter()
+                .all(|byte| *byte == 0)
+        );
+        synthetic_reservation_slack(&mut session);
+        assert_eq!(
+            session.stabilize_published_capture(1, 7, Some(&frame)),
+            Some(2)
+        );
+        let copied = unsafe { std::slice::from_raw_parts(addr as *const u8, 4096) };
+        assert_eq!(&copied[..384], frame.data.as_slice());
+        assert!(copied[384..].iter().all(|byte| *byte == 0));
         assert!(session.stable_capture_mode());
         // The recycled source is untouched and the fresh reservation is
         // bound to the exporting surface only.
@@ -447,6 +786,87 @@ mod tests {
         ));
         assert_eq!(session.cap.buffers[1].reserved_for, Some(7));
         assert_eq!(session.reserved_capture_for(7), Some(2));
+
+        // A second late export must stabilize its own old working slot even
+        // though the first surface already enabled session-wide stable mode.
+        let second_addr = unsafe {
+            super::super::mmap(
+                std::ptr::null_mut(),
+                4096,
+                super::super::PROT_READ | super::super::PROT_WRITE,
+                0x02 | 0x20,
+                -1,
+                0,
+            )
+        };
+        assert_ne!(second_addr as isize, -1);
+        let mut second_buffer = V4l2Buffer::new();
+        second_buffer.addr[0] = second_addr;
+        second_buffer.len[0] = 4096;
+        second_buffer.num_planes = 1;
+        // Synthetic working slots are firmware-owned for this second export;
+        // only the newly backed slot is a free reservation candidate.
+        for buffer in &mut session.cap.buffers[2..] {
+            buffer.state = BufferState::Queued;
+        }
+        let second_index = session.legacy_len() + session.cap.buffers.len();
+        session.cap.buffers.push(second_buffer);
+        use crate::state::{
+            Context, DRV_ID_BASE_CONTEXT, DRV_ID_BASE_SURFACE, DriverBox, Surface, SurfaceState,
+        };
+        let driver = DriverBox::new();
+        let mut guard = driver.lock.lock().unwrap();
+        guard.contexts[0] = Some(Context {
+            config_id: VA_INVALID_ID,
+            profile: VAProfile::VAProfileH264Main,
+            entrypoint: VAEntrypoint::VAEntrypointVLD,
+            width: 16,
+            height: 16,
+            render_targets: Vec::new(),
+            frame_open: false,
+            render_target: VA_INVALID_ID,
+            decoder: crate::codec::Decoder::new(VAProfile::VAProfileH264Main).unwrap(),
+            out_seq: 0,
+            v4l2: Some(session),
+        });
+        guard.surfaces[0] = Some(Surface {
+            width: 16,
+            height: 16,
+            format: crate::pixel_format::DecodedFormat::Nv12,
+            state: SurfaceState::Ready,
+            cap_idx: Some(1),
+            frame: Some(frame),
+            owner: DRV_ID_BASE_CONTEXT,
+            exported: false,
+            export_count: 0,
+            export_fds: Vec::new(),
+        });
+        // /dev/null cannot EXPBUF, but stabilization must happen before that
+        // ioctl and leave this surface pointing to its own copied allocation.
+        assert!(
+            crate::surface_export::export_ready_surface(
+                &mut guard,
+                DRV_ID_BASE_SURFACE,
+                crate::va_drm::DrmPrimeLayout::Composed
+            )
+            .is_err()
+        );
+        assert_eq!(
+            guard.surfaces[0].as_ref().unwrap().cap_idx,
+            Some(second_index)
+        );
+        assert_eq!(
+            guard.contexts[0]
+                .as_ref()
+                .unwrap()
+                .v4l2
+                .as_ref()
+                .unwrap()
+                .reserved_capture_for(DRV_ID_BASE_SURFACE),
+            Some(second_index)
+        );
+        let copied = unsafe { std::slice::from_raw_parts(second_addr as *const u8, 384) };
+        assert!(copied.iter().all(|byte| *byte == 0xA5));
     }
 
     #[test]
@@ -459,13 +879,15 @@ mod tests {
         // Dequeued but not yet requeued: the published slot itself is still
         // Free and unreserved, so the reservation adopts it without a copy
         // and no second slot is consumed.
-        assert_eq!(session.stabilize_published_capture(1, 7), Some(1));
+        synthetic_reservation_slack(&mut session);
+        let allocation_count = session.cap.buffers.len();
+        assert_eq!(session.stabilize_published_capture(1, 7, None), Some(1));
         assert!(matches!(
             session.cap.buffers[0].state,
             BufferState::Reserved
         ));
         assert_eq!(session.cap.buffers[0].reserved_for, Some(7));
-        assert_eq!(session.cap.buffers.len(), 1);
+        assert_eq!(session.cap.buffers.len(), allocation_count);
     }
 
     #[test]
@@ -481,7 +903,8 @@ mod tests {
         session.cap.buffers[0].state = BufferState::Reserved;
         session.cap.buffers[0].reserved_for = Some(9);
 
-        assert_eq!(session.stabilize_published_capture(1, 7), None);
+        synthetic_reservation_slack(&mut session);
+        assert_eq!(session.stabilize_published_capture(1, 7, None), None);
         // The refusal must not flip the session into stable capture.
         assert!(!session.stable_capture_mode());
         assert!(matches!(
@@ -499,7 +922,8 @@ mod tests {
 
         let mut session = session_with_unmapped_capture(fd);
         // The synthetic legacy pool owns client index zero.
-        assert_eq!(session.stabilize_published_capture(0, 7), None);
+        synthetic_reservation_slack(&mut session);
+        assert_eq!(session.stabilize_published_capture(0, 7, None), None);
         assert!(!session.stable_capture_mode());
     }
 }

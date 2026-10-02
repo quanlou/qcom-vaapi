@@ -49,7 +49,7 @@ impl V4l2Session {
         }
 
         let chunks = self.snapshot_pending_output();
-        let mut fifo_tail = self.fifo.clone();
+        let fifo_tail = self.fifo.clone();
         if chunks.is_empty() {
             self.abandoned = true;
             if debug_enabled() {
@@ -57,10 +57,9 @@ impl V4l2Session {
             }
             return Err(());
         }
-        // Frames consumed before the abort cannot be replayed. Keep only the
-        // FIFO tail that corresponds to the OUTPUT chunks we can recover.
-        let skip = fifo_tail.len().saturating_sub(chunks.len());
-        fifo_tail.drain(..skip);
+        // Never truncate pending owners to fit the kernel queue. A consumed
+        // OUTPUT can still own an unpublished picture; discarding that owner
+        // would leave its VA surface pending forever after a successful rebuild.
         if fifo_tail.len() != chunks.len() {
             self.abandoned = true;
             if debug_enabled() {
@@ -89,7 +88,13 @@ impl V4l2Session {
                 return Err(());
             }
         };
-        let new_fd = unsafe { open(c_path.as_ptr(), super::O_RDWR | super::O_NONBLOCK, 0) };
+        let new_fd = unsafe {
+            open(
+                c_path.as_ptr(),
+                super::O_RDWR | super::O_NONBLOCK | super::O_CLOEXEC as std::ffi::c_int,
+                0,
+            )
+        };
         if new_fd < 0 {
             self.abandoned = true;
             self.headers = headers;

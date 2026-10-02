@@ -51,7 +51,9 @@ unsafe fn driver_init(ctx: VADriverContextP) -> VAStatus {
         return err(VA_STATUS_ERROR_INVALID_PARAMETER);
     }
 
-    let state = Box::new(DriverBox::new());
+    let mut state = Box::new(DriverBox::new());
+    state.profiles = config::advertised_profiles();
+    let max_profiles = state.profiles.len() as c_int;
     unsafe {
         (*ctx).pDriverData = Box::into_raw(state) as *mut c_void;
         vtable::install_vtable((*ctx).vtable);
@@ -60,7 +62,7 @@ unsafe fn driver_init(ctx: VADriverContextP) -> VAStatus {
         (*ctx).version_minor = VA_MINOR_VERSION as c_int;
         // Profile-table wiring: the advertised count comes from the
         // V4L2-gated capability table in config.rs, not a static constant.
-        (*ctx).max_profiles = config::advertised_profiles().len() as c_int;
+        (*ctx).max_profiles = max_profiles;
         (*ctx).max_entrypoints = 1;
         (*ctx).max_attributes = 16;
         (*ctx).max_image_formats = image::SUPPORTED_IMAGE_FORMATS.len() as c_int;

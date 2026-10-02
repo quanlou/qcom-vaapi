@@ -21,7 +21,6 @@ use crate::{err, ok, state_from_ctx};
 use std::ffi::c_int;
 use std::ptr;
 use std::slice;
-use std::sync::OnceLock;
 
 /// Coded formats mapped to the VA profiles they allow this driver to report,
 /// in fixed advertisement order. A codec's profiles are advertised only when
@@ -30,19 +29,16 @@ use std::sync::OnceLock;
 /// Only profiles with a complete userspace translation path belong here. Kernel
 /// format enumeration is necessary capability evidence, but by itself is not
 /// enough to promise a working VA profile.
-static ADVERTISED_PROFILES: OnceLock<&'static [VAProfile]> = OnceLock::new();
-
+///
 /// Pure mapping from an enumerated OUTPUT fourcc list to the profile table
 /// this driver reports. Fixed codec order (H.264, HEVC, VP9, AV1); codecs
 /// whose V4L2 format was not enumerated are absent from the result. An
-/// enumeration with no recognized format falls back to the historical
-/// H.264-only table so capability reporting never regresses below the
-/// production decode path.
+/// enumeration with no recognized format reports no supported profiles.
 fn advertised_profiles_from(
     output_fourccs: &[u32],
     capture_fourccs: &[u32],
     experimental_av1: bool,
-) -> &'static [VAProfile] {
+) -> Vec<VAProfile> {
     let mut profiles: Vec<VAProfile> = Vec::new();
     if output_fourccs.contains(&V4L2_PIX_FMT_H264) {
         profiles.extend_from_slice(&SUPPORTED_PROFILES);
@@ -60,26 +56,18 @@ fn advertised_profiles_from(
     if experimental_av1 && output_fourccs.contains(&V4L2_PIX_FMT_AV1) {
         profiles.push(VAProfile::VAProfileAV1Profile0);
     }
-    if profiles.is_empty() {
-        return &SUPPORTED_PROFILES;
-    }
-    Box::leak(profiles.into_boxed_slice())
+    profiles
 }
 
-/// The profile table libva sees, gated once per process on what the V4L2
-/// decoder node actually exposes (read-only enumeration; no decode session).
-pub(crate) fn advertised_profiles() -> &'static [VAProfile] {
-    ADVERTISED_PROFILES.get_or_init(|| {
-        advertised_profiles_from(
-            &crate::v4l2::enumerate_output_fourccs(),
-            &crate::v4l2::enumerate_capture_fourccs(),
-            std::env::var("V4L2_VA_EXPERIMENTAL_AV1").is_ok_and(|value| value == "1"),
-        )
-    })
-}
-
-pub(crate) fn supported_profile(profile: VAProfile) -> bool {
-    advertised_profiles().contains(&profile)
+/// Discover capabilities for one driver initialization. No process-global
+/// cache: independent displays and later device overrides cannot inherit a
+/// table from another node. Enumeration failure advertises no decode support.
+pub(crate) fn advertised_profiles() -> Vec<VAProfile> {
+    advertised_profiles_from(
+        &crate::v4l2::enumerate_output_fourccs(),
+        &crate::v4l2::enumerate_capture_fourccs(),
+        std::env::var("V4L2_VA_EXPERIMENTAL_AV1").is_ok_and(|value| value == "1"),
+    )
 }
 
 fn validate_create_attributes(profile: VAProfile, attributes: &[VAConfigAttrib]) -> VAStatus {
@@ -117,14 +105,17 @@ fn validate_create_attributes(profile: VAProfile, attributes: &[VAConfigAttrib])
 }
 
 pub(crate) unsafe extern "C" fn query_config_profiles(
-    _ctx: VADriverContextP,
+    ctx: VADriverContextP,
     profile_list: *mut VAProfile,
     num_profiles: *mut c_int,
 ) -> VAStatus {
     if profile_list.is_null() || num_profiles.is_null() {
         return err(VA_STATUS_ERROR_INVALID_PARAMETER);
     }
-    let profiles = advertised_profiles();
+    let Some(state) = (unsafe { state_from_ctx(ctx) }) else {
+        return err(VA_STATUS_ERROR_INVALID_DISPLAY);
+    };
+    let profiles = &state.profiles;
     for (i, profile) in profiles.iter().enumerate() {
         unsafe { *profile_list.add(i) = *profile };
     }
@@ -133,7 +124,7 @@ pub(crate) unsafe extern "C" fn query_config_profiles(
 }
 
 pub(crate) unsafe extern "C" fn query_config_entrypoints(
-    _ctx: VADriverContextP,
+    ctx: VADriverContextP,
     profile: VAProfile,
     entrypoint_list: *mut VAEntrypoint,
     num_entrypoints: *mut c_int,
@@ -141,7 +132,10 @@ pub(crate) unsafe extern "C" fn query_config_entrypoints(
     if entrypoint_list.is_null() || num_entrypoints.is_null() {
         return err(VA_STATUS_ERROR_INVALID_PARAMETER);
     }
-    if !supported_profile(profile) {
+    let Some(state) = (unsafe { state_from_ctx(ctx) }) else {
+        return err(VA_STATUS_ERROR_INVALID_DISPLAY);
+    };
+    if !state.profiles.contains(&profile) {
         unsafe { *num_entrypoints = 0 };
         return err(VA_STATUS_ERROR_UNSUPPORTED_PROFILE);
     }
@@ -153,20 +147,26 @@ pub(crate) unsafe extern "C" fn query_config_entrypoints(
 }
 
 pub(crate) unsafe extern "C" fn get_config_attributes(
-    _ctx: VADriverContextP,
+    ctx: VADriverContextP,
     profile: VAProfile,
     entrypoint: VAEntrypoint,
     attrib_list: *mut VAConfigAttrib,
     num_attribs: c_int,
 ) -> VAStatus {
-    if !supported_profile(profile) {
+    let Some(state) = (unsafe { state_from_ctx(ctx) }) else {
+        return err(VA_STATUS_ERROR_INVALID_DISPLAY);
+    };
+    if !state.profiles.contains(&profile) {
         return err(VA_STATUS_ERROR_UNSUPPORTED_PROFILE);
     }
     if entrypoint != VAEntrypoint::VAEntrypointVLD {
         return err(VA_STATUS_ERROR_UNSUPPORTED_ENTRYPOINT);
     }
-    if attrib_list.is_null() || num_attribs <= 0 {
-        return ok();
+    if num_attribs < 0 || (num_attribs > 0 && attrib_list.is_null()) {
+        return err(VA_STATUS_ERROR_INVALID_PARAMETER);
+    }
+    if num_attribs as usize > DRV_MAX_ATTRIBUTE_LIST {
+        return err(VA_STATUS_ERROR_MAX_NUM_EXCEEDED);
     }
     for i in 0..num_attribs as isize {
         let attr = unsafe { &mut *attrib_list.offset(i) };
@@ -347,6 +347,62 @@ mod tests {
     }
 
     #[test]
+    fn capabilities_are_isolated_between_driver_instances() {
+        use crate::state::DriverBox;
+        use std::ffi::c_void;
+        let mut first = Box::new(DriverBox::new());
+        first.profiles = vec![VAProfile::VAProfileH264Main];
+        let mut second = Box::new(DriverBox::new());
+        second.profiles = vec![VAProfile::VAProfileVP9Profile0];
+        for driver in [&mut first, &mut second] {
+            let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
+            ctx.pDriverData = (&mut **driver as *mut DriverBox).cast::<c_void>();
+            let mut output = [VAProfile::VAProfileNone; 8];
+            let mut count = -1;
+            assert_eq!(
+                unsafe { query_config_profiles(&mut ctx, output.as_mut_ptr(), &mut count) },
+                ok()
+            );
+            assert_eq!(&output[..count as usize], driver.profiles.as_slice());
+            let mut entrypoint = VAEntrypoint::VAEntrypointVLD;
+            assert_eq!(
+                unsafe {
+                    query_config_entrypoints(
+                        &mut ctx,
+                        VAProfile::VAProfileHEVCMain,
+                        &mut entrypoint,
+                        &mut count,
+                    )
+                },
+                err(VA_STATUS_ERROR_UNSUPPORTED_PROFILE)
+            );
+            assert_eq!(count, 0);
+            assert_eq!(
+                unsafe {
+                    get_config_attributes(
+                        &mut ctx,
+                        driver.profiles[0],
+                        VAEntrypoint::VAEntrypointVLD,
+                        std::ptr::null_mut(),
+                        1,
+                    )
+                },
+                err(VA_STATUS_ERROR_INVALID_PARAMETER)
+            );
+        }
+        first.profiles.clear();
+        let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
+        ctx.pDriverData = (&mut *first as *mut DriverBox).cast::<c_void>();
+        let mut output = VAProfile::VAProfileNone;
+        let mut count = -1;
+        assert_eq!(
+            unsafe { query_config_profiles(&mut ctx, &mut output, &mut count) },
+            ok()
+        );
+        assert_eq!(count, 0);
+    }
+
+    #[test]
     fn accepts_only_supported_decode_configuration_attributes() {
         assert_eq!(
             validate_create_attributes(VAProfile::VAProfileH264Main, &[]),
@@ -484,15 +540,14 @@ mod tests {
         assert!(!vp9_only.contains(&VAProfile::VAProfileAV1Profile0));
         assert!(!vp9_only.contains(&VAProfile::VAProfileVP9Profile2));
 
-        // An enumeration with only unrecognized fourccs falls back to the
-        // historical H.264-only table instead of advertising nothing.
+        // Failed or unrecognized enumeration must never invent support.
         assert_eq!(
             advertised_profiles_from(&[0x1234_5678], &[V4L2_PIX_FMT_P010], false),
-            SUPPORTED_PROFILES.as_slice()
+            Vec::<VAProfile>::new()
         );
         assert_eq!(
             advertised_profiles_from(&[], &[], false),
-            SUPPORTED_PROFILES
+            Vec::<VAProfile>::new()
         );
     }
 
@@ -517,12 +572,11 @@ mod tests {
         let table = advertised_profiles_from(&all, &[V4L2_PIX_FMT_P010], false);
         for profile in never {
             assert!(!table.contains(&profile));
-            assert!(!supported_profile(profile));
         }
         // Every advertised profile is a member of the codec table, so the
         // UNSUPPORTED_PROFILE rejection only ever fires for unadvertised
         // values.
-        for profile in advertised_profiles() {
+        for profile in &table {
             assert!(matches!(
                 profile,
                 VAProfile::VAProfileH264ConstrainedBaseline
@@ -533,7 +587,7 @@ mod tests {
                     | VAProfile::VAProfileVP9Profile0
                     | VAProfile::VAProfileAV1Profile0
             ));
-            assert!(supported_profile(*profile));
+            assert!(table.contains(profile));
         }
     }
 }

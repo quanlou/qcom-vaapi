@@ -444,3 +444,32 @@ fn skip_mode_present_coded_only_when_a_backward_ref_exists() {
     assert_eq!(not_allowed[26], 0x70);
     assert_eq!(allowed[27], 0x00);
 }
+
+#[test]
+fn tile_headers_reject_impossible_minimum_area_and_context_tile_ids() {
+    let mut seq = sample_seq();
+    seq.max_frame_width = 4096;
+    seq.max_frame_height = 4608;
+    let mut frame = sample_keyframe();
+    frame.frame_width_minus_1 = 4095;
+    frame.frame_height_minus_1 = 4607;
+    // A single 4096x4608 tile exceeds MAX_TILE_AREA (4096x2304).
+    assert_eq!(
+        synthesize_uncompressed_header(&seq, &frame),
+        Err(Av1SynthError::InvalidTileCount)
+    );
+    frame.tile_cols = 2;
+    frame.tile_rows = 2;
+    assert!(synthesize_uncompressed_header(&seq, &frame).is_ok());
+    frame.context_update_tile_id = 4;
+    assert_eq!(
+        synthesize_uncompressed_header(&seq, &frame),
+        Err(Av1SynthError::InvalidTileCount)
+    );
+    frame.context_update_tile_id = 0;
+    frame.tile_size_bytes_minus_1 = 4;
+    assert_eq!(
+        synthesize_uncompressed_header(&seq, &frame),
+        Err(Av1SynthError::InvalidTileCount)
+    );
+}

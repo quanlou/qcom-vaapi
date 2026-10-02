@@ -7,6 +7,54 @@
 
 pub(super) const START_CODE: [u8; 4] = [0x00, 0x00, 0x00, 0x01];
 
+/// Read the parameter-set identity omitted from VA's parsed picture fields.
+/// Only the bounded slice prefix is needed; retain the compressed payload.
+pub(super) fn slice_pps_id(data: &[u8]) -> Option<u32> {
+    let header = *data.first()?;
+    if header & 0x80 != 0
+        || !matches!(header & 0x1f, 1 | 5)
+        || (header & 0x1f == 5 && header & 0x60 == 0)
+    {
+        return None;
+    }
+    let mut rbsp = Vec::with_capacity(32);
+    let mut zeros = 0;
+    for &byte in data.iter().skip(1).take(32) {
+        if zeros == 2 && byte == 3 {
+            zeros = 0;
+            continue;
+        }
+        rbsp.push(byte);
+        zeros = if byte == 0 { zeros + 1 } else { 0 };
+    }
+    let mut bit = 0;
+    let mut read_bit = || {
+        let byte = *rbsp.get(bit / 8)?;
+        let value = (byte >> (7 - bit % 8)) & 1;
+        bit += 1;
+        Some(u32::from(value))
+    };
+    let mut read_ue = || {
+        let mut zeros = 0;
+        while read_bit()? == 0 {
+            zeros += 1;
+            if zeros >= 32 {
+                return None;
+            }
+        }
+        let mut value = 1u32;
+        for _ in 0..zeros {
+            value = (value << 1) | read_bit()?;
+        }
+        Some(value - 1)
+    };
+    let _first_mb = read_ue()?;
+    if read_ue()? > 9 {
+        return None;
+    }
+    read_ue().filter(|id| *id <= 255)
+}
+
 pub(super) struct BitWriter {
     buf: Vec<u8>,
     byte: usize,
@@ -116,6 +164,35 @@ pub(super) fn emit_nal(nal_hdr: u8, rbsp: &[u8]) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn slice_parameter_identity_handles_nonzero_ids_and_escaping() {
+        for id in [0, 1, 31, 255] {
+            let mut writer = BitWriter::new(32);
+            writer.put(0, 31);
+            writer.put(u32::MAX, 32); // large first_mb forces an escaped prefix
+            writer.put_ue(2);
+            writer.put_ue(id);
+            assert!(writer.rbsp_trailing());
+            let nal = emit_nal(0x65, writer.bytes()).unwrap();
+            assert!(nal[4..].windows(3).any(|bytes| bytes == [0, 0, 3]));
+            assert_eq!(slice_pps_id(&nal[4..]), Some(id));
+        }
+    }
+
+    #[test]
+    fn slice_parameter_identity_rejects_truncation_and_out_of_range_ids() {
+        for bytes in [&[][..], &[0x65][..], &[0x65, 0][..], &[0xe5, 0xb8][..]] {
+            assert_eq!(slice_pps_id(bytes), None);
+        }
+        let mut writer = BitWriter::new(32);
+        writer.put_ue(0);
+        writer.put_ue(2);
+        writer.put_ue(256);
+        assert!(writer.rbsp_trailing());
+        let nal = emit_nal(0x65, writer.bytes()).unwrap();
+        assert_eq!(slice_pps_id(&nal[4..]), None);
+    }
 
     #[test]
     fn bit_writer_rejects_unrepresentable_values_without_panicking() {

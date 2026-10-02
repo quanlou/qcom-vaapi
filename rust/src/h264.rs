@@ -4,7 +4,7 @@ use crate::bindings::{
 
 mod bitstream;
 
-use bitstream::{BitWriter, START_CODE, emit_nal};
+use bitstream::{BitWriter, START_CODE, emit_nal, slice_pps_id};
 
 const MAX_ASSEMBLED_FRAME_BYTES: usize = 64 * 1024 * 1024;
 
@@ -71,8 +71,21 @@ impl H264Synth {
             return None;
         }
 
+        let pps_id = slice_pps_id(&slices[0].data)?;
+        if slices
+            .iter()
+            .any(|slice| slice_pps_id(&slice.data) != Some(pps_id))
+        {
+            return None;
+        }
         let sps = synth_sps(&self.pp, self.profile)?;
-        let pps = synth_pps(&self.pp, &slices[0].sp, self.profile)?;
+        let pps = synth_pps_with_id(
+            &self.pp,
+            &slices[0].sp,
+            self.profile,
+            self.have_iq.then_some(&self.iq),
+            pps_id,
+        )?;
         let emit = !self.emitted_any
             || self.force_emit
             || self.last_sps != sps
@@ -278,6 +291,8 @@ fn write_pps_rbsp(
     pp: &VAPictureParameterBufferH264,
     sp: &VASliceParameterBufferH264,
     profile: VAProfile,
+    iq: Option<&VAIQMatrixBufferH264>,
+    pps_id: u32,
 ) -> bool {
     let pic = unsafe { pp.pic_fields.bits };
     let profile_idc = profile_to_idc(profile);
@@ -287,7 +302,7 @@ fn write_pps_rbsp(
     // assuming an encoder-specific default from the DPB size.
     let l0_default = sp.num_ref_idx_l0_active_minus1;
 
-    bw.put_ue(0);
+    bw.put_ue(pps_id);
     bw.put_ue(0);
     bw.put(pic.entropy_coding_mode_flag(), 1);
     bw.put(pic.pic_order_present_flag(), 1);
@@ -303,9 +318,37 @@ fn write_pps_rbsp(
     bw.put(pic.constrained_intra_pred_flag(), 1);
     bw.put(pic.redundant_pic_cnt_present_flag(), 1);
 
+    let transform_8x8 = pic.transform_8x8_mode_flag() != 0;
+    let custom = iq.filter(|iq| {
+        iq.ScalingList4x4.iter().flatten().any(|&value| value != 16)
+            || (transform_8x8 && iq.ScalingList8x8.iter().flatten().any(|&value| value != 16))
+    });
+    if custom.is_some() && !profile_has_chroma_ext(profile_idc) {
+        return false;
+    }
     if profile_has_chroma_ext(profile_idc) {
-        bw.put(pic.transform_8x8_mode_flag(), 1);
-        bw.put(0, 1);
+        bw.put(u32::from(transform_8x8), 1);
+        bw.put(u32::from(custom.is_some()), 1);
+        if let Some(iq) = custom {
+            // VA supplies two 8x8 lists: chroma_format_idc=3 requires six.
+            if unsafe { pp.seq_fields.bits }.chroma_format_idc() == 3 {
+                return false;
+            }
+            for list in &iq.ScalingList4x4 {
+                bw.put(1, 1);
+                if !write_scaling_list(bw, list, 4) {
+                    return false;
+                }
+            }
+            if transform_8x8 {
+                for list in &iq.ScalingList8x8 {
+                    bw.put(1, 1);
+                    if !write_scaling_list(bw, list, 8) {
+                        return false;
+                    }
+                }
+            }
+        }
         bw.put_se(i32::from(pp.second_chroma_qp_index_offset));
     }
 
@@ -319,13 +362,58 @@ pub(crate) fn synth_sps(pp: &VAPictureParameterBufferH264, profile: VAProfile) -
         .flatten()
 }
 
+/// Write VA raster-order matrices in H.264 diagonal scan order. All values
+/// are materialized, so no default-list or previous-list inference is needed.
+fn write_scaling_list(bw: &mut BitWriter, list: &[u8], dimension: usize) -> bool {
+    let mut last = 8i32;
+    for diagonal in 0..(dimension * 2 - 1) {
+        let first = diagonal.saturating_sub(dimension - 1);
+        let end = diagonal.min(dimension - 1);
+        for step in first..=end {
+            let row = if diagonal % 2 == 0 {
+                end - (step - first)
+            } else {
+                step
+            };
+            let value = i32::from(list[row * dimension + diagonal - row]);
+            if value == 0 {
+                return false;
+            }
+            let delta = (value - last + 128).rem_euclid(256) - 128;
+            bw.put_se(delta);
+            last = value;
+        }
+    }
+    true
+}
+
 pub(crate) fn synth_pps(
     pp: &VAPictureParameterBufferH264,
     sp: &VASliceParameterBufferH264,
     profile: VAProfile,
 ) -> Option<Vec<u8>> {
-    let mut bw = BitWriter::new(256);
-    write_pps_rbsp(&mut bw, pp, sp, profile)
+    synth_pps_with_iq(pp, sp, profile, None)
+}
+
+fn synth_pps_with_iq(
+    pp: &VAPictureParameterBufferH264,
+    sp: &VASliceParameterBufferH264,
+    profile: VAProfile,
+    iq: Option<&VAIQMatrixBufferH264>,
+) -> Option<Vec<u8>> {
+    synth_pps_with_id(pp, sp, profile, iq, 0)
+}
+
+fn synth_pps_with_id(
+    pp: &VAPictureParameterBufferH264,
+    sp: &VASliceParameterBufferH264,
+    profile: VAProfile,
+    iq: Option<&VAIQMatrixBufferH264>,
+    pps_id: u32,
+) -> Option<Vec<u8>> {
+    // Explicit scaling matrices can exceed the old 256-byte header buffer.
+    let mut bw = BitWriter::new(2048);
+    write_pps_rbsp(&mut bw, pp, sp, profile, iq, pps_id)
         .then(|| emit_nal(0x68, bw.bytes()))
         .flatten()
 }
@@ -393,6 +481,84 @@ mod tests {
 
     fn bytes_from_array<const N: usize>(data: [u8; N]) -> Vec<u8> {
         data.to_vec()
+    }
+
+    #[test]
+    fn custom_scaling_lists_round_trip_raster_values_and_wrapped_deltas() {
+        // Decode the independently specified zigzag/Exp-Golomb syntax to
+        // raster order. Alternating extremes require modulo-256 deltas.
+        for (dimension, scan) in [
+            (
+                4,
+                vec![0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15],
+            ),
+            (
+                8,
+                vec![
+                    0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48,
+                    41, 34, 27, 20, 13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22,
+                    15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55,
+                    62, 63,
+                ],
+            ),
+        ] {
+            let list: Vec<u8> = (0..dimension * dimension)
+                .map(|i| if i % 2 == 0 { 255 } else { i as u8 + 1 })
+                .collect();
+            let mut writer = BitWriter::new(2048);
+            assert!(write_scaling_list(&mut writer, &list, dimension));
+            assert!(writer.rbsp_trailing());
+            let bytes = writer.bytes();
+            let mut position = 0;
+            let mut bit = || {
+                let value = (bytes[position / 8] >> (7 - position % 8)) & 1;
+                position += 1;
+                u32::from(value)
+            };
+            let mut reconstructed = vec![0; list.len()];
+            let mut last = 8i32;
+            for index in scan {
+                let mut zeros = 0;
+                while bit() == 0 {
+                    zeros += 1;
+                }
+                let mut value = 1;
+                for _ in 0..zeros {
+                    value = (value << 1) | bit();
+                }
+                let code = value - 1;
+                let delta = if code % 2 == 0 {
+                    -(code as i32 / 2)
+                } else {
+                    code.div_ceil(2) as i32
+                };
+                last = (last + delta).rem_euclid(256);
+                assert_ne!(last, 0);
+                reconstructed[index] = last as u8;
+            }
+            assert_eq!(reconstructed, list);
+        }
+    }
+
+    #[test]
+    fn pps_preserves_flat_defaults_and_materializes_custom_matrices() {
+        let pp = set_common(80, 45);
+        let sp = slice();
+        let mut iq: VAIQMatrixBufferH264 = zeroed();
+        iq.ScalingList4x4 = [[16; 16]; 6];
+        iq.ScalingList8x8 = [[16; 64]; 2];
+        let flat = synth_pps(&pp, &sp, VAProfile::VAProfileH264High).unwrap();
+        assert_eq!(
+            synth_pps_with_iq(&pp, &sp, VAProfile::VAProfileH264High, Some(&iq)).unwrap(),
+            flat
+        );
+        iq.ScalingList4x4[2][3] = 42;
+        assert_ne!(
+            synth_pps_with_iq(&pp, &sp, VAProfile::VAProfileH264High, Some(&iq)).unwrap(),
+            flat
+        );
+        iq.ScalingList4x4[2][3] = 0;
+        assert!(synth_pps_with_iq(&pp, &sp, VAProfile::VAProfileH264High, Some(&iq)).is_none());
     }
 
     #[test]
@@ -509,6 +675,37 @@ mod tests {
                 7, 129, 227, 6, 75, 0, 0, 0, 1, 104, 235, 143, 32
             ])
         );
+    }
+
+    #[test]
+    fn frame_assembly_preserves_the_slices_parameter_set_identity() {
+        let mut writer = BitWriter::new(32);
+        writer.put_ue(0);
+        writer.put_ue(2);
+        writer.put_ue(1);
+        assert!(writer.rbsp_trailing());
+        let nal = emit_nal(0x65, writer.bytes()).unwrap();
+        let mut syn = H264Synth::new(VAProfile::VAProfileH264Main);
+        syn.set_picture_params(set_common(80, 45));
+        let slices = [H264Slice {
+            sp: slice(),
+            data: nal[4..].to_vec(),
+        }];
+        let frame = syn.assemble_frame(&slices).unwrap();
+        let pps = frame
+            .bytes
+            .windows(5)
+            .position(|bytes| bytes == [0, 0, 0, 1, 0x68])
+            .unwrap();
+        // ue(1), ue(0): PPS identity 1 points at synthesized SPS identity 0.
+        assert_eq!(frame.bytes[pps + 5] >> 4, 0b0101);
+        assert!(frame.bytes.ends_with(&nal));
+        let mut mismatched = slices.to_vec();
+        mismatched.push(H264Slice {
+            sp: slice(),
+            data: vec![0x65, 0xb8],
+        });
+        assert!(syn.assemble_frame(&mismatched).is_none());
     }
 
     #[test]

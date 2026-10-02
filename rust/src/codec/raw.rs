@@ -344,17 +344,15 @@ impl RawDecoder {
         }
         match self.codec {
             Codec::Hevc => self.read_typed_ranges::<VASliceParameterBufferHEVC>(buffer, |sp| {
-                (sp.slice_data_offset, sp.slice_data_size, None)
+                Ok((sp.slice_data_offset, sp.slice_data_size, None))
             }),
             Codec::Vp9 => self.read_typed_ranges::<VASliceParameterBufferVP9>(buffer, |sp| {
-                (sp.slice_data_offset, sp.slice_data_size, None)
+                Ok((sp.slice_data_offset, sp.slice_data_size, None))
             }),
             Codec::Av1 => {
-                let tile_cols = self
+                let picture = self
                     .av1_picture
-                    .as_ref()
-                    .map(|pp| usize::from(pp.tile_cols))
-                    .unwrap_or(0);
+                    .ok_or_else(|| err(VA_STATUS_ERROR_INVALID_PARAMETER))?;
                 self.read_typed_ranges::<VASliceParameterBufferAV1>(buffer, |sp| {
                     if std::env::var_os("V4L2_VA_AV1_DUMP").is_some() {
                         eprintln!(
@@ -367,10 +365,9 @@ impl RawDecoder {
                             sp.slice_data_size
                         );
                     }
-                    let tile_index = (tile_cols != 0).then_some(
-                        usize::from(sp.tile_row) * tile_cols + usize::from(sp.tile_column),
-                    );
-                    (sp.slice_data_offset, sp.slice_data_size, tile_index)
+                    let tile_index = av1::tile_index(&picture, &sp)
+                        .map_err(|_| err(VA_STATUS_ERROR_INVALID_PARAMETER))?;
+                    Ok((sp.slice_data_offset, sp.slice_data_size, Some(tile_index)))
                 })
             }
             Codec::H264 => unreachable!(),
@@ -380,7 +377,7 @@ impl RawDecoder {
     fn read_typed_ranges<T: Copy>(
         &mut self,
         buffer: &Buffer,
-        range: impl Fn(T) -> (u32, u32, Option<usize>),
+        range: impl Fn(T) -> Result<(u32, u32, Option<usize>), VAStatus>,
     ) -> Result<(), VAStatus> {
         let size = std::mem::size_of::<T>();
         if (buffer.elem_size as usize) < size {
@@ -396,7 +393,7 @@ impl RawDecoder {
                 .ok_or_else(|| err(VA_STATUS_ERROR_INVALID_PARAMETER))?;
             let params =
                 unsafe { ptr::read_unaligned(buffer.data[offset..end].as_ptr() as *const T) };
-            let (offset, size, tile_index) = range(params);
+            let (offset, size, tile_index) = range(params)?;
             if size == 0 {
                 return Err(err(VA_STATUS_ERROR_INVALID_PARAMETER));
             }

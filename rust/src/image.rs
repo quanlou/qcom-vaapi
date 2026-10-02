@@ -234,7 +234,7 @@ pub(crate) unsafe extern "C" fn get_image(
     if image_format != frame_format {
         return err(VA_STATUS_ERROR_INVALID_IMAGE_FORMAT);
     }
-    copy_semiplanar_region(
+    if !copy_semiplanar_region(
         frame_format,
         cap,
         cap_stride,
@@ -246,7 +246,9 @@ pub(crate) unsafe extern "C" fn get_image(
         y as usize,
         width as usize,
         height as usize,
-    );
+    ) {
+        return err(VA_STATUS_ERROR_OPERATION_FAILED);
+    }
     ok()
 }
 
@@ -296,7 +298,14 @@ pub(crate) unsafe extern "C" fn derive_image(
         cap_h = frame.height;
         frame_format = frame.format;
         let data_size = image_data_size(pitch, cap_h);
-        data = frame.data[..frame.data.len().min(data_size as usize)].to_vec();
+        if pitch < (surf_width as u32).div_ceil(2) * 2 * frame_format.bytes_per_sample()
+            || cap_h < surf_height as u32
+            || data_size as usize > crate::state::DRV_MAX_BUFFER_BYTES
+            || frame.data.len() < data_size as usize
+        {
+            return err(VA_STATUS_ERROR_DECODING_ERROR);
+        }
+        data = frame.data[..data_size as usize].to_vec();
     }
 
     let data_size = image_data_size(pitch, cap_h);

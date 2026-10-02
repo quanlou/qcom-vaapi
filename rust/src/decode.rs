@@ -6,10 +6,10 @@
 
 use crate::bindings::*;
 use crate::state::{
-    DRV_MAX_RENDER_BUFFERS, SurfaceState, buffer_index, context_index, surface_index,
+    DRV_MAX_RENDER_BUFFERS, DriverState, SurfaceState, buffer_index, context_index, surface_index,
 };
 use crate::surface::release_surface_capture;
-use crate::sync::pump_and_publish;
+use crate::sync::{pump_and_publish, sync_surface};
 use crate::{err, ok, state_from_ctx};
 use std::ffi::c_int;
 
@@ -17,6 +17,15 @@ pub(crate) unsafe extern "C" fn begin_picture(
     ctx: VADriverContextP,
     context: VAContextID,
     render_target: VASurfaceID,
+) -> VAStatus {
+    unsafe { begin_picture_inner(ctx, context, render_target, true) }
+}
+
+unsafe fn begin_picture_inner(
+    ctx: VADriverContextP,
+    context: VAContextID,
+    render_target: VASurfaceID,
+    wait_for_pending: bool,
 ) -> VAStatus {
     let Some(state) = (unsafe { state_from_ctx(ctx) }) else {
         return err(VA_STATUS_ERROR_INVALID_DISPLAY);
@@ -48,6 +57,41 @@ pub(crate) unsafe extern "C" fn begin_picture(
         .is_some_and(|c| c.frame_open)
     {
         return err(VA_STATUS_ERROR_OPERATION_FAILED);
+    }
+    let format = crate::pixel_format::DecodedFormat::from_profile(
+        guard.contexts[ctx_idx].as_ref().unwrap().profile,
+    );
+    if guard.surfaces[surf_idx].as_ref().unwrap().format != format {
+        return err(VA_STATUS_ERROR_INVALID_SURFACE);
+    }
+    pump_and_publish(&mut guard, ctx_idx, 0);
+    if wait_for_pending
+        && guard.surfaces[surf_idx].as_ref().is_some_and(|surface| {
+            surface.state == SurfaceState::Pending && surface.owner == context
+        })
+    {
+        // A client flush can release its old references and reuse their VA
+        // surfaces while stateful firmware still owns the previous pictures.
+        // Complete the old decode before releasing its CAPTURE reservation or
+        // accepting the new IDR. Rejecting it loses the seek's reference chain.
+        drop(guard);
+        let status = unsafe { sync_surface(ctx, render_target) };
+        if status != ok() {
+            return status;
+        }
+        // Sync releases the lock. Revalidate all handles and picture state;
+        // permit only one wait so another caller cannot make this unbounded.
+        return unsafe { begin_picture_inner(ctx, context, render_target, false) };
+    }
+    if guard.surfaces[surf_idx].as_ref().is_some_and(|surface| {
+        matches!(
+            surface.state,
+            SurfaceState::InProgress | SurfaceState::Pending
+        )
+    }) {
+        // Reusing a still-pending ID lets an old completion publish into the
+        // new picture, and can return its CAPTURE slot to firmware too early.
+        return err(VA_STATUS_ERROR_SURFACE_BUSY);
     }
     if std::env::var_os("V4L2_VA_DEBUG").is_some()
         && let Some(surf) = guard.surfaces[surf_idx].as_ref()
@@ -116,6 +160,7 @@ pub(crate) unsafe extern "C" fn begin_picture(
     c.decoder.begin_picture();
     if let Some(surf) = guard.surfaces[surf_idx].as_mut() {
         surf.state = SurfaceState::InProgress;
+        surf.frame = None;
         surf.owner = context;
     }
     ok()
@@ -150,7 +195,7 @@ pub(crate) unsafe extern "C" fn render_picture(
         return err(VA_STATUS_ERROR_OPERATION_FAILED);
     }
 
-    let mut copied = Vec::with_capacity(num_buffers as usize);
+    let mut indices = Vec::with_capacity(num_buffers as usize);
     for i in 0..num_buffers as usize {
         let id = unsafe { *buffers.add(i) };
         let Some(idx) = buffer_index(id) else {
@@ -162,14 +207,21 @@ pub(crate) unsafe extern "C" fn render_picture(
         if buf.owner != context {
             return err(VA_STATUS_ERROR_INVALID_BUFFER);
         }
-        copied.push(buf.clone());
+        if buf.mapped {
+            return err(VA_STATUS_ERROR_OPERATION_FAILED);
+        }
+        indices.push(idx);
     }
 
-    let Some(c) = guard.contexts[ctx_idx].as_mut() else {
-        return err(VA_STATUS_ERROR_INVALID_CONTEXT);
-    };
-    for buffer in copied {
-        if let Err(status) = c.decoder.render_buffer(&buffer) {
+    // Borrow the decoder and buffer table separately; cloning every payload
+    // doubles peak memory and copies large compressed frames unnecessarily.
+    let DriverState {
+        contexts, buffers, ..
+    } = &mut *guard;
+    let c = contexts[ctx_idx].as_mut().unwrap();
+    for idx in indices {
+        if let Err(status) = c.decoder.render_buffer(buffers[idx].as_ref().unwrap()) {
+            fail_picture(&mut guard, ctx_idx);
             return status;
         }
     }
@@ -206,12 +258,12 @@ pub(crate) unsafe extern "C" fn end_picture(
     let frame = match c.decoder.finish_picture(c.out_seq) {
         Ok(frame) => frame,
         Err(status) => {
-            c.frame_open = false;
+            fail_picture(&mut guard, ctx_idx);
             return status;
         }
     };
     if frame.bytes.is_empty() {
-        c.frame_open = false;
+        fail_picture(&mut guard, ctx_idx);
         return err(VA_STATUS_ERROR_INVALID_PARAMETER);
     }
     if let Ok(prefix) = std::env::var("V4L2_VA_DUMP")
@@ -266,7 +318,35 @@ pub(crate) unsafe extern "C" fn end_picture(
     // Submit pacing may have completed earlier frames inside the V4L2 session;
     // surface that progress now so pipelining clients can recycle surfaces.
     pump_and_publish(&mut guard, ctx_idx, 0);
+    let exported = surface_index(render_target)
+        .and_then(|idx| guard.surfaces[idx].as_ref())
+        .is_some_and(|surface| surface.exported);
+    drop(guard);
+    if exported {
+        // Stable exports are populated by a CPU copy, which does not install
+        // a completion fence in dma_resv. An implicit-sync GL consumer can
+        // otherwise sample the previous frame as soon as EndPicture returns.
+        // Complete publication before handing this allocation to that client.
+        // Release the driver lock so other submitters can make progress.
+        return unsafe { sync_surface(ctx, render_target) };
+    }
     ok()
+}
+
+// An unsuccessful picture has no completion to publish. Close it and discard
+// stale pixels so sync/status report an error and teardown or the next picture
+// can proceed, including after a malformed codec buffer.
+fn fail_picture(guard: &mut DriverState, ctx_idx: usize) {
+    if let Some(context) = guard.contexts[ctx_idx].as_mut() {
+        context.frame_open = false;
+        if let Some(surface_idx) = surface_index(context.render_target)
+            && let Some(surface) = guard.surfaces[surface_idx].as_mut()
+        {
+            surface.state = SurfaceState::Dead;
+            surface.frame = None;
+        }
+        context.render_target = VA_INVALID_ID;
+    }
 }
 
 #[cfg(test)]
@@ -375,6 +455,210 @@ mod tests {
                 )
             },
             VA_STATUS_ERROR_INVALID_PARAMETER as VAStatus
+        );
+    }
+    fn picture_fixture() -> DriverBox {
+        let state = DriverBox::new();
+        let mut guard = state.lock.lock().unwrap();
+        guard.contexts[0] = Some(crate::state::Context {
+            config_id: VA_INVALID_ID,
+            profile: VAProfile::VAProfileH264Main,
+            entrypoint: VAEntrypoint::VAEntrypointVLD,
+            width: 320,
+            height: 240,
+            render_targets: Vec::new(),
+            frame_open: false,
+            render_target: VA_INVALID_ID,
+            decoder: crate::codec::Decoder::new(VAProfile::VAProfileH264Main).unwrap(),
+            out_seq: 0,
+            v4l2: None,
+        });
+        guard.surfaces[0] = Some(Surface {
+            width: 320,
+            height: 240,
+            format: crate::pixel_format::DecodedFormat::Nv12,
+            state: SurfaceState::Empty,
+            cap_idx: None,
+            frame: None,
+            owner: DRV_ID_BASE_CONTEXT,
+            exported: false,
+            export_count: 0,
+            export_fds: Vec::new(),
+        });
+        drop(guard);
+        state
+    }
+
+    #[test]
+    fn incomplete_picture_fails_sync_and_can_be_restarted_or_destroyed() {
+        let state = picture_fixture();
+        let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
+        ctx.pDriverData = &state as *const DriverBox as *mut c_void;
+        assert_eq!(
+            unsafe { begin_picture(&mut ctx, DRV_ID_BASE_CONTEXT, DRV_ID_BASE_SURFACE) },
+            ok()
+        );
+        assert_eq!(
+            unsafe { end_picture(&mut ctx, DRV_ID_BASE_CONTEXT) },
+            err(VA_STATUS_ERROR_INVALID_PARAMETER)
+        );
+        assert_eq!(
+            unsafe { crate::sync::sync_surface2(&mut ctx, DRV_ID_BASE_SURFACE, 0) },
+            err(VA_STATUS_ERROR_DECODING_ERROR)
+        );
+        assert!(
+            !state.lock.lock().unwrap().contexts[0]
+                .as_ref()
+                .unwrap()
+                .frame_open
+        );
+        assert_eq!(
+            unsafe { begin_picture(&mut ctx, DRV_ID_BASE_CONTEXT, DRV_ID_BASE_SURFACE) },
+            ok()
+        );
+        assert_eq!(
+            unsafe { end_picture(&mut ctx, DRV_ID_BASE_CONTEXT) },
+            err(VA_STATUS_ERROR_INVALID_PARAMETER)
+        );
+        assert_eq!(
+            unsafe { crate::context::destroy_context(&mut ctx, DRV_ID_BASE_CONTEXT) },
+            ok()
+        );
+    }
+
+    #[test]
+    fn malformed_render_aborts_picture_but_mapped_buffer_can_be_retried() {
+        let state = picture_fixture();
+        let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
+        ctx.pDriverData = &state as *const DriverBox as *mut c_void;
+        assert_eq!(
+            unsafe { begin_picture(&mut ctx, DRV_ID_BASE_CONTEXT, DRV_ID_BASE_SURFACE) },
+            ok()
+        );
+        state.lock.lock().unwrap().buffers[0] = Some(crate::state::Buffer {
+            owner: DRV_ID_BASE_CONTEXT,
+            type_: VABufferType::VAPictureParameterBufferType,
+            elem_size: 1,
+            num_elements: 1,
+            data: vec![0],
+            mapped: true,
+        });
+        let mut id = crate::state::DRV_ID_BASE_BUFFER;
+        assert_eq!(
+            unsafe { render_picture(&mut ctx, DRV_ID_BASE_CONTEXT, &mut id, 1) },
+            err(VA_STATUS_ERROR_OPERATION_FAILED)
+        );
+        assert!(
+            state.lock.lock().unwrap().contexts[0]
+                .as_ref()
+                .unwrap()
+                .frame_open
+        );
+        state.lock.lock().unwrap().buffers[0]
+            .as_mut()
+            .unwrap()
+            .mapped = false;
+        assert_eq!(
+            unsafe { render_picture(&mut ctx, DRV_ID_BASE_CONTEXT, &mut id, 1) },
+            err(VA_STATUS_ERROR_INVALID_PARAMETER)
+        );
+        assert_eq!(
+            unsafe { crate::sync::sync_surface2(&mut ctx, DRV_ID_BASE_SURFACE, 0) },
+            err(VA_STATUS_ERROR_DECODING_ERROR)
+        );
+        assert_eq!(
+            unsafe { crate::context::destroy_context(&mut ctx, DRV_ID_BASE_CONTEXT) },
+            ok()
+        );
+    }
+
+    #[test]
+    fn begin_rejects_wrong_format_and_pending_surface_without_changing_ownership() {
+        let state = picture_fixture();
+        let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
+        ctx.pDriverData = &state as *const DriverBox as *mut c_void;
+        state.lock.lock().unwrap().surfaces[0]
+            .as_mut()
+            .unwrap()
+            .format = crate::pixel_format::DecodedFormat::P010;
+        assert_eq!(
+            unsafe { begin_picture(&mut ctx, DRV_ID_BASE_CONTEXT, DRV_ID_BASE_SURFACE) },
+            err(VA_STATUS_ERROR_INVALID_SURFACE)
+        );
+        {
+            let mut guard = state.lock.lock().unwrap();
+            let surface = guard.surfaces[0].as_mut().unwrap();
+            surface.format = crate::pixel_format::DecodedFormat::Nv12;
+            surface.state = SurfaceState::Pending;
+            surface.cap_idx = Some(3);
+        }
+        assert_eq!(
+            unsafe {
+                begin_picture_inner(&mut ctx, DRV_ID_BASE_CONTEXT, DRV_ID_BASE_SURFACE, false)
+            },
+            err(VA_STATUS_ERROR_SURFACE_BUSY)
+        );
+        assert_eq!(
+            state.lock.lock().unwrap().surfaces[0]
+                .as_ref()
+                .unwrap()
+                .cap_idx,
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn seek_surface_reuse_waits_for_prior_completion_without_holding_lock() {
+        let state = picture_fixture();
+        {
+            let mut guard = state.lock.lock().unwrap();
+            guard.surfaces[0].as_mut().unwrap().state = SurfaceState::Pending;
+        }
+        // The scoped thread cannot outlive the driver. Access its raw VA
+        // state only through the same mutex used by the C callbacks.
+        let state_addr = (&state as *const DriverBox) as usize;
+        std::thread::scope(|scope| {
+            scope.spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+                let state = unsafe { &*(state_addr as *const DriverBox) };
+                state.lock.lock().unwrap().surfaces[0]
+                    .as_mut()
+                    .unwrap()
+                    .state = SurfaceState::Ready;
+            });
+            let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
+            ctx.pDriverData = &state as *const DriverBox as *mut c_void;
+            assert_eq!(
+                unsafe { begin_picture(&mut ctx, DRV_ID_BASE_CONTEXT, DRV_ID_BASE_SURFACE) },
+                ok()
+            );
+        });
+        let guard = state.lock.lock().unwrap();
+        assert_eq!(
+            guard.surfaces[0].as_ref().unwrap().state,
+            SurfaceState::InProgress
+        );
+        assert!(guard.contexts[0].as_ref().unwrap().frame_open);
+    }
+
+    #[test]
+    fn zero_timeout_does_not_start_or_complete_an_open_picture() {
+        let state = picture_fixture();
+        let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
+        ctx.pDriverData = &state as *const DriverBox as *mut c_void;
+        assert_eq!(
+            unsafe { begin_picture(&mut ctx, DRV_ID_BASE_CONTEXT, DRV_ID_BASE_SURFACE) },
+            ok()
+        );
+        assert_eq!(
+            unsafe { crate::sync::sync_surface2(&mut ctx, DRV_ID_BASE_SURFACE, 0) },
+            err(VA_STATUS_ERROR_TIMEDOUT)
+        );
+        assert!(
+            state.lock.lock().unwrap().contexts[0]
+                .as_ref()
+                .unwrap()
+                .frame_open
         );
     }
 }

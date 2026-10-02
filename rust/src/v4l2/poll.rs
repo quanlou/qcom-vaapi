@@ -22,6 +22,10 @@ fn source_change_marker_is_expected(source_change_flush: bool, draining: bool) -
     source_change_flush && !draining
 }
 
+fn take_prior_drain_marker(grace: &mut bool, draining: bool) -> bool {
+    !draining && std::mem::take(grace)
+}
+
 /// How a completed source-change flush is resumed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DrcResumeMode {
@@ -34,8 +38,8 @@ enum DrcResumeMode {
     DecoderStart,
 }
 
-fn drc_resume_mode(stable_capture: bool, cap_streaming: bool) -> DrcResumeMode {
-    if stable_capture && cap_streaming {
+fn drc_resume_mode(cap_streaming: bool) -> DrcResumeMode {
+    if cap_streaming {
         DrcResumeMode::CaptureCycle
     } else {
         DrcResumeMode::DecoderStart
@@ -45,6 +49,19 @@ fn drc_resume_mode(stable_capture: bool, cap_streaming: bool) -> DrcResumeMode {
 impl V4l2Session {
     pub(crate) fn pump(&mut self, timeout_ms: i32) -> Vec<ReadyCapture> {
         let mut ready = std::mem::take(&mut self.ready);
+        // A CPU-copy client can block in sync/download while its submitter
+        // waits for that frame. Completed slots already have detached pixel
+        // snapshots, so replenish the bounded working queue during polling
+        // too; waiting for the next submission can starve this completion.
+        if !self.stable_capture
+            && self.cap.streaming
+            && !self.aborted
+            && !self.abandoned
+            && self.queue_working_capture().is_err()
+        {
+            self.abandoned = true;
+            return ready;
+        }
         let mut pfd = PollFd {
             fd: self.fd,
             events: super::POLLIN
@@ -72,7 +89,37 @@ impl V4l2Session {
         while let Some(r) = self.dequeue_capture() {
             ready.push(r);
         }
+        self.finish_discarded_drain(&mut ready);
         ready
+    }
+
+    fn finish_discarded_drain(&mut self, ready: &mut Vec<ReadyCapture>) {
+        // LAST proves CAPTURE has no further completions in this drain.
+        // Also wait for every OUTPUT buffer to be returned. Remaining owners
+        // were discarded by firmware; keeping them Pending blocks a new IDR,
+        // while marking them Ready would certify pixels we never received.
+        if !self.draining || !self.drain_last_seen || self.out_queued() != 0 {
+            return;
+        }
+        for surface in self
+            .fifo
+            .drain(..)
+            .map(|pending| pending.surface)
+            .chain(self.no_output_waiting.drain(..))
+        {
+            if debug_enabled() {
+                eprintln!(
+                    "msm_drv_video_rs: completed drain discarded surface={}; reporting decode error",
+                    surface
+                );
+            }
+            ready.push(ReadyCapture {
+                surface,
+                failed: true,
+                cap_idx: None,
+                frame: None,
+            });
+        }
     }
 
     pub(super) fn out_queued(&self) -> usize {
@@ -168,8 +215,10 @@ impl V4l2Session {
     }
 
     pub(crate) fn capture_copy(&self, idx: usize) -> Option<(Vec<u8>, u32, u32)> {
-        let (b, _w, height, stride) = self.resolve_cap(idx)?;
-        if b.addr[0].is_null() || b.len[0] == 0 {
+        let (b, width, height, stride) = self.resolve_cap(idx)?;
+        let format = crate::pixel_format::DecodedFormat::from_v4l2_fourcc(self.capture_fourcc)?;
+        let required = semiplanar_storage_size(width, height, stride, format)?;
+        if b.addr[0].is_null() || required > b.len[0] {
             return None;
         }
         let bytes =
@@ -182,22 +231,30 @@ impl V4l2Session {
     /// publish step: the firmware-chosen working slot's frame must land in
     /// the surface's reserved slot, whose allocation backs the surface's
     /// exported dma-bufs.
-    pub(super) fn copy_capture_slot(&mut self, from_live: usize, to_live: usize) {
+    pub(super) fn copy_capture_slot(&mut self, from_live: usize, to_live: usize) -> Result<(), ()> {
         if from_live == to_live {
-            return;
+            return Ok(());
         }
+        self.map_buffer(false, to_live)?;
         let (src, len) = match self.cap.buffers.get(from_live) {
             Some(b) if !b.addr[0].is_null() => (b.addr[0], b.len[0]),
-            _ => return,
+            _ => return Err(()),
         };
         let Some(dst) = self.cap.buffers.get_mut(to_live) else {
-            return;
+            return Err(());
         };
         if dst.addr[0].is_null() || len == 0 {
-            return;
+            return Err(());
         }
-        let bytes = len.min(dst.len[0]);
+        if len > dst.len[0] {
+            return Err(());
+        }
+        use std::os::fd::AsRawFd;
+        let access =
+            super::dmabuf::CpuWriteAccess::begin(dst.sync_fd.as_ref().map(AsRawFd::as_raw_fd))?;
+        let bytes = len;
         unsafe { ptr::copy_nonoverlapping(src as *const u8, dst.addr[0] as *mut u8, bytes) };
+        access.finish()?;
         dst.planes[0].bytesused = bytes as u32;
         if debug_enabled() {
             eprintln!(
@@ -205,6 +262,7 @@ impl V4l2Session {
                 from_live, to_live, bytes
             );
         }
+        Ok(())
     }
 
     pub(crate) fn export_capture(&mut self, idx: usize) -> Option<CaptureExport> {
@@ -223,7 +281,12 @@ impl V4l2Session {
         let stride = cap_pix.plane_fmt[0].bytesperline;
         let height = cap_pix.height;
         let uv_offset = stride.checked_mul(height)?;
-        let size = b.len[0] as u32;
+        let format = crate::pixel_format::DecodedFormat::from_v4l2_fourcc(self.capture_fourcc)?;
+        let required = semiplanar_storage_size(cap_pix.width, height, stride, format)?;
+        if required > b.len[0] {
+            return None;
+        }
+        let size = u32::try_from(b.len[0]).ok()?;
         let mut exp: v4l2_exportbuffer = zeroed();
         exp.type_ = self.cap.type_;
         exp.index = live_idx as u32;
@@ -233,14 +296,23 @@ impl V4l2Session {
         {
             return None;
         }
+        // Keep a separate allocation handle for CPU cache maintenance. It
+        // lives with the slot, independently of the client export lifetime.
+        use std::os::fd::BorrowedFd;
+        if self.cap.buffers[live_idx].sync_fd.is_none() {
+            let duplicate = unsafe { BorrowedFd::borrow_raw(exp.fd) }.try_clone_to_owned();
+            let Ok(duplicate) = duplicate else {
+                unsafe { super::close(exp.fd) };
+                return None;
+            };
+            self.cap.buffers[live_idx].sync_fd = Some(duplicate);
+        }
         // Account the export against the slot while the driver-side dup is
         // alive; callers retire it via `retire_slot_exports` when that dup
         // closes (surface release) or when the client dup fails (unwind).
         if let Some(b) = self.cap.buffers.get_mut(live_idx) {
             b.export_refs = b.export_refs.saturating_add(1);
         }
-        let format = crate::pixel_format::DecodedFormat::from_v4l2_fourcc(self.capture_fourcc)
-            .unwrap_or(crate::pixel_format::DecodedFormat::Nv12);
         Some(CaptureExport {
             fd: exp.fd,
             size,
@@ -264,14 +336,13 @@ impl V4l2Session {
         if self.source_change_start_sent {
             return;
         }
-        // Stable-capture (export) sessions stream CAPTURE before the first AU,
-        // so the first source change lands as a full DRC while both planes are
-        // streaming. A bare DECODER_CMD START resumes that DRC but skips the
+        // Source change can land while both queues are already streaming in
+        // either CPU-copy or export sessions. A bare START skips the
         // CAPTURE-streamon work (input-internal buffer requeue, STAGE/PIPE),
         // which leaves the firmware silently unable to consume OUTPUT; run the
         // streamon-based resume instead and keep the bare START for sessions
         // that match the native CAPTURE-after-event flow.
-        if drc_resume_mode(self.stable_capture, self.cap.streaming) == DrcResumeMode::CaptureCycle
+        if drc_resume_mode(self.cap.streaming) == DrcResumeMode::CaptureCycle
             && self.resume_drc_capture_cycle()
         {
             self.source_change_start_sent = true;
@@ -299,7 +370,7 @@ impl V4l2Session {
         self.source_change_start_sent = true;
     }
 
-    fn dequeue_events(&mut self) {
+    pub(super) fn dequeue_events(&mut self) {
         loop {
             let mut evt: v4l2_event = zeroed();
             if xioctl(self.fd, VIDIOC_DQEVENT, &mut evt as *mut _ as *mut c_void).is_err() {
@@ -355,6 +426,8 @@ impl V4l2Session {
                     self.cap.fourcc = pix.pixelformat;
                     self.cap.width = pix.width;
                     self.cap.height = pix.height;
+                    self.capture_metadata_ready |=
+                        unsafe { evt.u.src_change.changes } & V4L2_EVENT_SRC_CH_RESOLUTION != 0;
                     if debug_enabled() {
                         eprintln!(
                             "msm_drv_video_rs: SOURCE_CHANGE {}x{} -> {}x{} streaming={}",
@@ -424,11 +497,33 @@ impl V4l2Session {
         let plane_count = (buf.length as usize).min(VIDEO_MAX_PLANES_USIZE);
         b.planes[..plane_count].copy_from_slice(&planes[..plane_count]);
         let bytesused = planes[0].bytesused;
+        if buf.length != 1
+            || bytesused as usize > b.len[0]
+            || planes[0].data_offset != 0
+            // Iris marks some empty source-change/drain completions ERROR.
+            // Their stateful marker handling below must run; damaged pixel
+            // payloads still fail before publication.
+            || (bytesused != 0 && buf.flags & V4L2_BUF_FLAG_ERROR != 0)
+        {
+            // Never publish damaged frames or reinterpret an unsupported
+            // memory layout as contiguous NV12/P010 pixels.
+            if debug_enabled() {
+                eprintln!(
+                    "msm_drv_video_rs: invalid CAPTURE completion index={} planes={} bytesused={} length={} offset={} flags=0x{:x}",
+                    idx, buf.length, bytesused, b.len[0], planes[0].data_offset, buf.flags,
+                );
+            }
+            self.abandoned = true;
+            return None;
+        }
         if debug_enabled() {
             eprintln!(
-                "msm_drv_video_rs: CAP DQ idx={} bytes={} ts={}.{}",
-                idx, bytesused, buf.timestamp.tv_sec, buf.timestamp.tv_usec
+                "msm_drv_video_rs: CAP DQ idx={} bytes={} ts={}.{} flags=0x{:x}",
+                idx, bytesused, buf.timestamp.tv_sec, buf.timestamp.tv_usec, buf.flags
             );
+        }
+        if self.draining && buf.flags & V4L2_BUF_FLAG_LAST != 0 {
+            self.drain_last_seen = true;
         }
         if bytesused == 0 {
             // Empty CAPTURE buffers are either a drain marker, a source-change
@@ -439,7 +534,17 @@ impl V4l2Session {
             // marker/no-output cases, with pending work, as a fatal session
             // abort.
             let pending = self.fifo.len() + self.out_queued();
-            if source_change_marker_is_expected(self.source_change_flush, self.draining) {
+            if take_prior_drain_marker(&mut self.drain_empty_grace, self.draining) {
+                // START can precede dequeue of STOP's final empty buffer.
+                // This buffer has no picture owner. Treat exactly one as the
+                // prior drain marker, independently of the paired EOS event.
+                if debug_enabled() {
+                    eprintln!(
+                        "msm_drv_video_rs: empty CAPTURE paired with prior drain (pending={}); requeueing",
+                        pending
+                    );
+                }
+            } else if source_change_marker_is_expected(self.source_change_flush, self.draining) {
                 self.source_change_empty_seen = true;
                 if debug_enabled() {
                     eprintln!(
@@ -477,6 +582,9 @@ impl V4l2Session {
             let _ = self.qbuf_capture(idx);
             return None;
         }
+        // A real capture after START ends the window for a delayed marker,
+        // including reference-only replay output without a FIFO owner.
+        self.drain_empty_grace = false;
         if self.fifo.is_empty() {
             let _ = self.qbuf_capture(idx);
             return None;
@@ -500,7 +608,7 @@ impl V4l2Session {
         let pending = self.fifo.remove(hit);
         let surface = pending.surface;
         self.published_timestamps.push_back(ts_usec);
-        const MAX_PUBLISHED_TIMESTAMPS: usize = 128;
+        const MAX_PUBLISHED_TIMESTAMPS: usize = super::replay::MAX_REPLAY_CHUNKS;
         if self.published_timestamps.len() > MAX_PUBLISHED_TIMESTAMPS {
             self.published_timestamps.pop_front();
         }
@@ -521,8 +629,13 @@ impl V4l2Session {
         let cap_idx = if self.stable_capture
             && let Some(reserved) = self.reserved_capture_for(surface)
         {
-            if reserved != dq_cap_idx {
-                self.copy_capture_slot(idx, reserved - self.legacy_len());
+            if reserved != dq_cap_idx
+                && self
+                    .copy_capture_slot(idx, reserved - self.legacy_len())
+                    .is_err()
+            {
+                self.abandoned = true;
+                return None;
             }
             reserved
         } else {
@@ -537,25 +650,48 @@ impl V4l2Session {
         let frame =
             self.capture_copy(cap_idx)
                 .map(|(data, stride, height)| crate::state::SurfaceFrame {
-                    data,
+                    data: std::sync::Arc::new(data),
                     stride,
                     height,
                     format,
                 });
+        if frame.is_none() {
+            self.abandoned = true;
+            return None;
+        }
         let ready = ReadyCapture {
             surface,
+            failed: false,
             cap_idx: Some(cap_idx),
             frame,
         };
         for hidden_surface in self.no_output_waiting.drain(..) {
             self.ready.push(ReadyCapture {
                 surface: hidden_surface,
+                failed: false,
                 cap_idx: ready.cap_idx,
                 frame: ready.frame.clone(),
             });
         }
         Some(ready)
     }
+}
+
+fn semiplanar_storage_size(
+    width: u32,
+    height: u32,
+    stride: u32,
+    format: crate::pixel_format::DecodedFormat,
+) -> Option<usize> {
+    if width == 0
+        || height == 0
+        || !width.is_multiple_of(2)
+        || !height.is_multiple_of(2)
+        || stride < width.checked_mul(format.bytes_per_sample())?
+    {
+        return None;
+    }
+    (stride as usize).checked_mul(height as usize + height as usize / 2)
 }
 
 #[cfg(test)]
@@ -573,6 +709,52 @@ mod tests {
     }
 
     #[test]
+    fn discarded_picture_errors_require_last_and_all_output_returned() {
+        let (mut session, _backing) = session_with_backed_capture(-1);
+        session.fifo.push(super::super::PendingFrame {
+            surface: 9,
+            timestamp: 7,
+            expects_output: true,
+        });
+        session.no_output_waiting.push(10);
+        let mut ready = Vec::new();
+        session.finish_discarded_drain(&mut ready);
+        session.draining = true;
+        session.finish_discarded_drain(&mut ready);
+        assert_eq!(session.fifo.len(), 1);
+        assert_eq!(session.no_output_waiting, [10]);
+        assert!(ready.is_empty());
+        session.drain_last_seen = true;
+        let mut output = V4l2Buffer::new();
+        output.state = BufferState::Queued;
+        session.out.buffers.push(output);
+        session.finish_discarded_drain(&mut ready);
+        assert_eq!(session.fifo.len(), 1);
+        assert!(ready.is_empty());
+        session.out.buffers[0].state = BufferState::Free;
+        session.finish_discarded_drain(&mut ready);
+        assert!(session.fifo.is_empty());
+        assert!(session.no_output_waiting.is_empty());
+        assert_eq!(ready.iter().map(|r| r.surface).collect::<Vec<_>>(), [9, 10]);
+        assert!(
+            ready
+                .iter()
+                .all(|r| r.failed && r.frame.is_none() && r.cap_idx.is_none())
+        );
+        // Synthetic CAPTURE addresses belong to backing vectors, not mmap.
+        for b in &mut session.cap.buffers {
+            b.addr.fill(std::ptr::null_mut());
+            b.len.fill(0);
+        }
+        for p in &mut session.legacy {
+            for b in &mut p.buffers {
+                b.addr.fill(std::ptr::null_mut());
+                b.len.fill(0);
+            }
+        }
+    }
+
+    #[test]
     fn source_change_markers_do_not_arm_firmware_abort() {
         assert!(source_change_marker_is_expected(true, false));
         assert!(!source_change_marker_is_expected(true, true));
@@ -580,13 +762,19 @@ mod tests {
     }
 
     #[test]
-    fn only_stable_streaming_sessions_resume_drc_via_capture_cycle() {
-        assert_eq!(drc_resume_mode(true, true), DrcResumeMode::CaptureCycle);
-        // Without stable capture the native-shaped CAPTURE-after-event flow
-        // still resumes through the bare START.
-        assert_eq!(drc_resume_mode(true, false), DrcResumeMode::DecoderStart);
-        assert_eq!(drc_resume_mode(false, true), DrcResumeMode::DecoderStart);
-        assert_eq!(drc_resume_mode(false, false), DrcResumeMode::DecoderStart);
+    fn prior_drain_empty_marker_is_consumed_once_after_start() {
+        let mut grace = true;
+        assert!(!take_prior_drain_marker(&mut grace, true));
+        assert!(grace);
+        assert!(take_prior_drain_marker(&mut grace, false));
+        assert!(!grace);
+        assert!(!take_prior_drain_marker(&mut grace, false));
+    }
+
+    #[test]
+    fn every_streaming_capture_resumes_drc_via_capture_cycle() {
+        assert_eq!(drc_resume_mode(true), DrcResumeMode::CaptureCycle);
+        assert_eq!(drc_resume_mode(false), DrcResumeMode::DecoderStart);
     }
 
     /// A synthetic session with one legacy slot and two backed live CAPTURE
@@ -614,6 +802,8 @@ mod tests {
             source_change_eos_seen: false,
             source_change_start_sent: false,
             drain_eos_grace: false,
+            drain_empty_grace: false,
+            drain_last_seen: false,
             abandoned: false,
             sync_drain_failures: 0,
             stable_capture: false,
@@ -622,6 +812,8 @@ mod tests {
             headers: Vec::new(),
             replay_history: Vec::new(),
             published_timestamps: VecDeque::new(),
+            next_submission_timestamp: 0,
+            capture_metadata_ready: false,
         };
         session.legacy.push(LegacyPool {
             buffers: vec![V4l2Buffer::new()],
@@ -652,6 +844,10 @@ mod tests {
 
         let (mut session, _backing) = session_with_backed_capture(fd);
         session.stable_capture = true;
+        session.cap.buffers.extend(
+            (session.cap.buffers.len()..=super::super::WORKING_QUEUE_MAX)
+                .map(|_| V4l2Buffer::new()),
+        );
         // Legacy pool occupies client index zero; live slot zero becomes
         // surface 7's reservation (client index one).
         assert_eq!(session.reserve_capture(7), Some(1));
@@ -672,7 +868,7 @@ mod tests {
         let dq_cap_idx = session.legacy_len() + dq_live;
         let reserved = session.reserved_capture_for(7).unwrap();
         assert_ne!(reserved, dq_cap_idx);
-        session.copy_capture_slot(dq_live, reserved - session.legacy_len());
+        let copy_result = session.copy_capture_slot(dq_live, reserved - session.legacy_len());
 
         // Read every observable result into locals before handing the heap
         // backing back, so a failed assert can never leave raw heap pointers
@@ -692,11 +888,50 @@ mod tests {
             b.num_planes = 0;
         }
 
+        assert!(copy_result.is_ok());
         assert_eq!(used, 64);
         assert!(copied.iter().all(|&x| x == 0xAA));
         // The working slot keeps no owner and stays Free so the next working
         // top-up can requeue it.
         assert_eq!(working_owned, None);
         assert!(working_free);
+    }
+    #[test]
+    fn failed_exported_copy_does_not_overwrite_or_publish_destination() {
+        use std::os::fd::IntoRawFd;
+        use std::os::unix::net::UnixStream;
+        let fd = std::fs::File::open("/dev/null").unwrap().into_raw_fd();
+        let (mut session, backing) = session_with_backed_capture(fd);
+        let (stream, _peer) = UnixStream::pair().unwrap();
+        session.cap.buffers[0].sync_fd = Some(stream.into());
+        unsafe {
+            ptr::write_bytes(session.cap.buffers[1].addr[0].cast::<u8>(), 0xaa, 64);
+        }
+        let result = session.copy_capture_slot(1, 0);
+        let published = session.cap.buffers[0].planes[0].bytesused;
+        // Avoid allowing teardown to munmap heap storage on assertion failure.
+        for b in &mut session.cap.buffers {
+            b.addr[0] = ptr::null_mut();
+            b.len[0] = 0;
+        }
+        assert!(result.is_err());
+        assert_eq!(published, 0);
+        assert!(backing[0].iter().all(|&value| value == 0));
+    }
+
+    #[test]
+    fn capture_layout_rejects_invalid_or_undersized_geometry() {
+        use crate::pixel_format::DecodedFormat::{Nv12, P010};
+        assert_eq!(
+            semiplanar_storage_size(1280, 736, 1280, Nv12),
+            Some(1_413_120)
+        );
+        assert_eq!(
+            semiplanar_storage_size(1280, 736, 2560, P010),
+            Some(2_826_240)
+        );
+        assert_eq!(semiplanar_storage_size(1280, 736, 1280, P010), None);
+        assert_eq!(semiplanar_storage_size(1280, 0, 1280, Nv12), None);
+        assert_eq!(semiplanar_storage_size(1279, 736, 1280, Nv12), None);
     }
 }

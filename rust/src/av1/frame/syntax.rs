@@ -77,6 +77,12 @@ pub(super) fn write_tile_info(
         tile_cols_log2 += 1;
     }
     let min_log2_tile_rows = min_log2_tiles.saturating_sub(tile_cols_log2);
+    if target_rows_log2 < min_log2_tile_rows
+        || u32::from(frame.context_update_tile_id) >= u32::from(tile_cols) * u32::from(tile_rows)
+        || frame.tile_size_bytes_minus_1 > 3
+    {
+        return Err(Av1SynthError::InvalidTileCount);
+    }
     let mut tile_rows_log2 = min_log2_tile_rows;
     while tile_rows_log2 < max_log2_tile_rows {
         let increment = tile_rows_log2 < target_rows_log2;
