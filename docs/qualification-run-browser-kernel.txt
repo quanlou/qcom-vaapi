@@ -1,0 +1,57 @@
+Browser/kernel qualification attempt — 2026-10-01
+
+Browser hardware qualification BLOCKED; kernel isolated host checks PASS,
+boot qualification NOT PROVEN. No browser playback or kernel boot occurred.
+
+Exact GL-passing binary SHA256:
+fc08226fcc18c257f52d2159ad8ebb5ed57f2a580dbf23640f9340b60ffa6e10
+Original /tmp/libva-host-gl-check.5HPJnr/driver/msm_drv_video.so and frozen
+/tmp/libva-gl-last-source-z88fqfmg prebuilt match. The package uses those
+bytes and frozen qualification tools, with hash-checked no-rebuild staging.
+
+Environment discovery
+DISPLAY=:0 and WAYLAND_DISPLAY=wayland-0 are set; display sockets exist.
+Chromium snap and Firefox wrapper exist. /dev/video16 and renderD128 are
+absent in this sandbox. Strict browser invocation with explicit 24 FPS,
+2 GiB sampled process-tree RSS, 20 measured seconds and 30-second bound
+stopped at hardware_busy before launch. Pinned package invocation subsequently
+stopped at missing_hardware before launch. These are different preflight
+observations, neither a playback/fallback result. Requirements are exploratory
+workload budgets, not universal hardware specifications.
+
+Host validation
+- All package hashes checked; original and staged binary SHA256 identical.
+- Shell syntax checks passed. Browser snap staging copies the exact tested
+  binary atomically; it does not compile different bytes or require missing Rust
+  source. Host runner selects snap-visible profile storage for snap browsers.
+- python3 tools/verify-iris-metadata.py /home/mq/oss/linux PASS:
+  original index-32 fault reproduced; patched 4,096 submissions plus reordered
+  history, flag and stale-index checks passed in a temporary copy.
+- Running kernel is 7.3.0-15-qcom-x1e; qcom_iris module exists. Generated
+  release in the local source is 6.18.0-12865-g0048fbb4011e; source revision
+  reports 7.0-rc6. This checkout is not evidence of the deployed kernel build.
+  No source mutation, installation, reboot or privileged tracing was performed.
+
+Host runners
+bash /tmp/libva-exact-browser-kernel-20261001/run-browser-exact.sh chromium
+bash /tmp/libva-exact-browser-kernel-20261001/run-browser-exact.sh /path/to/firefox
+bash /tmp/libva-exact-browser-kernel-20261001/run-kernel-host-checks.sh
+
+Browser runner rechecks pinned tools/binary, creates fresh results and delegates
+strict frame publication/playback/seek/clean-exit/kernel checks to the frozen
+verifier. It uses the shared hardware lease; do not run alongside other probes.
+The kernel runner is explicitly an isolated sanitizer test and prints
+boot_qualification=not_proven even when it succeeds.
+
+Artifacts
+/tmp/libva-exact-browser-kernel-20261001/qualification-sha256.txt
+/tmp/libva-exact-browser-kernel-20261001/browser-attempt.log
+/tmp/libva-exact-browser-kernel-20261001/kernel-attempt.log
+/tmp/libva-exact-browser-kernel-ubsan.log
+
+Remaining
+Run browser qualification on the physical host with free lease/device access.
+Establish patched deployment kernel build/boot/firmware identities independently.
+Small-stream firmware qualification remains unrun; use the existing bounded
+Iris diagnostic only in a recovered device session with authorized tracing.
+Keep producer-metadata-dependent AV1 disabled.

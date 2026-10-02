@@ -1,9 +1,9 @@
 # Documentation — learn the stack, then write your own driver
 
-Welcome. This directory is a self-contained "book" about this repository
-(`msm_drv_video`): a VA-API driver, written in Rust, that turns standard
-VA-API video-decode requests into V4L2 requests for Qualcomm's **Iris**
-hardware video decoder (the Snapdragon X1E80100 / X Elite VPU).
+Welcome. This directory is a self-contained "book" about qcom-vaapi: a
+Rust VA-API driver that turns standard video-decode requests into V4L2
+requests for Qualcomm's **Iris** hardware decoder (the Snapdragon X1E80100 / X
+Elite VPU).
 
 It is written for someone who knows **nothing** about Linux drivers or
 graphics. No prior kernel or multimedia knowledge is assumed.
@@ -39,7 +39,7 @@ Qualcomm decoder at `/dev/video16`). Desktop apps, however, don't speak
 V4L2; they speak **VA-API** (via the `libva` library). This repository is
 the missing middle: a **translator** that speaks VA-API on one side and
 V4L2 on the other, shipped as `msm_drv_video.so` and loaded by libva at
-runtime.
+ runtime.
 
 ```plantuml
 @startuml

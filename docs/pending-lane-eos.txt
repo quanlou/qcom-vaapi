@@ -1,0 +1,155 @@
+EOS lane — 2026-10-01
+
+Scope: one-frame fixture/native-drain diagnosis; preserve the external seek/EOS
+owner's production Rust and existing verifier edits. No kernel or driver install.
+
+Fixture evidence
+
+/home/mq/tmp/vaatest/one-frame.mp4 contains exactly one H.264 Constrained
+Baseline I-frame, 320x240, no B frames, 25 fps, duration 0.04 seconds.
+Independent software decode into NV12 succeeds with one 115200-byte frame:
+MD5 31357095c263c15fdce9a108daf8abbf.
+
+The historical fc082 native reference log exits with header-only output. That
+is not evidence that the VA driver produced zero frames: the prior strict gate
+stopped before invoking the VA edge leg. Its dimensions also overlap the known
+small-stream firmware compatibility issue. Actual native/VA evidence is needed.
+
+The current verify-rust-driver.sh already uses independently counted software
+NV12 references for one-frame and small B-frame edge fixtures, forcing real
+VA hardware frames and hwdownload. Required 1/30/full native reference matrix
+is unchanged. That external owner's change was preserved, not duplicated here.
+
+Native decoder static findings (hypotheses, not hardware proof)
+
+Local /home/mq/oss/FFmpeg/libavcodec/v4l2_context.c sets done immediately on
+V4L2_EVENT_EOS (around line 190), and treats any empty CAPTURE while draining
+as final (around line 400), before checking LAST. A SOURCE_CHANGE empty marker
+could therefore terminate native output prematurely. The ioctl trace should
+establish event/STOP/empty-CAPTURE ordering before attributing the failure to
+firmware, the native wrapper, or this driver. No FFmpeg source was modified.
+
+New bounded diagnostic
+
+tools/diagnose-one-frame-eos.sh DRIVER_DIR FRESH_DISK_BACKED_RESULTS
+
+- Pins the exact fc08226fcc18c257f52d2159ad8ebb5ed57f2a580dbf23640f9340b60ffa6e10
+  driver by default (an explicitly selected later hash can be supplied through
+  V4L2_VA_EOS_EXPECTED_DRIVER_SHA256).
+- Acquires the common hardware lock; accepts only a fresh output path and a
+  software-verified exactly-one-frame fixture.
+- Executes one bounded kernel-wrapped native ioctl trace, then at most one
+  bounded forced-VA hwdownload ioctl trace. No retry loop.
+- Stops before subsequent hardware opens after any command failure, kernel
+  fault, missing/truncated kernel observation, or changed driver hash.
+- A zero-frame successful native exit is recorded honestly. The VA leg must
+  independently produce the complete pixel/timestamp parity with the software
+  oracle; zero or wrong VA output fails.
+- A passing diagnostic covers this single fixture, not the complete release.
+
+Host checks
+
+bash -n tools/diagnose-one-frame-eos.sh: PASS.
+python3 -m unittest discover -s tools/tests -p test_one_frame_eos_diagnostic.py -v:
+PASS 3 regressions: native-zero output can be distinguished from actual VA
+output, native kernel fault stops before VA with no retries, zero VA output
+cannot pass. Software fixture evidence: /tmp/libva-eos-one-software.md5.
+
+Execution coordination
+
+A fresh device check in this older child execution namespace returns both
+/dev/video16 and /dev/dri/renderD128 absent. Root confirmed its newer execution
+namespace has actual devices, so root centrally executes the prepared diagnostic
+under the real lock/storage. This is a child isolation limitation, not a claim
+that deployment devices are absent. Hardware results will be appended once
+root returns the logs. Expected outputs include input-sha256.txt, fixture.txt,
+kernel.txt, native.log/native-ioctl.trace/native.md5 and va.log/va-ioctl.trace/
+va.md5 beneath the selected disk-backed result directory.
+
+Actual root-executed qualification — completed
+
+Evidence: /home/mq/.cache/libva-v4l2-qualification/eos-20261001-root-1/
+Driver SHA256: fc08226fcc18c257f52d2159ad8ebb5ed57f2a580dbf23640f9340b60ffa6e10
+Fixture SHA256: c58e5c34aae2ca6fae0e910ac815bd19d385be6b35a7fca7d3046f8d889a2518
+Kernel: 7.3.0-15-qcom-x1e, aarch64.
+
+PASS: native 1 frame, forced VA hwdownload 1 frame, software 1 frame. All
+three framemd5 files have identical frame dimensions, timebase, timestamps,
+115200-byte payload size and MD5 31357095c263c15fdce9a108daf8abbf.
+Both native and VA FFmpeg commands exited 0 with zero decode errors. Both
+complete kernel windows contain all seven counters, all zero. No retry run
+was requested or performed by this lane.
+
+Native trace: CAPTURE STREAMON succeeds, format is 384x256 NV12 with
+384-byte stride, two decoder-command ioctls follow (first returns EBUSY,
+second succeeds), then CAPTURE index 0 KEYFRAME and index 1 LAST are dequeued,
+followed by both queues' STREAMOFF. The strace version prints decoder-command
+arguments as pointers and does not decode multiplanar plane bytesused. Do not
+infer individual START/STOP identities or empty pixel payloads from its generic
+top-level bytesused=0 field. Actual decoded frame output proves native emitted
+a picture on this run.
+
+VA log: SOURCE_CHANGE reports 384x256 unchanged allocation geometry; CAPTURE
+idx 0 has 147456 bytes and a pending surface is published once. The downloaded
+visible 320x240 NV12 pixels match software exactly. No recovery-armed, anomalous
+EOS, empty-CAPTURE-without-drain or driver failure markers appear.
+
+This closes the demonstrated single-fixture output/parity requirement for this
+exact binary in this clean diagnostic window. It does not explain the earlier
+native zero-frame exit: command normalization and tracing differ from the older
+native invocation, and native/firmware scheduling can differ. No causal claim
+is supported by these two observations, nor is intermittent reliability proven
+by one successful run. The complete strict production gate, small B-frame
+fixture, seek and sustained performance remain separately required.
+
+Concrete EOS verifier fail-fast recommendation (external owner)
+
+verify-eos-drain.sh currently records a failed leg A and then opens the mid-cut,
+post-cut and sanity sessions. After leg A's classification/parity verdict, exit
+1 before leg B whenever command failure, missing/invalid complete kernel
+summary, or any nonzero kernel counter is observed. Preserve logs and report
+later legs not run. Apply the same immediate stop before post-cut after a
+kernel-failing cut. A clean success with independent full-frame parity can
+continue. Do not use a recovery or closing-sanity decode to certify or repair a
+window already containing firmware/kernel faults. Root was informed; this lane
+has not overwritten the external owner's verifier/source edits.
+
+Session churn fail-first-fault integration — host-only follow-up
+
+Claimed/changed only tools/verify-session-churn.sh and new
+ tools/tests/test_churn_failfast.py; root owns EOS/production integration.
+
+The production outer kernel window previously observed faults only when the
+whole churn script exited. Churn could open multiple later sessions after a
+fault, and expected kill statuses could conceal the kernel classification.
+Each individual churn session is now kernel-wrapped and requires a complete
+all-seven-zero observation before any subsequent decoder open. Normal sessions
+must exit 0; deliberate SIGKILL/TERM must exit their expected 137/124 respectively
+and still have clean kernel evidence. Missing observations, unexpected command
+statuses and recovery pixel parity failures terminate immediately. Original
+seven required outcome checks are preserved. Individual full-decode logs use
+reference.log and round-N.log instead of overwriting one last-leg.log.
+
+Host validation: four whole-run mocked regressions pass (36 fixture scenarios),
+including all seven fault counters during normal and expected-kill legs, missing
+kernel evidence, wrong kill status and partial recovery. The clean run observes
+13 sessions and retains pass=7 fail=0. Shell syntax and whitespace checks pass.
+No decoder opened by these tests; no production source or hardware rerun here.
+
+Per-session journal flush adds the capture helper's bounded one-second delay
+before the subsequent session. These checks prove recovery after observation,
+not an instantaneous zero-delay reopen. The new harness needs real deployment
+qualification rather than inheriting earlier churn evidence as unchanged timing.
+
+Remaining order gap for external Rust-driver verifier owner
+
+verify-rust-driver.sh still invokes a multi-probe hardware sequence under the
+production outer observer. Command failure normally exits, but a kernel fault
+with successful output can be followed by later probes before the outer window
+is checked. Optional hwmap's status is diagnostic and may likewise precede
+further decoder opens after a fault. External owner should kernel-wrap each
+reference/decode and subprobe (or check the running kernel window at every
+boundary), preserving required matrix/export/GL-first order and stopping on any
+fault/missing observation before the next open. Diagnostic hwmap may remain
+blocked-before-driver without failing quality only if its kernel window is
+complete and clean. Do not weaken parity/count/software-fallback requirements.

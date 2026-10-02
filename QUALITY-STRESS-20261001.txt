@@ -1,0 +1,96 @@
+Quality stress audit — 2026-10-01
+
+Result: bounded concurrency passed; overall quality gate failed.
+The source workspace changed during the audit. Hardware evidence uses the
+isolated source snapshot in /tmp/libva-quality-20261001, not later edits.
+Base commit: 1fc6d73443a0f9037676614c0d007c514e934936 (with uncommitted changes).
+Snapshot manifest: /tmp/libva-quality-20261001/snapshot-sha256.txt
+
+Findings
+
+1. HEVC Main10 is advertised but cannot initialize on the tested hardware path.
+   All 30 hashes differed from the P010 reference; the driver failed context
+   initialization and FFmpeg fell back to software yuv420p10le. This is not
+   evidence of hardware pixel corruption. strace confirms CAPTURE VIDIOC_S_FMT
+   requested P010 and the kernel returned NV12. The driver rejects that format
+   change. No Main10 BeginPicture calls were observed.
+   Evidence: /tmp/libva-quality-20261001/codecs/hevc10-30.log
+             /tmp/libva-quality-20261001/main10-ioctl.log
+   Follow-up: investigate P010 negotiation timing and gate advertisement on
+   usable decode support, not merely format enumeration. Verifiers should
+   reject software fallback explicitly before doing checksum comparisons.
+
+2. HEVC synthesis accepts tile counts exceeding the fixed VA arrays.
+   A zero-initialized HEVC picture with 320x240 dimensions, tiles enabled,
+   and num_tile_columns_minus1 = column_width_minus1.len()+1 returns Ok.
+   The writer signals the excessive count while iter().take() emits only the
+   available array entries, producing inconsistent syntax. This should be
+   rejected before synthesis/submission. No hardware submission was made for
+   malformed inputs.
+   Location: rust/src/h265/synth.rs::synthesize_parameter_sets / synthesize_pps
+   Evidence: /tmp/libva-quality-20261001/hevc-invalid-tiles.log
+   Reproduce: ./tools/verify-host-stress.sh
+   The new regression assertion intentionally remains failing until fixed.
+
+3. Export-fd drop test is unreliable under parallel execution.
+   surface_export::tests::dropping_surface_closes_tracked_export_fds failed
+   with 16 test threads: fcntl returned 1 instead of -1 after dropping OwnedFd.
+   Another concurrent test may reuse the closed numeric fd before fcntl runs.
+   This is a test race, not evidence of an fd leak. Verify EOF via a pipe/socket
+   whose final writer is owned by the surface, rather than probing a stale fd.
+   Evidence: /tmp/libva-quality-20261001/unit-tests.log
+   The failure was intermittent; a later run did not reproduce it.
+
+Passing evidence
+
+- Initial suite: 152 tests passed with 8 test threads.
+- Strict clippy passed on the snapshot including the added host stress tests.
+- Eight callers sharing one DriverBox completed 4,000 create/map/read/reject
+  resize/reject destroy/unmap/destroy buffer cycles; the buffer table was empty.
+- Image table exhaustion at 256 images rejected allocation without an orphan
+  buffer; destruction and reallocation succeeded and both tables became empty.
+- 10,000 deterministic malformed buffer sequences across H.264, HEVC Main,
+  HEVC Main10, VP9, and AV1 completed without a panic. This is a bounded
+  generated-input check, not exhaustive fuzzing or a sanitizer run.
+- Two simultaneous realtime H.264 VAAPI processes each decoded 120 frames,
+  byte-exact against the native reference. Both logs show driver BeginPicture
+  calls. The following serial 30-frame decode also matched. Kernel-window
+  classification: zero session/system fatals, power cycles, and vb2 warnings.
+  Evidence: /tmp/libva-quality-20261001/concurrent-summary.json
+            /tmp/libva-quality-20261001/concurrent-kernel.log
+- H.264 required 1/30/300-frame matrix passed.
+- GStreamer export callback reached; GL roundtrip gate passed with its existing
+  warmup allowance (missing=1, tolerated=2).
+- Resolution churn: 780 frames, four source changes, parity/sanity passed.
+- Sustained playback: 3,600 frames, parity/sanity passed.
+- HEVC Main and VP9: 30-frame reference parity passed, driver calls confirmed.
+- Session churn: pass=7 fail=0 after midstream cuts, SIGKILL, and SIGTERM.
+
+Limits and reproduction
+
+AV1 was hidden and skipped in hardware checks. The optional one-frame EOS and
+240p B-frame files were deliberately absent for this audit; their established
+expected-failure paths were not exercised. FFmpeg hwmap remained blocked before
+reaching the export callback. No browser validation, sanitizers, or maximum
+hardware-session-capacity claim is made. Initial cargo fmt --check failed in
+ongoing V4L2 edits (recovery.rs/setup.rs); those files were not modified here.
+
+Added files only: tools/host-stress.rs and tools/verify-host-stress.sh, plus this
+report. The runner takes an optional fresh output directory, copies rust/ without
+target/, injects a test module into the copy, and runs the defensive tests plus
+the entire suite with 16 test threads. It opens no video decoder sessions for
+the added tests; existing capability tests may enumerate device formats.
+
+Latest runner validation: /tmp/libva-quality-20261001/repro.log
+The copied current tree passed 162 tests and failed the new excessive-tile-count
+regression. The dedicated stress run passed three tests and failed that same
+regression. Shell syntax and Rust formatting checks passed for the new tools.
+
+Hardware matrix and session teardown commands were run serially. Only the
+explicit two-process H.264 stress overlapped hardware decoding.
+Full logs: /tmp/libva-quality-20261001/hardware-matrix.log
+           /tmp/libva-quality-20261001/session-churn.log
+
+Follow-up: see docs/production-fixes-20261001.txt for the subsequent fixes and
+189/193 passing unit/stress counts. This audit is historical evidence; it must
+not be used to claim production qualification of the later source.

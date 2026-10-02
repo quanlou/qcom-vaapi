@@ -1,0 +1,211 @@
+AV1 FASTER LIVE TRACE PREPARED (2026-10-02): user prioritizes completing AV1.
+Frozen av1-live-trace.4f13b3c1.l_9qb4rh/run-next-reviewed.py ready. Exact installed
+module SHA and DWARF-derived inst.codec/session/HFI/frame-info offsets bound;
+manual read-only BPF kprobe/kretprobe snapshot at actual OUTPUT function, no BTF
+module needed, no device addresses logged, no module/boot/PM writes. Trace startup
+must attach before decoder opens; runtime verifier/attachment UNPROVEN as root.
+Unprivileged codegen failed solely tracefs permission, preserved, no attachment.
+Four focused classifier tests PASS corruption/overflow/rejected/incomplete/nohidden
+and per-codec complete verified-control pairs. Prior strict control4vs2 failure
+remains failed; exact old offline reanalysis proves2contexts each valid pair, new
+classifier rejects omitted/unverified/duplicate pairs, not arbitrary count relax.
+Readonly identity/idle/ref0/clean/shared-lease preflight PASS. Copies frozen native
+producer/reference fixture, requires full96 displayed ordered byte parity, complete
+global clean kernel observer/45s process-tree timeout/no linger. Kernel checks
+while decode runs; any error stops first experiment. Raw NOSHOW size/timestamp
+only observation, never hidden-pixel validity or AV1 VAAPI/Chromium support.
+Operator wrapper first completes pending client-open removal refusal once if not
+attempted, refuses existing failed/incomplete evidence; then conditional traced
+AV1 experiment. No forced removal/reload/install/reboot/sleep. Agent no sudo,
+trace attachment or decoder opens. Necessary new combined operator command:
+sudo python3 /home/mq/.cache/libva-v4l2-qualification/resume-20261002/av1-live-trace.4f13b3c1.l_9qb4rh/run-next-reviewed.py
+Do not repeat request unchanged or retry failure. Canonical diagnostic source
+ tools/qualify-iris-av1-completion-trace.py. AV1 transport/hidden lifetimes remain
+incomplete; inspect actual evidence next, then implement evidence-supported fix.
+
+HOST AV1 OBSERVATIONAL TRACE PREPARED (2026-10-02): isolated candidate
+av1-raw-completion-trace-host.26bikaen W=1 build PASS against exact installed kernel
+headers. Compiler Ubuntu15.3.0-3 vs installed15.3.0-4/pahole absent warnings and
+BTF skip retained; no runtime compatibility claim. Repo diagnostic patch
+kernel/diagnostics/iris-av1-raw-completion-trace.patch adds AV1-only dev_dbg after
+buffer identity/queued validation and before firmware metadata copy/flag mapping.
+Records session/index/raw size/offset/timestamp/HFI flags/picture/no-output/
+corrupt/overflow, no device addresses. Dynamic debug default disabled. Removing
+only trace block restores exact prior source; NOSHOW ERROR/payload/ownership and
+all PM behavior unchanged. Not in production patch stack, not installed, no
+hardware opens or protected/module writes. Binary/source identities preserved.
+Future evidence can distinguish raw firmware completion from VB2 metadata
+clearing; nonzero size alone never proves valid hidden pixels. Existing module
+results never qualify this diagnostic candidate. Do not deploy/start hardware or
+repeat privileged requests while existing operator removal-refusal remains pending.
+AV1 producer transport and hidden surface lifetime remain incomplete.
+
+HOST AV1 ORIGINAL REFERENCE INDEX COMPLETE (2026-10-02):
+Existing CBS original-OBU probe now records resolved refresh masks, frame type and
+show-existing slot index. tools/inspect-av1-reference-index.py follows original
+header reference aliases, not VA surface/DMA ownership. Fresh isolated -Wall
+-Wextra -Werror build and five actual software ordered pixel roundtrips PASS
+684 displayed frames including 10bit; original/aom/rav1e/SVT/10bit show-existing
+aliases149/39/45/45/39 all refer to previously hidden frame headers in this corpus.
+Evidence av1-original-reference-host.r_ti3dbd/reference-summary.json; frozen sources
+and all inputs retained. An evidence script named inspect.py shadowed Python
+stdlib and failed; traceback/source retained, renamed evidence script fixes import.
+No kernel/module/VA capability changes, no hardware opens. This is host reference
+metadata audit only, not complete AV1 conformance, VA transport or hidden pixels.
+Original producer transport source anchors also retained in
+av1-va-transport-source-audit.b5w2x0im/audit.json. Current FFmpeg start_frame sees
+original frame bytes and retains sequence bytes, but decode_slice supplies tile
+payload; Rust keeps only selected ranges. Paired bounded prefix/tile-offset
+transport and real hidden surface lifetime remain required. Operator removal
+refusal still pending; do not repeat the already presented command.
+
+HOST AV1 PRODUCER CONTINUATION (2026-10-02): Exact CBS original OBU retention
+probe implemented producers/av1-cbs-original-obu-probe.c and reproducible verifier
+tools/verify-av1-original-obus-host.py. No hardware decoder open/find_stream_info/VA
+call. Requires entire packet unit coverage/contiguity and bounded original spans.
+Host software roundtrip av1-original-obu-host-r2 PASS original MP4300 + libaom/
+rav1e/SVT96each, pixel hashes and order exact, hidden/show-existing retained.
+MP4 absent temporal-delimiter raw OBU demux attempts FAILED and preserved at
+av1-original-obu-host; corrected host adapter uses IVF framing with original packet
+units+original sequence extradata and original PTS, no sequence/frame synthesis.
+Timing NOT qualified. This proves compression-header preservation feasibility,
+NOT final VA transport/hidden-surface ownership or Chromium integration. Installed
+VA/module unchanged, AV1 profile gated. Four host successes do not qualify hardware.
+No new hardware corpus opens while operator device PM result pending. Existing
+necessary operator command remains presented, do not repeat it unchanged.
+
+LATEST HOST CONTINUATION (2026-10-02):
+Expanded AV1/system-sleep/controlled-live-removal scope INCOMPLETE. Firefox deferred.
+Boot b86c3104-05ca-4e40-a913-9226ea801cfb runs exact persistent build
+231cb9f3a0141c3ddfa7b8df87df0889eff2f5f2; installed VA/module unchanged.
+Idle operator module removal/reload and fresh post-reload full strict matrix,
+churn/EOS/seeks/4K/Chromium/runtime-PM/null-output all PASS, all windows clean.
+real-use run.u738ry1i:3120byteexact70.98s43.956FPS467568KiBRSS. Active-client
+normal-removal refusal still pending; no force-removal support.
+Operator freezer dry run PASS5.4915s/cleanexit/clean kernel/settings restored.
+Device-stage operator packet pm-devices-packet.b86c3104.7krx481j is ready;
+necessary command already presented; do NOT repeat unchanged sudo request.
+No result yet. No agent sleep/unload/reboot. Prior ec980588 deep sleep FAIL/no
+recorded resume/forced shutdown; cause unproven, no unchanged deep retry.
+AV1 native fullstream300/300 pixel parity IN ORDER PASS with receive-core
+DISCARD correction in av1-discard-core.b86c3104.7ky_w9qp, clean kernel/teardown.
+Original299-frame and first-empty-recycle/internal-error failures preserved.
+Actual-function host discard model PASS through10000empties/error propagation.
+Native test alone is NOT Chromium/VAAPI production support; profile remains gated.
+New HOST-ONLY diverse corpus av1-corpus-host.cgwv9g1s generated libaom/rav1e/SVT
+8-bit720p96displayed frames each. Traced hidden42/45/45 and showexisting39/45/45,
+varied refresh flags. No grain/superres/10bit/sequence-change coverage yet.
+Frozen candidates/references av1-diverse-prepared.b86c3104.4qj9mp36; identities
+and pending-PM guards PASS. No hardware corpus run; waits successful device-PM
+result on same boot, then verify loaded identity/kernel/shared lease before each
+case; stop at first failure. Inspect operator/test runners without competing.
+FFmpeg parsed original sequence bytes are retained in seq_data_ref, current OBU
+bytes are passed to start_frame; vaapi_av1 ignores originals. Need actual producer
+and driver transport/hidden-surface ownership integration plus lifecycle/diverse
+hardware proof before enabling AV1. No unused driver API or reserved-ABI abuse.
+Host tests never qualify production. Stop hardware on any new kernel/firmware
+fault; never open on three known faulted boots. No4K60/battery/zero-copy/kernel
+physical-memory claims. Preserve all user changes/failures. All runners exited,
+refcnt0; stay quiet while operator pending unless meaningful new progress.
+
+Historical evidence retained below.
+
+LATEST EXPANDED PROGRESS (2026-10-02): operator PM freezer diagnostic PASS
+on same b86c3104/build;5.4915s exit0/no lingering, journal shows task freeze/thaw
+and debug wait/completed exit, pm_test/debug/print settings restored. NOT real sleep.
+Prepared pm-devices-packet.b86c3104.7krx481j, read-only preflight PASS. Necessary
+operator step presented next: sudo python3 packet/tools/qualify-iris-pm-stage.py
+run devices packet/evidence. Save work; screen may darken briefly. No agent PM
+transition, no platform deep sleep, no module operations, no retries. Do not repeat
+operator step unchanged. Inspect result when available; expanded sleep still pending.
+AV1 native actual-function model PASS: previous NULL handling yields early EAGAIN;
+new receive-core DISCARD internally recycles empty captures without mapping/publishing
+stale pixels.0/1/10/100/1000/10000empty sequences, requeue error, other-codec guard
+PASS; actual frame dequeuer and FFmpeg core extracted, firmware/submission unmodeled.
+Fresh bounded native av1-discard-core.b86c3104.7ky_w9qp PASS300/300 full-stream
+byte-exact IN ORDER, exit0/no lingering process/complete clean kernel window.
+Includes AV1-only early empty-capture bypass of legacy drain EOF, ERROR diagnostics
+retained and explicit receive-core discard; no general hidden/corrupt disambiguation.
+The two original failures remain preserved. Installed VA/module unchanged; AV1 profile
+still gated. This establishes only one native compressed-input sample, not general AV1
+or Chromium/VAAPI support. Need diverse corpus/lifecycle and actual producer/driver
+transport integration before enabling AV1. Producer source patch updated in
+producers/ffmpeg-av1-native-diagnostic.patch; host model tools/verify-ffmpeg-av1-discard.py.
+All runners now exited/refcnt0, current exact build/boot, hardware lease idle. No4K60,
+battery, end-to-endzero-copy or separately measured kernel memory claims.
+
+AV1 production lane — 2026-10-01
+
+Result: host correctness fixes complete; production AV1 remains blocked by
+missing authoritative compressed-header metadata and unavailable hardware.
+This lane does not enable the profile or claim full-stream pixel parity.
+
+Implemented
+- Validate tile row and column separately before linearization. Previously an
+  out-of-range column could alias a valid tile in the following row.
+- Reject partial-tile slice flags because the assembler requires complete tiles.
+- Reject empty tiles (including the final tile), unsupported tile-size widths,
+  and lengths that do not fit the emitted size prefix. Previously a length could
+  truncate to another valid size and desynchronize firmware parsing.
+- Validate reference indices, primary reference, interpolation filter, quantizer
+  signed widths, CDEF count, super-resolution denominator, and order-hint width
+  before bit writes/debug assertions. Large-scale tile input is unsupported.
+  Order-hint width is checked before both sequence and frame synthesis.
+- Reject uniform layouts below the minimum tile-area subdivision, context-update
+  tile IDs outside the tile grid, and unsupported tile-size widths in the writer.
+
+Validation
+- Four additional AV1 regressions cover coordinate aliasing/partial payloads,
+  empty/oversize tile prefixes, malformed VA field widths, and tile-area/context
+  header validation. Existing original compressed-header byte fixtures still pass.
+- cargo test --locked --manifest-path rust/Cargo.toml --quiet av1: 42 passed.
+- cargo clippy --locked --manifest-path rust/Cargo.toml --all-targets -- -D warnings:
+  passed on the shared source at validation time.
+- rustfmt on the four edited files and scoped git diff --check: passed.
+- No decoder-node/firmware/GL run performed in this lane. Host tests establish
+  rejection and syntax behavior, not hardware decoding or full-stream parity.
+
+Authoritative metadata investigation
+The official libva AV1 picture structure has no refresh_frame_flags. Its
+ref_frame_map describes references available to the current picture, not the
+post-decode refresh decisions. Different refresh decisions can therefore have
+the same VA picture parameters and tile bytes. Observing the next reference map
+can detect divergence, but cannot provide authoritative decisions before the
+current synchronous submission. The diagnostic shadow-map guard remains useful;
+it does not establish a complete reconstruction contract.
+
+Additional sequence syntax not represented by this VA structure includes actual
+sequence maximum dimensions, frame-ID syntax, sequence screen-content/integer-MV
+selection, enable_warped_motion, enable_ref_frame_mvs, enable_restoration,
+separate_uv_delta_q, timing/decoder-model/operating-point data, and complete color
+primaries/transfer metadata. Current defaults and picture-derived values cannot
+establish a faithful, stable sequence for arbitrary streams. Per-frame frame-size
+inheritance/override and render-size choices are also not preserved completely.
+
+Sources inspected (primary sources)
+https://raw.githubusercontent.com/intel/libva/master/va/va_dec_av1.h
+  VADecPictureParameterBufferAV1; VASliceParameterBufferAV1. The tile contract
+  supplies per-tile offsets, lengths, and coordinates, not original frame headers.
+https://raw.githubusercontent.com/FFmpeg/FFmpeg/master/libavcodec/vaapi_av1.c
+  vaapi_av1_start_frame maps parsed state into the limited VA structure;
+  vaapi_av1_decode_slice sends parsed tile bytes with per-tile parameters.
+https://raw.githubusercontent.com/FFmpeg/FFmpeg/master/libavcodec/av1dec.c
+  AV1_OBU_FRAME/TILE_GROUP dispatch calls decode_slice with tile_data.data and
+  tile_data.data_size. Sequence/header data exists inside FFmpeg but is not
+  preserved in the VA tile submission. Preserving the entire submitted slice
+  buffer alone therefore does not recover those headers for this producer.
+
+Required closure
+1. A real producer must supply preserved sequence/frame OBUs or an explicit,
+   versioned authoritative metadata contract. Reserved VA ABI bytes must remain
+   zero; do not smuggle private metadata into them or add an unused driver API.
+   Updating only this driver cannot make stock FFmpeg supply absent information.
+2. Wire that producer contract, validate metadata against picture/tile parameters,
+   and remove refresh/sequence inference from the production path.
+3. Run full-stream hardware parity against libdav1d across independent encoders,
+   hidden/show-existing frames, varied reference refresh patterns, sequence changes,
+   and unsupported-feature rejection. The existing 43-header divergence is still
+   a blocker; matching the first 30 displayed frames is insufficient.
+4. Keep production AV1 unavailable until these checks pass. The explicitly enabled
+   experimental path remains a diagnostic fixture path, not a supported stream
+   contract. Capability/production gate edits belong to the hardware-gate lane.

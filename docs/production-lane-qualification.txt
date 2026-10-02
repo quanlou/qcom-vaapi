@@ -1,0 +1,79 @@
+Hardware release qualification lane — 2026-10-01
+
+Host implementation complete; deployment hardware qualification BLOCKED.
+Neither /dev/video16 nor /dev/dri/renderD128 exists in this environment. The
+required 720p sample exists, but fixtures cannot substitute for decoder/DRM
+access. No hardware decode, kernel installation, or system install was performed.
+
+Release gate fixes
+
+- Reject inherited non-msm VA driver selection and software/native-decoder
+  substitutions. Explicitly export LIBVA_DRIVER_NAME=msm and the required
+  h264_v4l2m2m independent hardware reference identity.
+- Refuse nonempty result directories so old logs cannot be mistaken for this
+  invocation's evidence. Use a fresh directory for every attempt.
+- Check strict edge fixtures before expensive host work.
+- SHA256 provenance binds rust/src, Cargo.toml/lock, all verifier tools, supplied
+  main/edge media, and existing codec fixture-directory children/membership.
+  It also records kernel release and machine architecture. Python bytecode
+  caches are excluded because verification generates them.
+- Recheck provenance after host checks and after every hardware probe. Changed
+  source, added/deleted fixtures, a different kernel, or a replaced staged
+  shared object fails qualification. Build/bind the exact driver before the
+  first hardware probe. The existing strict matrix, GL, churn, EOS, seeks,
+  codec parity, and kernel-observation checks remain required.
+
+Validation
+
+python3 -m unittest discover -s tools/tests -p test_production_provenance.py -v
+  PASS: 13 host regressions. Covers source edits/additions, fixture edits and
+  directory additions, missing media, binary replacement, duplicate evidence,
+  kernel mismatch, wrong decoder/driver identity, stale logs, and unchanged
+  input acceptance.
+
+bash -n tools/verify-production.sh
+  PASS.
+
+The combined Python suite passed 49 tests before the final directory-membership
+regression was added. Root owns the final combined checkout validation.
+
+An isolated production invocation at /tmp/libva-qualification-20261001 stopped
+at formatting checks because the copy captured concurrent in-progress GL source
+edits. That is an explicitly failed attempt, not hardware evidence. Source copy,
+provenance and failed log remain in that directory. The previously established
+missing-hardware blocker remains open.
+
+Reproducible deployment qualification
+
+1. Freeze the completed checkout and prepare all supplied media, including
+   codec-directory fixtures, before running. Do not build/edit the same source
+   or overwrite the staged driver while qualification is running. Put outputs
+   outside rust/src and tools, and outside supplied media directories.
+2. Boot the deployment kernel with the candidate Iris bounds fix and independently
+   establish that the booted build includes it. A matching uname or module hash
+   alone does not prove that the candidate source patch was included.
+3. Ensure the decoder/DRM nodes and required native codec/GStreamer/GL/player
+   dependencies are available. Choose a fresh driver and evidence directory:
+
+   qualification_dir=$(mktemp -d /tmp/libva-release.XXXXXX)
+   V4L2_VA_PRODUCTION_DIR="$qualification_dir/results" \
+     tools/verify-production.sh "$qualification_dir/driver" \
+     > "$qualification_dir/production.log" 2>&1
+
+   Supply V4L2_VA_SAMPLE, V4L2_VA_ONE_FRAME_SAMPLE, V4L2_VA_BFRAMES_SAMPLE,
+   V4L2_VA_CODEC5_DIR, V4L2_VA_DEVICE and V4L2_VA_DRM_DEVICE when the deployment
+   uses other paths. Keep all strict gates unchanged.
+4. Retain provenance.json, the exact msm_drv_video.so, main production log and
+   all per-probe output. A production=pass covers provided media and headless
+   lifecycle only; deployment browser and sustained 4K performance remain
+   separate required qualification, using the same binary/kernel/firmware.
+
+Limits
+
+The provenance manifest detects changed supplied inputs at checkpoints; it is
+not an authenticity attestation or a substitute for freeze/serial qualification.
+It does not establish firmware identity or prove a patch is booted. Automatically
+created codec samples should be prepared first; adding them to an already bound
+fixture directory intentionally fails that attempt. Missing devices, kernel
+patch boot evidence, strict GL/real-browser results, long-GOP recovery and full
+AV1 parity cannot be closed by these host tests.

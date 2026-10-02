@@ -9,12 +9,16 @@ feel obvious.
 
 ## 1. Where we are
 
-Already true (validated on the local sample):
-
-- `vainfo` loads the driver; H264 Baseline/Main/High VLD reported.
-- 30-frame and full-300-frame FFmpeg VA-API decodes are **byte-for-byte
-  identical** to the native `h264_v4l2m2m` path (`framemd5` + `cmp`).
-- SPS/PPS synthesis is pinned by unit tests against golden bytes.
+The driver supports H.264 Baseline/Main/High, HEVC Main/Main10, and VP9 Profile
+0. AV1 has an experimental implementation but remains unadvertised by default.
+The latest strict hardware gate passed H.264 1/30/300 parity, exact 300-frame
+GL output, 780-frame resolution churn, 3,600-frame playback, 30-frame parity
+for HEVC/Main10/VP9, EOS, churn, and 24 ordinary seeks. It failed the mixed
+seek phase on the supplied transport stream; an indexed Matroska remux passed
+the same hardware seek checks, but does not change the failed gate result. A
+fresh strict gate is running. Production qualification is not complete. See
+[`PROGRESS.md`](../PROGRESS.md) and the [current hardware record](production-resumption-20261001.txt)
+for the live status and exact evidence.
 
 That means the *hard middle* of the stack works end to end:
 
@@ -27,7 +31,7 @@ C --> "frame submit\n(synthesis + QBUF)" as S
 S --> "decode + pump" as D
 D --> "sync + get_image\n(CPU copy)" as G
 G --> (*)
-note right of D : you are here\n(correct, single stream,\ncontrolled clients)
+note right of D : implemented;\nrelease qualification\nin progress
 @enduml
 ```
 
@@ -38,9 +42,9 @@ everything below.
 
 | Blocker | Symptom today | Who forces it |
 |---|---|---|
-| **End-of-stream drain** | Last frames of a file can be delayed or lost; sync can time out on a frame the hardware never flushes | Every player at EOF; browsers at clip end |
-| **No zero-copy export** | Pixels are memcpy'd out of CAPTURE buffers into CPU images | Browsers import GPU textures; the CPU copy is a bandwidth tax and often a blocker |
-| **Lifecycle hardening** | Seek storms, resolution changes, repeated open/close can wedge the session | Browsers: seeking, ads (resolution change), tab churn |
+| **Release qualification** | Strict mixed seek gate is being rerun after a transport-stream parser/reference failure; sustained 4K and browser budgets remain separate | Deployment sessions |
+| **PRIME and GL ownership** | Export/import works for qualified probes, but stable exported allocations currently need CPU copies; this does not prove a copy-free browser path | GPU importers and browsers |
+| **Small-stream/kernel edge cases** | Recovery-v4 passed the supplied one-frame and B-frame probes; broader firmware reliability and persistent kernel deployment remain open | Short clips and deployment lifecycle |
 
 ## 3. The phases
 
@@ -83,8 +87,8 @@ repeated playback. The NV12 image layout/copy code now lives in
 `rust/src/image.rs` with unit coverage, CPU-owned buffer metadata/handle
 callbacks live in `rust/src/buffer/handles.rs` with direct host coverage,
 and the queue-all CPU-copy path remains distinct from pre-decode PRIME
-reservations. Repeated playback still needs a clean device run because the
-latest verifier is blocked by `/dev/video16` firmware poison.
+reservations. The latest clean hardware gate passed churn 7/7 and the 3,600-frame
+playback check; current release qualification is tracked separately below.
 
 **Why:** this is the phase where *test hygiene* becomes the product:
 leak checks under repetition.
@@ -94,19 +98,14 @@ fds, mappings) and how `Drop` ordering matters.
 
 ### Phase 3 — dmabuf zero-copy (the browser gate)
 
-**Status:** groundwork has landed — `VIDIOC_EXPBUF` on CAPTURE buffers
-(`v4l2.rs`) plus a first `vaExportSurfaceHandle` returning read-only
-DRM PRIME 2 NV12 descriptors (`lib.rs` + `va_drm.rs`, composed or
-separate layers). What remains is exactly the hard part: export
-lifetime tracking (CAPTURE buffers must not be requeued while a GPU
-process still holds their fds), modifier/format verification on real
-importers, and browser validation.
+**Status:** PRIME export and GL import have been exercised by the strict
+300-frame gate. Exported surfaces use stable reservations and CPU copies to
+provide completed pixels; do not describe this as a copy-free zero-copy path.
+The deployment browser playback/performance gate is still pending.
 
-**What:** export CAPTURE buffers as dmabufs (`VIDIOC_EXPBUF`), implement
-`vaExportSurfaceHandle`, keep CAPTURE buffers alive while exported,
-requeue them only after handles are released, verify strides/offsets/
-modifiers. Then: browser VAAPI logs show hardware decode, no fallback
-to software.
+**What:** preserve export lifetime and layout correctness, measure the copy
+and importer behavior, then verify the deployment browser's real decode, seek,
+frame coverage, and performance budget.
 
 **Why separate from phase 2:** different failure modes entirely — you
 are now negotiating with the GPU importer, where a wrong stride is a
@@ -119,11 +118,11 @@ semantics, and why "zero-copy" is a *lifetime* problem more than a
 
 ### Phase 4 — lifecycle hardening
 
-**Status:** CPU-copy lifecycle gate met on 2026-09-20. One process decodes all
-780 frames across four real 960x640/1280x720 transitions without an Iris fault;
-a 12-segment run decodes 3,600 frames; repeated session churn passes 7/7.
-Seek storms finish and preserve decoder health. Mixed-resolution seeks can
-still provoke recoverable Iris session aborts, which the probe reports.
+**Status:** the latest clean gate passed 780 frames across four resolution
+changes, 3,600-frame playback, churn 7/7, EOS checks, and 24 ordinary seeks.
+The supplied mixed-resolution transport-stream seek case failed with parser and
+reference errors also seen in a software control. An indexed Matroska remux
+passed all 12 mixed seeks; the full strict gate is being rerun with that fixture.
 
 **What:** flush on seek, drain after flush, safe destruction of pending
 surfaces, real resolution changes, error recovery that never wedges the
@@ -137,10 +136,11 @@ comes back here with interest.
 
 ### Phase 5 — more codecs (HEVC, VP9, AV1)
 
-**Status:** HEVC Main and VP9 Profile 0 are implemented and match their native
-V4L2 decoders for 30 frames. Main10 is hidden pending P010 surfaces. AV1 is
-hidden pending synthesis of the sequence/frame OBU headers omitted from VA tile
-buffers.
+**Status:** HEVC Main, HEVC Main10, and VP9 Profile 0 are implemented; the
+latest strict hardware gate passed 30-frame parity for each. Main10 uses a
+software HEVC reference converted to P010 because the native wrapper fails on
+this fixture. AV1 OBU synthesis exists experimentally, but full-stream parity
+and authoritative refresh/sequence metadata are missing, so AV1 stays hidden.
 
 **What:** per codec: profile reporting, new VA buffer types, V4L2 format setup,
 bitstream assembly changes, and native parity samples.
@@ -153,13 +153,14 @@ the honest answer usually surprises people.
 
 ## 4. Immediate next tasks (from `ROADMAP.md`), with the "why"
 
-1. Keep EOS drain covered by the framemd5 matrix and fix the tracked B-frame xfail -> *phase 1 guardrail*
-2. Image lifecycle polish + surface error reporting → *phase 2*
-3. `vaExportSurfaceHandle` via `VIDIOC_EXPBUF` → *phase 3 groundwork*
-4. mpv `--hwdec=vaapi-copy` testing → *phase 2 exit check*
-5. Chromium/Firefox with VAAPI logging → *phase 3 requirement discovery*:
-   run them, read which `va*` calls they make, and implement exactly
-   those — the fastest way to find out which stubs matter.
+1. Complete the current strict qualification run; preserve the mixed-seek
+   failure record even if the indexed-fixture rerun passes.
+2. Run sustained 4K and deployment-browser checks with explicit FPS, memory,
+   duration, seek, frame-coverage, kernel, and process-exit requirements.
+3. Investigate the historical small-stream firmware failures and complete
+   persistent kernel deployment qualification.
+4. Keep AV1 unadvertised until the producer supplies authoritative metadata
+   (or compressed headers) and full-stream parity passes.
 
 ## 5. How to work on the roadmap as a learner
 

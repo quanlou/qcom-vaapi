@@ -1,10 +1,18 @@
 # Roadmap to production-grade VAAPI/browser support
 
-The Rust driver is currently good enough for controlled FFmpeg VAAPI smoke tests, but it is not production-grade yet. The Rust-only tree can load through libva, report H.264 Baseline/Main/High VLD, and match native `h264_v4l2m2m` byte-for-byte on the current full 300-frame H.264 sample.
+> **Current release state (2026-10-02):** v13 strict headless, sustained4K,
+> Chromium and ordinary runtime autosuspend/resume checks PASS on boot8558e0e1.
+> 4K3540byteexact frames69.88s/50.66FPS/479708KiBRSS. Firefox is deferred and
+> unsupported by user decision; AV1 stays unadvertised. System sleep, live module
+> removal and persistent deployment remain unqualified. All failed evidence is
+> preserved. [The active report](docs/production-next-cold-20261002.txt) and
+> [PROGRESS.md](PROGRESS.md) control status; older results below are historical.
 
-The main production blockers are browser-grade zero-copy validation, exported-buffer lifetime hardening, real client compatibility callbacks, CAPTURE reconfiguration, and module/API cleanup now that the C prototype has been purged.
+The driver supports H.264 Baseline/Main/High, HEVC Main/Main10, and VP9
+Profile 0, with an experimental AV1 path kept unadvertised. Required correctness,
+lifecycle, memory, browser, and deployment gates retain their original limits.
 
-## Current status
+## Historical engineering notes
 
 Validated locally on `/home/mq/tmp/vaatest/test_720p.mp4`:
 
@@ -417,8 +425,10 @@ and `docs/10-quality-validation.md`; full-stream parity remains mandatory.
 ## Quality closure (2026-10-01)
 
 Passing a baseline gate does not close a known correctness or reliability gap.
-Production acceptance still requires the small H.264 cases, strict GL frame
-coverage, AV1 full-stream reference parity, and sustained 4K browser playback.
+Production acceptance still requires completion of the active strict gate,
+sustained 4K and deployment-browser performance checks, persistent kernel
+deployment validation, and AV1 full-stream parity. A strict gate failure remains
+a failure even when a later remuxed-fixture run passes.
 
 - H.264, HEVC Main/Main10, and VP9 4K correctness now pass
   `tools/verify-4k-decode.sh`: 3840x2160,
@@ -559,7 +569,7 @@ Exit criteria:
    true-EOS variant).
 9. Keep `tools/verify-session-churn.sh` in the pre-browser regression set so the cross-session wedge stays covered; keep `-nostdin` on ffmpeg invocations run from automation.
 
-### Kernel memory-safety blocker (2026-10-01)
+### Kernel memory-safety finding and follow-up (2026-10-01)
 
 A 600-frame 4K H.264 run is pixel/timestamp exact but fails kernel memory
 safety: Iris capture fallback reads `tss[32]` after the metadata writer reaches
@@ -567,8 +577,11 @@ its array boundary. See [candidate patch and regression](kernel/README.md).
 The original source reproduces under UBSAN; the patched extracted functions
 pass 4,096 inputs. Production closure requires booting the matching patched
 kernel and rerunning long 4K/lifecycle checks, not merely waiting for warnings
-to stop repeating. The kernel wrapper now fails on memory faults/warnings.
-The tightened churn gate passes 7/7; strict GL still fails one missing frame.
+to stop repeating. The kernel wrapper now fails on memory faults/warnings. The
+bounds-and-removal candidate was later cold-loaded and its identity verified;
+recovery-v4 then passed GL 300/300 and churn 7/7 with clean observed kernel
+windows. Sustained 4K/lifecycle qualification and persistent deployment remain
+open; see the current status at the top and the production resumption report.
 
 ### Complete reference replay (2026-10-01)
 

@@ -1,0 +1,302 @@
+Pending lane 4 — sustained 4K / browser qualification, 2026-10-01
+
+Execution split
+Root now has direct physical device access; the reactivated child retains the
+old sandbox with masked /dev and read-only ~/.cache. This is an execution
+boundary, not a new production-hardware failure. Root runs hardware centrally
+and returns logs; this child prepares and reviews the measurements.
+
+Ready host command
+bash /tmp/performance-host-20261001.sh
+
+Results default to disk-backed:
+/home/mq/.cache/libva-v4l2-qualification/performance/run.XXXXXX
+Snap browser profiles also stay on disk under ~/snap/<browser>/common.
+No hardware lease acquired or decoder/browser process launched by this child.
+The command serializes native/driver hardware legs via existing shared lease;
+stop on the first nonzero kernel/firmware summary. Root must schedule it after
+other EOS/native/seek runs release their leases.
+
+Identity and workload
+Preserves exact earlier GL300/300 binary SHA256:
+fc08226fcc18c257f52d2159ad8ebb5ed57f2a580dbf23640f9340b60ffa6e10
+Both 4K package and browser package hashes checked before tests; browser snap
+staging uses the pinned-copy override, not a rebuild of later source.
+
+4K first calibrates H264 with 5 repeats, still requiring full pixel/kernel
+correctness but explicitly unqualified as sustained performance. From measured
+FPS, calculate ceil(FPS*70/60) loops, bounded at100. Then require >=30FPS,
+<=524288KiB FFmpeg peak RSS and >=60 observed seconds. Excessive speed exceeding
+fixture/loop coverage is duration-unqualified, never a throughput failure.
+Current per-leg timeout remains120s; no threshold weakening or simulation.
+Other codecs can follow once H264 measurements and safety are established.
+
+Both Chromium and Firefox profiles use the actual 1280x72030FPS10s fixture.
+Exploratory requirements: >=27 presentedFPS (30FPS minus explicit10% allowance
+for startup/seek), <=1% dropped frames, <=2097152KiB summed observed process-tree
+RSS, >=20s measurement,30s launch bound. Actual driver publication, playback,
+acknowledged seek, forward frames, clean kernel and natural shutdown mandatory.
+RSS budgets are chosen workload requirements, not universal platform limits;
+process RSS excludes firmware/kernel/GPU allocations and is not leak proof.
+
+Actual hardware results (root execution complete)
+Artifacts: /home/mq/.cache/libva-v4l2-qualification/performance/run.O6rYy2
+Top log: /home/mq/.cache/libva-v4l2-qualification/performance-root-20261001.log
+These supersede earlier child sandbox availability observations.
+
+4K H264 correctness PASS; performance budget FAIL
+- 1,30,300 frames byte-exact against native reference (300=5 complete repeats).
+- Both native and VA legs have clean kernel summaries for every leg.
+- Driver elapsed/peakRSS: 1frame0.35s/922136KiB;
+  30frames0.91s/1227444KiB;300frames7.98s/1323480KiB.
+- Full-leg throughput37.59FPS exceeds30FPS requirement, but peakRSS1.262GiB
+  exceeds the explicit512MiB requirement by2.52x. This was not a throughput
+  failure. Calibration duration7.98s is not sustained qualification; the
+  sustained stage correctly did not run after the memory-budget failure.
+- Logs show32 CAPTURE slots*12533760bytes =382.5MiB of CAPTURE storage alone;
+  OUTPUT sizeimage7077888bytes with source16-slot policy adds potential108MiB.
+  Those maxima do not prove resident accounting or explain all RSS. The high
+  1frame RSS suggests substantial startup/pool cost; three short peak values
+  do not prove an unbounded leak.
+- Next concrete driver work: instrument per-session pool/snapshot/recovery
+  allocations and /proc/<pid>/smaps_rollup; distinguish mapped resident DMA
+  buffers from copied snapshots and retained old pools, then reduce measured
+  duplication and bound aggregate session memory. Do not raise the budget to
+  turn this run into a pass.
+
+Chromium actual driver playback FAIL
+-470 driver CAPTURE publications,454 drain-history replay events.
+- Natural exit0,29.426s process runtime,peakRSS1578456KiB within2GiB budget.
+- Kernel summary clean; no explicit software fallback or VA decode error.
+- Finished telemetry total464,dropped128:27.59% dropped,336 presented frames
+  over25.0037s=13.44FPS, failing both27FPS and1%drop requirements.
+- Seek requested7.5s but acknowledged position0.000391s; this is not correct
+  seek behavior. Readiness2 at before-seek/finished triggers the first checker
+  rejection (browser_video_not_ready); even bypassing it would fail throughput,
+  drops and requested-position evidence. Keep all acceptance checks.
+- Next concrete driver work: inspect why browser sync produces454 STOP/history
+  replay cycles for470 publications and why post-seek timestamps restart near0
+  rather than requested7.5. Driver drain pacing/replay and timestamp continuity
+  are stronger leads than generic snap confinement. Chromium reached VAAPI and
+  decoded many real hardware frames. Source changes need a fresh identity and
+  hardware validation; this pinned run cannot qualify a later fix.
+
+Firefox actual VAAPI start, export failure, software fallback, timeout FAIL
+- Actual VAAPI decoder initialized; only6 driver publications observed.
+- First export failure: surface1073741847,mem_type0x40000000,flags0x5,
+  driver reasonOperationFailed, then Firefox vaExportSurfaceHandle failed.
+  Nearby driver log reports stable reservation starvation. The exact failure
+  branch is not recorded; code can fail reservation/stabilization/export/fddup.
+- Firefox subsequently uses FFVPX software decoding. Telemetry744 totalframes
+  is not744 hardwareframes; hardware publication evidence is insufficient.
+- Valid requested2.5s seek acknowledgment and finished telemetry do not rescue
+  software fallback.61 droppedframes/744=8.20%,683 presented/25.412s=26.88FPS.
+- Exit124 at35.23s with timed_out=true,peakRSS1856532KiB within2GiB budget;
+  no surviving descendants observed after cleanup. dom.allow_scripts_to_close_
+  windows=true is present, yet process tree did not naturally terminate. The
+  observer terminated the kernel-log wrapper; no complete kernel summary is
+  available, so clean Firefox kernel evidence is NOT proven.
+- Next concrete driver work: report precise export failure branch and surface
+  reservation ownership, reproduce stable-slot starvation after actual pool
+  sizing. Separately diagnose Firefox profile/window/process shutdown so the
+  kernel wrapper completes naturally; do not treat killed teardown as healthy.
+
+Safety stop and scope
+Root later reports5 Iris session-fatals from a separate smallstream VA probe;
+all further hardware work stopped. No further tests were launched by this lane.
+No thresholds weakened, no budget increase, no source fix or driver rebuild.
+Frozen harness75 regressions and runner syntax checks passed earlier. These
+actual results qualify only the pinned binary identified above;4K sustained,
+other-codec performance and browser production readiness remain unqualified.
+
+Firefox export ownership implementation (host validated; hardware pending)
+Changed only rust/src/v4l2/capture.rs in this follow-up; no codec, submit,
+replay, recovery, memory-budget or browser-checker changes.
+
+1. Legacy CPU queue topup now uses the existing bounded6slot working queue,
+   preserving the extra unqueued CAPTURE allocations before the first late
+   Firefox export. Reserved/outstanding-export slots never enter this topup.
+2. A valid dequeue-time snapshot can restore a delayed frame even when its
+   former working index now belongs to another exported surface. Copy only
+   into this frame's distinct Free reservation; never borrow/rewrite the
+   foreign slot. Exports without snapshots still reject foreign reservations.
+3. Reserving a surface that already owns a live reservation returns that
+   reservation, avoiding duplicate slot consumption. New reservations require
+   Free/unowned/unexported slots; exhaustion fails boundedly with debug counts.
+
+Meaningful regressions
+All three new tests failed on the earlier implementation before the fix:
+- reservation_is_idempotent_for_a_live_surface_owner
+- legacy_topup_keeps_slack_for_the_first_post_decode_export
+- delayed_snapshot_survives_its_old_slot_becoming_a_foreign_reservation
+The last uses an unmapped foreign slot with outstanding export references and
+checks ownership/reference counts remain unchanged while snapshot pixels and
+zeroed padding restore into a separate allocation.
+
+After-fix checks
+cargo test --locked --manifest-path rust/Cargo.toml --quiet:212passed
+cargo clippy --locked --manifest-path rust/Cargo.toml --all-targets -- -D warnings:PASS
+cargo fmt --manifest-path rust/Cargo.toml -- --check:PASS
+git diff --check:PASS
+bash tools/verify-host-stress.sh /tmp/libva-firefox-export-stress-20261001:
+216passed,host_stress_status=0,parallel_suite_status=0
+Before/after/stress logs: /tmp/firefox-export-{before,after,stress}.log
+
+This fixes reproduced ownership defects; it does not qualify browser playback
+or resolve high4KRSS. The changed CPU queue policy requires CPU1/30/full,
+strictGL,session churn and actual Firefox export/playback retesting on a safely
+recovered device/new immutable binary. Those are deliberately not run after
+HARDWARE STOP; production remains pending.
+
+4K allocation/thread-scope source audit (performance child, host-only)
+Changed only tools/verify-4k-decode.sh and added the focused host argv test
+tools/tests/test_4k_thread_scopes.py. No Rust allocations, CAPTURE policies,
+export ownership, codec, replay or recovery code changed in this audit.
+
+Concrete evidence from the existing pinned-baseline logs
+Leg            submitted  unique surfaces  published   compressed bytes
+1 output frame     17            17            17          1,628,302
+30 output frames   48            18            48          4,531,343
+300 output frames 300            18           300         27,948,115
+Each leg logs one OUTPUT format and one CAPTURE allocation. No additional
+pool/recovery initialization is visible in these logs. These counts refer to
+baseline fc082...a6e10, not the newer external seek owner's driver candidate.
+
+The old '-threads:v 1' occurs after '-i', so it controls FFmpeg's output
+checksum encoder only. Input H264 decoder frame threading remained automatic.
+The1-frame leg therefore cannot be interpreted as allocating just one decoded
+snapshot. The revised verifier independently sets '-threads:v 1' before '-i'
+for every native/reference and VA input, while retaining the output option.
+This bounds harness decoder-thread prefetch; codec reordering/lookahead is
+still required. It is a harness workload change, not proof of driver RSS savings.
+
+Allocation/lifecycle evidence from source, not inferred leak claims
+- create_surfaces_common allocates identity/metadata only, frame=None. It does
+  not allocate32or1024full-resolution pixel arrays up front.
+- CAPTURE32*12,533,760bytes=401,080,320bytes=382.5MiB mapped capacity.
+- OUTPUT source policy16*7,077,888bytes=113,246,208bytes=108MiB possible
+  mapped capacity. Actual granted OUTPUT count and resident pages need runtime
+  observation; count16 is a source policy, not logged allocation evidence.
+- capture_copy allocates a private Vec from the entire mapped CAPTURE plane on
+  each completion. For the negotiated3840pitch/2176height NV12, required pixel
+  storage is exactly12,533,760bytes=11.953125MiB. The sizeimage matches this
+  geometry; trimming plane padding would not address this fixture's memory.
+-17and18distinct retained snapshots model203.203125and215.15625MiB respectively.
+  This is a lifecycle/capacity model, not an smaps attribution or proof that all
+  these bytes contributed to the measured RSS at its peak.
+- apply_ready_captures moves each Vec into the owning surface; BeginPicture
+  clears that snapshot when the surface is reused. These arrays do not grow by
+  one forever on the repeated18-surface workload. Hidden/no-output surfaces can
+  clone snapshots, but no such marker/retirement is observed in the H264 logs.
+- vaGetImage already borrows the snapshot while copying. vaDeriveImage creates
+  independent mutable image storage of the same11.953125MiB; sharing the Vec
+  with vaMapBuffer or dropping the surface snapshot would break independent
+  mutable image/late-export/second-read semantics. No unsafe release was added.
+-32CAPTURE+16OUTPUT+18snapshots+1derived image model717.609375MiB capacity,
+  before FFmpeg buffers, compressed history or allocator overhead. Summing
+  capacities is NOT measured resident accounting: DMA/shared mappings, actual
+  grant sizes and client allocation lifetimes need smaps confirmation.
+
+The old logs and source do not fully explain922136KiB/1323480KiB peakRSS.
+In particular, no claim of an unbounded leak or proven512MiB fit is justified.
+The512MiB budget and30FPS/sustained60s requirements remain unchanged.
+
+Meaningful regression evidence
+The real verifier is copied into an isolated temporary harness with mocked
+ffprobe, ffmpeg, kernel wrapper and flock. No actual decoder/device is opened
+or hardware lease acquired. It exercises all24native/VA argv combinations for
+H264,HEVC,Main10,VP9 and required1/30/full legs, checking separate input/output
+option scopes, repeated reference parity and clean-window parsing.
+Before fix:4codec subtests fail because the input-thread option is missing.
+After fix:all4codec subtests pass; existing18performance regressions pass.
+bash syntax and git diff whitespace checks pass. Mock pixels are host test
+fixtures only and provide no hardware decode/performance qualification.
+
+Bounded next measurement after the hardware safety boundary is cleared
+1. Freeze the chosen new binary/source/harness and record hashes; coordinate
+   with the external seek/export owner, then acquire the shared hardware lease.
+2. Run revised H2641/30/full calibration once, preserving512MiB and independent
+   byte parity/kernel checks. Stop immediately on the first fault/failure.
+3. Capture /proc/<ffmpeg-pid>/smaps_rollup and status before input opens, after
+   queue initialization, during first publication and at steady state using a
+   bounded sampler. Record Rss/Pss/private/shared anonymous/file-backed bytes.
+   Where permitted, inspect /proc/<pid>/maps/smaps for V4L2/DMA mappings without
+   dumping unrelated process contents. Correlate phases with driver logs.
+4. Compare submission/published/unique-surface counts and peakRSS with the
+   existing baseline. Only measured before/after evidence can close the memory
+   budget. If still high, add gated per-session mapped/snapshot/image/replay
+   byte counters before changing pool sizes or lifetime semantics; preserve
+   export reservation slack and codec reference requirements.
+5. Only after calibration fits the same budget, schedule >=60observed seconds
+   of repeated decoding and the supported codec set. This has not been run.
+
+Repeated-export peer review correction (host-only)
+The normal export_ready_surface callsite guards stabilization by checking that
+reserved_capture_for(surface)==surface.cap_idx. Normal repeated ready exports
+therefore skip copying. A mismatched index, however, could enter stabilization
+and idempotent reserve_capture would return already exported sameowner backing.
+An attempted copy could overwrite that allocation, and failed bounds/cache
+access could release its earlier reservation. Do not rely only on callsite
+invariants to prevent this ownership loss.
+
+stabilize_published_capture now checks for existing ownership before any copy:
+matching index returns read-only/idempotently; mismatched index fails without
+modifying the earlier allocation. Only a newly acquired reservation is ever
+subject to failed-copy cleanup.
+
+New repeated_stabilization_never_refreshes_or_releases_an_existing_export
+regression fails before the guard, passes afterward. It verifies outstanding
+export_refs2, reservation identity, bytesused and every mapped byte remain
+unchanged for conflicting valid snapshot, matching repeated export and an
+oversized snapshot that would otherwise undo the earlier reservation.
+Full shared Rust suite216passes; strict Clippy,fmt,diffcheckPASS. Temporary
+compiler files use disk-backed ~/.cache/libva-v4l2-qualification/export-host-tmp
+because shared/tmp quota is exhausted. No hardware opens or threshold changes.
+
+Required sample30 integration failure audit
+External candidate packet.377t6a0p (dc9739...ca63), production.ZIYIfL, passed
+sample1 then failed sample30 status251/internal decoding errors with all seven
+kernel counters0. Captured source used new6-slot CPU working bound versus the
+prior clean b2e7ce packet's queue-all32 policy. The bound changes pacing and is
+a plausible contributor, but the warning-level log has no driver queue trace
+to establish a sole cause.
+
+The external submit owner identified a concrete integration defect: streaming
+CPU submission still requeued only this target's old cap_idx, leaving other
+completed working slots Free. Under the smaller pool that can exhaust decoder
+supply; repeated target indices may also be already Queued. Current submit now
+calls queue_all_capture for every streaming CPU submission, replenishing the
+entire bounded working pool, without changing export reservations or kernel
+slot ownership. External owner is freezing/retesting that combined source.
+
+Do not enlarge the shared capture policy while that gate targets the6-slot
+policy. A26working/6spare policy for normal32slot allocation was considered as
+an isolated fallback, but is not implemented or qualified. Wait for actual
+fulltopup CPU1/30/full results before attributing starvation purely to6slots.
+No independent hardware probes, frame-thread reductions or verifier changes.
+
+CPU required-matrix chronology and unrun fallback
+5cb03057ffc2f278055b724c6ed87fce994fbbee0eb5381aad8ca148aced077e,
+packet.eufa1nd_/production.xrSLy6, still failedsample30 status251 after the
+first CPUsubmissiontopup fix; allkernelcounters0. A further b086f9...83a1
+packet.igmkrc1v/production.1AkohJ alsofailed. Externalowner debugthen found
+CPU capture replenishment missing during drainwait/replay/restart, not only
+normal submissions. Root nowreports a repairedcandidate passes required
+CPU1/30/300 with115Python/219Rust tests; gatecontinuesGL/resolution under
+externallease. This latest CPU evidence supersedes the earlier hypothesis
+that increasing6slots is necessarily required.
+
+An isolated31working/1spare fallback wasbuilt but NEVER hardwareexecuted:
+~/.cache/libva-v4l2-qualification/cpu-export-window-candidate
+SHA2566f22a33d472381be8e20de615a2be670f474695189f672e0c78aef44cb63e930.
+Onlycapture.rs differs from frozenfailed5cb baseline; deeper-cpu-window.patch,
+source manifests, beforefailing/afterpassingregressions,219passingRust tests,
+strictClippy/fmt andreleasebuild artifacts preserved. CPU workinglimit is
+max(allocatedslots-1,16) boundedactualpool; stable6 unchanged. The proposed
+singleCPU30 runner remains UNRUN and superseded by nowpassing6-slot source.
+
+Kernelreview confirms postPSC fw_min_count/control is authoritative, initial4
+isprovisional; logs lackactualminimum. There isno proof32buffers universally
+mandatory, andNV12 referenceDPB not1:1workingbuffers. Do notdeploy blind31limit
+or claimfallbackqualified. No sharedRustsource changes while ownergateactive.
+Further4K/browser reruns await complete newestcandidate gate andsourceidentity.

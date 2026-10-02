@@ -1,0 +1,826 @@
+AV1 PRODUCER COPY-ON-WRITE HEADER OWNERSHIP HOST PASS (2026-10-02):
+New reusable CBS helper clones parsed content through standard CBS writable-unit
+API, retaining tile buffer and writer-held sequence lifetimes. Original parsed
+headers are checked byte-for-byte unchanged after serialization; show-existing
+visibility/reference state remains original. Host five samples including10bit
+PASS690coded/684display exact tiles/pixels/order, Werror build and13 focused tests
+PASS. Evidence av1-producer-ownership-host.1ugsj9kg. No decoder/device opens,
+installed changes or operator step. This is producer ownership groundwork, NOT
+actual VA transport/driver ownership/Chromium qualification. AV1 stays disabled.
+Next wire helper into isolated actual FFmpeg VA producer plus validated full-OBU
+standard slice-data driver path; freeze paired experiment before hardware.
+Baseline remains user-deferred/incomplete; every prior failure retained.
+
+AV1 NATIVE NORMALIZED DIVERSE PASS / VA INTEGRATION NEXT (2026-10-02):
+User explicitly deferred fresh baseline; interrupted baseline retained incomplete.
+Aom99coded/96display p6yso_fj PASS; corrected active-sequence original300/300
+skv3j30x PASS; rav1e96/96 c9puqkke PASS; SVT96/96 dkg8np7f PASS. All591coded
+and588original-display NV12 pixels/order byteexact, full clean kernel windows,
+exit0/no linger/safe final idle/current3loaded identities unchanged. Summary
+av1-native-normalized-diverse-summary.json. Original300 truncated139 failure
+preserved; corrected input removes superseded differing MP4 extradata sequence
+before actual inband header, full changed run now PASS. Original faulted4f13
+never opens again, operator normal restart currente56c1f3a verified. No extra
+sudo/boot/module edits. Host5samples including10bit/690coded/tileproof/13tests
+PASS; native10bit untested. This establishes normalized native hidden-reference
+pixel path for tested corpus, NOT AV1 VAAPI/Chromium or full production. Next
+implement actual FFmpeg VA producer original/CBS headers+standard slice-data
+transport with validated driver ownership, then strict VA diversity/lifecycle/
+Chromium. AV1 remains advertised disabled; active-playback sleep/streaming
+removal still unqualified. Preserve all failures; no unchanged retries.
+
+AV1 DIVERSE FIRST FAILURE / ACTIVE SEQUENCE HOST FIX (2026-10-02):
+Original300 sample av1-coded-diverse.e56c1f3a.0.op_jii4c FAIL139/300frames,
+clean complete observer/exit0/no linger/ref0. Offline exact hash audit matches all
+139returned frames to originalcoded161..299; no emptyERROR completions. Serial
+runner stopped, rav1e/SVT packets never attempted. Preserve full failure.
+Input has differing MP4-extradata and immediate inband sequence headers before
+frame0; active inband header recurs at frame161. Packetizer now omits superseded
+sequence headers before a coded frame (no intervening frame consumes old header),
+retains last active header and all compressed tiles.13 focused host tests PASS;
+five corpus active-sequence software proof running/completing. Firmware cause
+unproven until changed hardware proof, no unchanged failure retry. Baseline stays
+user-deferred/incomplete; AV1 advertised support remains disabled/unqualified.
+
+AV1 DIRECT CHANGED NATIVE PASS (2026-10-02): av1-coded-native.e56c1f3a.p6yso_fj
+single99coded normalized libaom frames ALL NV12 byteexact/order PASS; original
+96display alias projection PASS. One decoder session(no probe decode), one coded
+frame per packet, passthrough output; complete clean kernel observer/process-tree
+exit0/no linger, safe final idle and3loaded identities unchanged. This proves
+actual hidden reference pixels for tested normalized path, not raw hidden payload
+or VAAPI/Chromium integration. Old system fault/81drop failures remain FAILED;
+boot4f13 permanently excluded. No general firmware root-cause claim. Baseline
+explicitly deferred by user, interrupted incomplete. Next native original300/
+rav1e96/SVT96 diverse checks serial stop first failure, then actual VA producer/
+driver header/reference integration. No extra sudo/reboot/unload/sleep needed.
+
+USER DEFERRED BASELINE / DIRECT CHANGED AV1 EXPERIMENT (2026-10-02): user
+explicitly requested skip baseline to conserve agent bandwidth. Owned baseline
+process tree terminated, no lingering children; user-interruption.json preserves
+incomplete result, never qualification PASS. Currentboot e56c1f3a exact3loaded
+identities/selectedSHA/ref0/suspendedusage0/auto and wholebootclean verified after
+cleanup. Fresh av1-coded-native.e56c1f3a.p6yso_fj frozen99coded libaom packets,
+unique coded timestamps/no probe decode/passthrough output, full99NV12 software
+reference and96original display alias projection. Host five corpus/12tests PASS.
+Explicit baseline defer recorded in frozen plan, remaining safety/parity/timeout/
+cleanup unchanged. Single changed experiment starting, not old failure retry.
+No extra sudo/reboot/module operations. Stop first fault; AV1 remains disabled.
+
+AV1 HOST CODED-FRAME CORPUS PASS / FRESH SUPPORTED BASELINE ACTIVE:
+av1-coded-frame-host.bjt63i9i/corpus all five samples PASS690coded frames,
+684original displays, exact compressed tiles and pixels/order, including10bit.
+One complete FRAME OBU per IVF packet and coded-frame monotonic timestamps;
+no probe decode and output passthrough.12 focused AV1 tests PASS. Firmware fault
+cause remains unproven; no hardware validation of changed framing yet.
+Newboot e56c1f3a operator normal restart, actual3loaded builds/selectedSHA/idle/
+wholeboot journal clean read-only PASS. Current-boot persistent activation evidence
+saved. Fresh av1-prereq-boot.e56c1f3a.yi5595k4 exact unchanged v15 source/harness/
+driver hashes PASS; full supported correctness/lifecycle baseline starting before
+new changed AV1 experiment. Never use faulted4f13 for hardware, preserve old FAIL.
+No privileged writes/reboot/unload/sleep/sudo requested. AV1 remains disabled.
+
+AV1 HOST DIAGNOSIS CONTINUES AFTER OPERATOR NORMAL RESTART: currentboot
+e56c1f3a normal chosen restart confirmed; no hardware opens. Actual private FFmpeg
+host strace with ordinary-file mock (no video-node opens) shows old probe3opens,
+-nofind_stream_info1open. Evidence av1-no-probe-host-r2.bn83mtsn; preliminary
+probe-session fault cause still unproven. Changed host diagnostic uses one complete
+FRAME OBU per IVF packet, monotonic coded-frame timestamps, nofind_stream_info
+and output fps_mode passthrough; unsupported OBU layouts refused. New host corpus
+check active av1-coded-frame-host.bjt63i9i, never hardware. Old fault/drop evidence
+kept, no unchanged hardware retry. Framework fault guard rejects4f13/b86c.
+
+AV1 CHANGED NATIVE EXPERIMENT FAILED / HARDWARE STOP (2026-10-02):
+av1-visible-native.4f13b3c1.0oensoo1 result FAIL, actual Iris system error0x5000003
+and vb2_start_streaming WARN; current4f13b3c1 is FAULTED, never decoder-open again.
+Process monitor exited1 in0.595s, no linger/signal denial/unresolved children;
+private FFmpeg terminated, module ref0. All raw logs/failed packet retained.
+Host normalization five samples684display/690coded/tile parity remains host only.
+Native reported99decoded but muxed81 with18timestamp drops; no pixel pass inferred.
+Producer normalization/header packaging/probe-session fault cause UNPROVEN.
+A later boot now e56c1f3a-108d-4e3e-9440-f0c397aafa6b detected; operator restart
+reason pending. No decoder opens on newboot until identities/clean/prerequisites
+and changed experiment reviewed. No repeat unchanged candidate, sudo, agent
+reboot/sleep/unload. Continue HOST diagnosis and producer/reference integration.
+AV1 remains disabled/unqualified. Prior supported sleep/decode passes retained.
+
+AV1 VISIBILITY HOST CORPUS PASS / CHANGED NATIVE EXPERIMENT (2026-10-02):
+Actual CBS visibility normalization only hidden INTER, zero-refresh show-existing
+commands omitted; hidden KEY/timed decoder models refused. Five software samples
+(original/libaom/rav1e/SVT/10bit)684 displayed projected byteexact from690 decoded
+frames, all690 compressed tile groups unchanged. Host failures for raw-container
+identification retained; explicit IVF packet framing corrects harness. No VAAPI
+support claim. Evidence av1-visible-reference-host.ug562ias/corpus-r3/result.json.
+Fresh frozen av1-visible-native.4f13b3c1.0oensoo1 checks sameboot activation/three
+actual loaded identities/selectedSHA/sleep counter/source+harness+native hashes,
+shared lease and wholeboot clean. Readonly preflight PASS. One changed normalized
+99-frame libaom native experiment next; bounded45s cleanup/kernel monitoring,
+full99coded byte parity plus96original display projection, no retry on failure.
+No new module install/sudo/reboot/sleep/removal. AV1 VAAPI remains disabled.
+
+Observer settling fix completed: tools/qualify-iris-av1-completion-trace.py now
+waits bounded15s read-only after successful process cleanup, checks journal every
+poll and refuses identity/fault errors immediately. Seven focused host tests and
+py_compile PASS; no new hardware run. Independent subsequent-idle-witness.json
+binds exact sameboot/build/selectedSHA/ref0/suspendedusage0/auto/clean journal.
+Original failed packet untouched. Continue AV1 header/reference implementation.
+
+AV1 LIVE TRACE ACTUAL RESULTS (2026-10-02): client-open normal removal refusal
+PASS on current4f13b3c1. Live BPF attached and stopped cleanly; worker96 displayed
+frames ordered byteexact PASS,197 raw completions including42 NOSHOW, all42 raw
+sizes0 and timestamps nonzero. Complete kernel observer/process-tree exit0/no
+linger PASS. Overall packet remains FAIL: immediate final idle check preceded
+runtime autosuspend. Independent subsequent idle suspended/usage0/auto/ref0;
+no new kernel fault. Preserve result.json and all old failures; never rerun this
+packet. Fix host observer settling with bounded read-only wait and fault/identity
+checks, then continue actual-header/hidden-reference AV1 integration. Raw hidden
+payload absent means ERROR-bit clearing cannot supply hidden decoded pixels.
+AV1 VAAPI/Chromium still unqualified; active-playback sleep/streaming removal
+remain unqualified. No new sudo/reboot/removal requested.
+
+AV1 FASTER LIVE TRACE PREPARED (2026-10-02): user prioritizes completing AV1.
+Frozen av1-live-trace.4f13b3c1.l_9qb4rh/run-next-reviewed.py ready. Exact installed
+module SHA and DWARF-derived inst.codec/session/HFI/frame-info offsets bound;
+manual read-only BPF kprobe/kretprobe snapshot at actual OUTPUT function, no BTF
+module needed, no device addresses logged, no module/boot/PM writes. Trace startup
+must attach before decoder opens; runtime verifier/attachment UNPROVEN as root.
+Unprivileged codegen failed solely tracefs permission, preserved, no attachment.
+Four focused classifier tests PASS corruption/overflow/rejected/incomplete/nohidden
+and per-codec complete verified-control pairs. Prior strict control4vs2 failure
+remains failed; exact old offline reanalysis proves2contexts each valid pair, new
+classifier rejects omitted/unverified/duplicate pairs, not arbitrary count relax.
+Readonly identity/idle/ref0/clean/shared-lease preflight PASS. Copies frozen native
+producer/reference fixture, requires full96 displayed ordered byte parity, complete
+global clean kernel observer/45s process-tree timeout/no linger. Kernel checks
+while decode runs; any error stops first experiment. Raw NOSHOW size/timestamp
+only observation, never hidden-pixel validity or AV1 VAAPI/Chromium support.
+Operator wrapper first completes pending client-open removal refusal once if not
+attempted, refuses existing failed/incomplete evidence; then conditional traced
+AV1 experiment. No forced removal/reload/install/reboot/sleep. Agent no sudo,
+trace attachment or decoder opens. Necessary new combined operator command:
+sudo python3 /home/mq/.cache/libva-v4l2-qualification/resume-20261002/av1-live-trace.4f13b3c1.l_9qb4rh/run-next-reviewed.py
+Do not repeat request unchanged or retry failure. Canonical diagnostic source
+ tools/qualify-iris-av1-completion-trace.py. AV1 transport/hidden lifetimes remain
+incomplete; inspect actual evidence next, then implement evidence-supported fix.
+
+POSTWAKE FULL/SCOPED PASS / CLIENT REMOVAL REFUSAL PREPARED (2026-10-02):
+exec34519 exited0. Sameboot4f13b3c1 genuine idle deep sleep preceding then full
+production.SmVk4F strict headless matrix/parity/churn/EOS/seeks PASS. Real-use
+run.jaca_p3g PASS4K3000byteexact65.13s46.0617FPS483252KiB actual FFmpeg RSS;
+Chromium755/25.0004s30.1995FPS779hardware completions/seek/cleanexit. RuntimePM
+before/after PASS; null600frames cleanexit/complete clean window PASS; final3
+loaded IDs unchanged and sleep_success remains1. All runners exited. This proves
+one idle deep wake followed by required decoding, not active-playback suspend.
+Next frozen active-removal-refusal.4f13b3c1.gy64n0o4 ready;2focused hostclassifier
+tests PASS (busy pin success, permission/wrongID/noPin/exit0 fail). Readonly
+preflight PASS idle/ref0/3loadedIDs/selectedSHA/currentclean. Operator-only worker
+opens idle client, requires positive module ref, plain rmmod once must refuse
+specifically busy with same loaded module/pin retained. No forced removal/reload/
+reboot/sleep/retry; bounded process-tree/global kernel observer; closes ownfd then
+verifies idle ref0. Scope open idle client, active streaming remains unqualified.
+Necessary operator sudo python3 /home/mq/.cache/libva-v4l2-qualification/resume-20261002/active-removal-refusal.4f13b3c1.gy64n0o4/run-reviewed.py
+Agent did not open decoder or attempt removal for this packet. Wait quietly pending.
+AV1 VAAPI producer/hidden-reference ownership/Chromium remains incomplete; native
+AV1 passes alone never enable advertised support. Preserve all older failures.
+
+SAMEBOOT DEEP SLEEP PASS / POSTWAKE GATES ACTIVE (2026-10-02): operator
+idle-sleep-postdecode.4f13b3c1.ecvqq5_f genuine deep witness PASS boot4f13b3c1,
+sleep_success0->1, PMnone, complete clean kernel window; actual3patched identities
+unchanged. Fresh frozen postwake-qrtr.4f13b3c1.4v5a85g1 binds preserved before/after/sleepresult, exact
+v15 driver/source/harness and current-boot activation. Preflight idle/clean/lease/
+selectedSHA/loaded builds PASS. verify-loaded also refuses additional sleep cycles.
+run-all.sh ACTIVE exec34519 full strict then conditional4K/Chromium/runtimePM/null
+regression; before-gate PM PASS. Inspect without competing; no repeated tests.
+No operator action needed while running. No agent sleep/reboot/unload/privileged
+writes. Previous failed boots/evidence retained; AV1 VAAPI and active-client
+removal-refusal still incomplete. Do not call expanded production complete.
+
+FRESH PATCHED BOOT ALL SCOPED GATES PASS (2026-10-02): exec57728 exited0.
+qrtr-installed-boot.4f13b3c1.fo17v1gt production.uDTPWA full strict correctness/
+lifecycle PASS; real-use run._2skxs22 PASS4K3180byteexact70.25s45.2669FPS491320KiB
+actual FFmpeg RSS (whole observer tree553012KiB separately). Chromium757frames/
+25.0003s30.2796FPS780hardware completions/seek/cleanexit PASS. Before/after runtime
+PM PASS;600frame null regression cleanexit/complete clean kernel window PASS.
+Final three loaded identities PASS; no runners remain or competing hardware.
+Sameboot postwake decoding still pending because operator chose normal restart
+between prior deep witness23b4 and these freshboot4f13b3c1 results.
+Fresh observer idle-sleep-postdecode.4f13b3c1.ecvqq5_f prepared read-only after
+sameboot strict/scoped prerequisites and idle/clean state; no sleep transition.
+Necessary operator command systemctl suspend once, wake normally DO NOT RESTART,
+then python3 /home/mq/.cache/libva-v4l2-qualification/resume-20261002/idle-sleep-postdecode.4f13b3c1.ecvqq5_f/observe-reviewed.py verify
+After PASS run required fresh full strict/scoped decode gates under lease on this
+sameboot and preserve before/after sleep evidence. No repeat on failure/hang.
+This required cycle follows prior PASS, not retrying unchanged failed experiment.
+AV1 VAAPI and active-client removal-refusal still incomplete. No completion claim.
+
+FRESH PATCHED BOOT FULL GATE PASS (2026-10-02): qrtr-installed-boot.4f13b3c1.fo17v1gt/
+production.uDTPWA strict full headless gate PASS pixel parity/matrix/churn/EOS/seek
+clean kernel windows and final frozen driver identity. Run-all exec57728 remains
+ACTIVE scoped4K/Chromium/runtimePM/null regression; before-real-use PM PASS.
+Do not start competing tests. These are fresh boot4f13b3c1, not postwake on23b4.
+Actual deep sleep PASS preserved; user normal restart confirmed. Need genuine
+sameboot postwake decode qualification after runner completion. No extra sudo or
+restart requested; no new agent sleep/module operations.
+
+DEEP SLEEP PASS / FRESH RESTART GATES ACTIVE (2026-10-02): actual idle deep
+sleep witness PASS on23b4aa5c, sleep_success3->4, PMnone, clean completed kernel
+window and three actual patched module identities checked. User chose normal
+restart afterward; independent journal orderly shutdown confirms, now boot
+4f13b3c1-dddf-4b86-9667-b104b7fad629. Cannot label fresh boot tests post-wake on oldboot.
+Current cold3loaded identities and selected exact pair PASS; journal clean,
+Irisref0/suspendedusage0/auto. Fresh frozen qrtr-installed-boot.4f13b3c1.fo17v1gt
+copies prior exact v15 source/harness/driver, fresh current-boot activation evidence.
+run-all.sh ACTIVE exec57728 full strict gate then conditional scoped4K/Chromium/
+runtimePM/null regression, stops first failure. Before-gate runtime PM PASS.
+Inspect runner/logs without competing hardware or repeated tests. No new sleep/
+module/reboot by agent. Next genuine sameboot post-wake decode still pending;
+AV1 VAAPI and active-client removal-refusal still incomplete. Old failures kept.
+
+PATCHED QRTR STAGED PM PASS / IDLE SLEEP OBSERVER PREPARED (2026-10-02):
+Currentboot23b4aa5c pm-qrtr-fixed.23b4aa5c.pffv4qkb actual freezer5.504s/devices6.554s/
+platform8.058s PASS, exit0/no linger/complete clean global kernel windows; all
+controls restorednone/0/0, Iris ref0/suspendedusage0/auto. Three actual loaded IDs
+verified before/after wrapper. Previously failed Wi-Fi platform symptom absent in
+changed candidate run, not proof of earlier true deep hang cause. Idle sleep
+observer frozen idle-sleep-qrtr-fixed.23b4aa5c.avk4woal,7witness hosttests PASS; agent prepared before journal
+cursor/sleep_success snapshot only, no sleep or privileged/module operation.
+Operator next save work then select Sleep manually, let it sleep then wake normally;
+verify command python3 /home/mq/.cache/libva-v4l2-qualification/resume-20261002/idle-sleep-qrtr-fixed.23b4aa5c.avk4woal/observe-reviewed.py verify
+Wrapper verifies actual3loaded identities/selected QRTR hashes and sameboot staged
+PM pass; observer requires genuine PMnone, increasing sleep_success, completed
+entry/exit/no fault and idle Iris. User authorization for operator-led tests persists.
+Do not repeat if failure/restart/hang; preserve evidence and inspect journal. After
+successful actual sleep witness full required fresh postwake decode gates remain.
+AV1 VAAPI and active-client removal-refusal remain incomplete. Stay quiet pending.
+
+QRTR COLD BOOT VERIFIED / PATH BUG FIXED (2026-10-02): user verifier failed
+selection comparison because /lib symlink resolves /usr/lib on actual path only.
+Original verifier and failure JSON preserved; resolve both sides, mismatch still
+rejected. Corrected verifier PASS boot23b4aa5c-c050-4c60-bee9-e6d7bdfdd52f actual
+QRTRa3742ff58316450e2f4cbc77f799d29f567277d4/MHI2a9b093bf2b5cfcddd4a3b31f5b3ad8cb3757de4/Iris231cb9f3a0141c3ddfa7b8df87df0889eff2f5f2.
+Exact selected pair SHA PASS; independent kernel journal no matching fault/WARN.
+Fresh operator-only staged packet pm-qrtr-fixed.23b4aa5c.pffv4qkb; readonly preflight PASS idle/ref0/
+suspendedusage0/auto and PMnone/0/0. Frozen wrapper binds current activation,
+three loaded build IDs and selected QRTR pair before/after each stage; shared
+lease/strict observer/restoration in tools; freezer then devices then platform,
+stops first failure, exclusive attempt witness prevents unchanged retry. No real
+platform machine sleep, module ops/reboot/decoder opens by agent. Necessary
+operator command sudo python3 /home/mq/.cache/libva-v4l2-qualification/resume-20261002/pm-qrtr-fixed.23b4aa5c.pffv4qkb/run-reviewed.py
+Save work/screen may dark briefly. Wait quietly while pending. Genuine system
+sleep/postwake, active-client removal-refusal and AV1 VAAPI still unqualified.
+
+QRTR PACKAGE LOCATION CORRECTED (2026-10-02): user requested repository ownership,
+not Chromium Snap storage. Upstream patch now kernel/0006-qrtr-resend-hello-on-mhi-resume.patch.
+Both failed r1 and installed r2 deployment bundles moved to qualification workspace
+resume-20261002/deployment/qrtr-resume-r{1,2}; old Snap paths are compatibility
+symlinks only, no duplicated payloads. R2 resolves BUNDLE to canonical location;
+INSTALL.txt current commands updated, pre-relocation identities preserved separately.
+Installed boot files/root rollback backups untouched; no reinstallation needed.
+Next after operator normal restart use canonical r2 verify-cold-boot.py.
+QRTR patch is an upstream platform dependency, separate from Iris patch stack;
+never apply automatically to Iris-only source. No hardware/PM operations.
+
+QRTR R2 OPERATOR INSTALL SUCCESS (2026-10-02): user reports
+prior_rollback_verification=pass paired_boot_files=installed live_modules=unchanged.
+Independent readonly selection+SHA checks confirm exact qrtr/qrtr-mhi overrides
+and corrected hook. Current boot8f19b5c6 still original QRTR builds0f5c6c68820ae6e5cda0a4299b8413d4c3c750c1/
+4c0b03365c6835ac0adbca717157a24bb3e903f4; Iris v15 unchanged. No decoder/sleep/module
+operations by agent. Operator normal restart then r2 verify-cold-boot.py required.
+Do not request further sudo/install retries while waiting. No sleep before actual
+changed identity checks and fresh reviewed diagnostic packet. Failed r1 retained.
+
+QRTR R1 INSTALL FAILED / R2 CORRECTED (2026-10-02): operator r1 install rejected
+unexpected qrtr in initramfs; automatic rollback paths ran, original selection
+restored/override absent/hook absent. Root backup state/exact initrd+metadata
+restoration must be verified by r2 privileged preflight before changes. Do not
+rerun r1. Actual distro auto_add_modules =net/qrtr copies original subtree before
+hooks; real staged directory+explicit module copy reproduced original+candidate
+duplicates. Initial rehearsal missed this directory-copy path. Failed r1 bundle
+and root backup preserved. R2 hook calls apply_add_modules, checks exact both
+candidate image hashes, removes only original qrtr/qrtr-mhi variants from DESTDIR,
+never host distro modules. Final image still strictly rejects any wrong copy.
+Rehearsal-r2 actual generated depmod selection/exact pair/hash/wrong-copy refusal
+PASS;9transaction/rollback/prior restoration tests PASS; readonly preflight PASS
+with root rollback verification deferred. Corrected bundle:
+/home/mq/snap/chromium/common/libva-v4l2-production/qrtr-resume-r2/INSTALL.txt.
+Necessary corrected operator install step presented; only after success normal
+operator restart and r2 verify-cold-boot.py. Never live unload QRTR/Wi-Fi; no sleep
+retry before new reviewed packet with actual changed loaded identities. No r2
+privileged writes, reboot, sleep or decoder opens by agent. Currentboot8f19b5c6.
+
+QRTR REVERSIBLE BOOT PACKAGE READY (2026-10-02): bundle
+/home/mq/snap/chromium/common/libva-v4l2-production/qrtr-resume-r1/INSTALL.txt.
+Paired qrtr/qrtr-mhi overrides and version-gated explicit initramfs hook; retains
+Iris v15 and distro modules; snapshots baseline initramfs/module metadata;
+completed failure automatic restore, unfinished writer refuses competing rollback.
+6mocked transaction tests PASS, readonly preflight PASS, staged actual depmod/
+dracut-install copied exact pair+Iris PASS. Cold verifier prepared checks all3
+actual loaded build IDs and selections after new operator boot. No privileged
+writes/module operations/sleep/reboot. Operator install command presented once,
+then only on successful installation operator normal restart/cold verifier.
+Do not repeat unchanged requests while pending; no sleep until changed identities
+and a NEW reviewed diagnostic packet. Existing failed PM evidence stays failed.
+
+QRTR UPSTREAM CANDIDATE HOST VERIFIED (2026-10-02): exact upstream patch applied
+without edits to authenticated distro QRTR source in qrtr-resume-review/candidate.
+Exact running kernel headers W=1 modules PASS; actual-function UBSan host model
+4resume/error paths +10000handshake resets PASS (not concurrency/hardware proof).
+ABI imports PASS qrtr127/qrtr-mhi24; added qrtr_endpoint_hello resolved against
+candidate qrtr export. SHA qrtr0981df0407fe42db0064a9d47a97f7836d23042cd25365914552a9bfc38f8485;
+qrtr-mhi4fe0acdbf99364f87bcf0a67e21dcf7045473016e0a8ff978e081a8a9ba39715.
+Review/identities/build/model evidence saved; no deployment or live module change.
+Next prepare paired reversible future-boot deployment; never live unload QRTR/Wi-Fi.
+Only changed candidate after operator installation/boot can receive controlled PM
+retest. Do not retry existing platform packet or claim system sleep qualified.
+
+LATEST PLATFORM FAILURE / QRTR REVIEW (2026-10-02): operator platform diagnostic
+FAIL on b86c3104: ath12k_wifi7 WCN7850 restart timeout -110, two mac80211 WARNs;
+Iris suspend/resume callbacks returned0. Runner exited0/no lingering, controls
+restored none/0/0; strict global kernel observer correctly failed. Failed evidence
+and SHA manifest preserved in pm-platform-packet.b86c3104.zlgf9wpy. No further
+hardware or PM tests on this warned boot; no unchanged retry. Host independently
+restarted to 8f19b5c6-686e-4201-ac31-3d75443ddf72; persistent v15 cold identity PASS,
+no new decode qualification. Agent performed no reboot/sleep/module operation.
+Exact authenticated distro archive extracted QRTR source: handshake-at-register
+present, resume handshake absent. Upstream fix6a5719cc3ef2e4d9857cc4ae18e6db09d59a8cc9
+net: qrtr: resend HELLO on MHI resume matches exact WCN7850/ath12k_wifi7 symptom.
+Prepare isolated credited upstream backport and exact-header build before any
+operator deployment/test. This does not prove the cause of earlier deep hang.
+AV1 VAAPI/Chromium remains gated, real sleep and active-client removal-refusal
+remain incomplete. Old results remain bound to their original boots.
+
+LATEST PLATFORM PM PREPARATION (2026-10-02): operator-only platform dry-run
+packet pm-platform-packet.b86c3104.zlgf9wpy prepared. Exact 7.3 distro suspend.c
+SHA71c4a16ad3db8cac349b7d8b52cdfddae26a8918216f18ec54a68c1761077576 extracted
+from cached package archiveSHA2519439d088772d8dfe298d5c1c4bcff7c2744abef41183c93e0bd1e97614813
+matching .dsc. Actual suspend_enter host model6cases PASS: TEST_PLATFORM bypasses
+CPU offlining/syscore/platform machine sleep,5callback error rollback paths covered;
+not hardware/concurrency proof. Initial host compile missingerrno failed evidence
+platform-boundary-host preserved; corrected platform-boundary-host-r2 PASS.
+Operator runner adds platform stage only, requires preceding PASS devices sameboot/
+build/restorednone, refuses unavailable stages, explicitly witnesses restoration
+of debug/print along with pm_test.8focused witness/restoration/prerequisite tests
+and174tooling tests PASS51.966s; py_compile/diffcheck PASS. Frozen wrapper verifies
+all packet identities before action; shared hardware lease/exactloaded/idle/clean
+kernel gates remain. Read-only --check PASS sameb86c3104/build/ref0/suspendedusage0
+andnone/0/0; NO transition or privileged write run. Necessary operator step:
+sudo python3 /home/mq/.cache/libva-v4l2-qualification/resume-20261002/pm-platform-packet.b86c3104.zlgf9wpy/run-reviewed-platform.py
+Save work; screen may dark briefly. No module/reboot/CPU offline/actual deep sleep.
+Stop and inspect failure; do not retry. Inspect pending evidence quietly, no repeated
+operator request. Devices/freezer actual PASS remain diagnostic-only; real sleep/
+postwake and active-client removal-refusal still incomplete. AV1 native diverse
+passes retained; VA hidden-reference ownership/Chromium integration remain gated.
+
+LATEST AV1 EXPLICIT DECODE-ORDER DIAGNOSTIC (2026-10-02): fresh isolated FFmpeg
+source/build av1-order-diagnostic-source/build; standard display-delay0/enable1
+S_CTRL+G_CTRL verified before streaming, AV1-only opt-in, capture trace only;
+receive-core discard model PASS. Installed VA/kernel unchanged. Single bounded
+av1-decode-order.b86c3104.8lk29q48 hardware experiment:96displayed full ordered
+pixel hashes exact/exit0/no linger/kernelclean. Strict runner result FAIL preserved:
+checker assumed exactly2control messages, FFmpeg probe and real decode initialized
+2distinct contexts=>4messages. Offline capture-review.json proves both contexts
+set/read exactcontrol10029965=0/10029966=1. No hardware retry or failed-result rewrite.
+139capture completions:96nonempty,42empty ERROR alltimestamp0,1emptyEOS. Explicit
+mode does not make hidden reference surfaces available through current kernel.
+Raw HFI payload/hidden pixel validity NOT observed; do not clear error flags on
+assumption. Need further verified hidden-reference transport/firmware semantics
+before VAAPI/Chromium AV1 support. Original source patch and identities frozen.
+All runners exited/refcnt0. Device-stage operator PM PASS6.6598s and temporary
+pm_test/debug/print restorednone/0/0; genuine system sleep still unqualified.
+Diverse native AV1 aom/rav1e/SVT96 each PASS after device PM, clean windows.
+Next: continue paired producer/hidden-reference ownership work and staged operator
+PM diagnostics; no repeated deep sleep or unchanged hardware failure.
+
+LATEST AV1 DIVERSE HARDWARE PASS (2026-10-02): after operator device-stage PM
+PASS, serial exact prepared native cases aom-720p/rav1e-720p/svt-720p all PASS96
+ordered full pixel hashes each, exit0/no lingering/complete clean kernel windows.
+Evidence av1-diverse-prepared.b86c3104.4qj9mp36/{aom,rav1e,svt}-720p. Current same
+boot b86c3104/exact persistent build/refcnt0. Installed VA/module unchanged;
+AV1 profile gated. Native display output proof does NOT establish VA hidden-surface
+ownership or Chromium support, nor genuine system sleep. Next isolated diagnostic:
+request existing explicit decode-order controls in native AV1 and record capture
+completion payload/flags/timestamps, with strict unchanged display parity and
+no retry. Host build/identity precedes any bounded hardware run.
+
+LATEST OPERATOR DEVICE PM PASS (2026-10-02): pm-devices-packet.b86c3104.7krx481j
+result PASS devices dry run,6.6598s exit0/no lingering/timed_out=false. Same boot
+b86c3104/build231cb9f3, refcnt0/runtime suspended/usage0/auto and pm_test none
+restored. This does NOT qualify platform sleep/post-wake. AV1 guarded independent
+encoder hardware corpus now eligible; run prepared cases serially, stop first
+failure, frozen identities/current reload/actual build/shared lease/clean kernel
+required. Installed driver/module unchanged, AV1 profile still gated.
+
+HOST AV1 HIDDEN COMPLETION AUDIT (2026-10-02): actual unchanged installed-source
+HFI flag mapping + output handler + VB2 completion extracted into sanitized C host
+model.8normal/NOSHOW/corrupt/overflow cases PASS. Even NOSHOW without corruption
+and nonzero incoming payload loses both payload and timestamp, advances no capture
+sequence, completes ERROR. Original source hashes match post-reload frozen kernel.
+Tool tools/verify-iris-av1-noshow.py; evidence av1-noshow-completion-host with full
+actual functions/identities. No candidate fix, no firmware valid-hidden-pixel proof.
+This concretely blocks publishing hidden VA reference surfaces from original AV1
+headers; native software-display DISCARD fix cannot supply those surfaces. Need
+verified firmware decode-order hidden completion semantics before changing error
+classification; actual corrupt/overflow errors must stay strict. No kernel/VA change
+or hardware opens. Device PM operator result still pending; no repeated request.
+
+HOST AV1 ORIGINAL TILE SPANS (2026-10-02): Extended actual CBS original-byte
+probe to require tile-group pointers/sizes strictly within original OBU spans and
+record OBU-relative offsets; verifier rejects missing/out-of-bounds tile spans.
+Fresh av1-original-tile-host.ggbm0h1q PASS5software roundtrips: original MP4300,
+aom/rav1e/SVT96each and 10bit aom96; all ordered full pixel hashes exact.
+Original tile groups300/99/96/96/99, hidden/showexisting retained. Strict C build,
+py_compile and diff-check PASS. Sources, exact linked libraries and manifest frozen.
+This validates producer offset feasibility only: VA transport, hidden-surface
+publication and Chromium AV1 remain unfinished/gated. Installed binaries unchanged.
+Device-stage PM result still absent on same b86c3104/refcnt0; no hardware opens,
+no repeated operator request. Continue host integration while pending.
+
+HOST AV1 DEPTH CONTINUATION (2026-10-02): Original OBU verifier now preserves
+source 10/12-bit comparison formats and refuses unknown formats instead of always
+converting to 8-bit NV12. 12-bit acceptance is NOT tested/qualified. New host-only
+libaom Main10 fixture av1-original-depth-host.d70ni99w PASS96 ordered full 10-bit
+pixel hashes, original hidden42/showexisting39 preserved, parsed high_bitdepth=1.
+Same verifier 8-bit libaom96 regression PASS unchanged NV12 hashes. py_compile PASS.
+Frozen source/probe/fixture/results/trace manifest retained. No hardware decoder
+opens or VA/module changes. This is host transport feasibility only, not AV1
+hardware/Chromium support. Device-stage PM operator result still pending; no
+unchanged request/retry. Continue actual producer/VA hidden ownership integration
+and guarded hardware corpus after successful operator PM diagnostic.
+
+HOST AV1 PRODUCER CONTINUATION (2026-10-02): Exact CBS original OBU retention
+probe implemented producers/av1-cbs-original-obu-probe.c and reproducible verifier
+tools/verify-av1-original-obus-host.py. No hardware decoder open/find_stream_info/VA
+call. Requires entire packet unit coverage/contiguity and bounded original spans.
+Host software roundtrip av1-original-obu-host-r2 PASS original MP4300 + libaom/
+rav1e/SVT96each, pixel hashes and order exact, hidden/show-existing retained.
+MP4 absent temporal-delimiter raw OBU demux attempts FAILED and preserved at
+av1-original-obu-host; corrected host adapter uses IVF framing with original packet
+units+original sequence extradata and original PTS, no sequence/frame synthesis.
+Timing NOT qualified. This proves compression-header preservation feasibility,
+NOT final VA transport/hidden-surface ownership or Chromium integration. Installed
+VA/module unchanged, AV1 profile gated. Four host successes do not qualify hardware.
+No new hardware corpus opens while operator device PM result pending. Existing
+necessary operator command remains presented, do not repeat it unchanged.
+
+LATEST HOST CONTINUATION (2026-10-02):
+Expanded AV1/system-sleep/controlled-live-removal scope INCOMPLETE. Firefox deferred.
+Boot b86c3104-05ca-4e40-a913-9226ea801cfb runs exact persistent build
+231cb9f3a0141c3ddfa7b8df87df0889eff2f5f2; installed VA/module unchanged.
+Idle operator module removal/reload and fresh post-reload full strict matrix,
+churn/EOS/seeks/4K/Chromium/runtime-PM/null-output all PASS, all windows clean.
+real-use run.u738ry1i:3120byteexact70.98s43.956FPS467568KiBRSS. Active-client
+normal-removal refusal still pending; no force-removal support.
+Operator freezer dry run PASS5.4915s/cleanexit/clean kernel/settings restored.
+Device-stage operator packet pm-devices-packet.b86c3104.7krx481j is ready;
+necessary command already presented; do NOT repeat unchanged sudo request.
+No result yet. No agent sleep/unload/reboot. Prior ec980588 deep sleep FAIL/no
+recorded resume/forced shutdown; cause unproven, no unchanged deep retry.
+AV1 native fullstream300/300 pixel parity IN ORDER PASS with receive-core
+DISCARD correction in av1-discard-core.b86c3104.7ky_w9qp, clean kernel/teardown.
+Original299-frame and first-empty-recycle/internal-error failures preserved.
+Actual-function host discard model PASS through10000empties/error propagation.
+Native test alone is NOT Chromium/VAAPI production support; profile remains gated.
+New HOST-ONLY diverse corpus av1-corpus-host.cgwv9g1s generated libaom/rav1e/SVT
+8-bit720p96displayed frames each. Traced hidden42/45/45 and showexisting39/45/45,
+varied refresh flags. No grain/superres/10bit/sequence-change coverage yet.
+Frozen candidates/references av1-diverse-prepared.b86c3104.4qj9mp36; identities
+and pending-PM guards PASS. No hardware corpus run; waits successful device-PM
+result on same boot, then verify loaded identity/kernel/shared lease before each
+case; stop at first failure. Inspect operator/test runners without competing.
+FFmpeg parsed original sequence bytes are retained in seq_data_ref, current OBU
+bytes are passed to start_frame; vaapi_av1 ignores originals. Need actual producer
+and driver transport/hidden-surface ownership integration plus lifecycle/diverse
+hardware proof before enabling AV1. No unused driver API or reserved-ABI abuse.
+Host tests never qualify production. Stop hardware on any new kernel/firmware
+fault; never open on three known faulted boots. No4K60/battery/zero-copy/kernel
+physical-memory claims. Preserve all user changes/failures. All runners exited,
+refcnt0; stay quiet while operator pending unless meaningful new progress.
+
+Historical evidence retained below.
+
+LATEST EXPANDED PROGRESS (2026-10-02): operator PM freezer diagnostic PASS
+on same b86c3104/build;5.4915s exit0/no lingering, journal shows task freeze/thaw
+and debug wait/completed exit, pm_test/debug/print settings restored. NOT real sleep.
+Prepared pm-devices-packet.b86c3104.7krx481j, read-only preflight PASS. Necessary
+operator step presented next: sudo python3 packet/tools/qualify-iris-pm-stage.py
+run devices packet/evidence. Save work; screen may darken briefly. No agent PM
+transition, no platform deep sleep, no module operations, no retries. Do not repeat
+operator step unchanged. Inspect result when available; expanded sleep still pending.
+AV1 native actual-function model PASS: previous NULL handling yields early EAGAIN;
+new receive-core DISCARD internally recycles empty captures without mapping/publishing
+stale pixels.0/1/10/100/1000/10000empty sequences, requeue error, other-codec guard
+PASS; actual frame dequeuer and FFmpeg core extracted, firmware/submission unmodeled.
+Fresh bounded native av1-discard-core.b86c3104.7ky_w9qp PASS300/300 full-stream
+byte-exact IN ORDER, exit0/no lingering process/complete clean kernel window.
+Includes AV1-only early empty-capture bypass of legacy drain EOF, ERROR diagnostics
+retained and explicit receive-core discard; no general hidden/corrupt disambiguation.
+The two original failures remain preserved. Installed VA/module unchanged; AV1 profile
+still gated. This establishes only one native compressed-input sample, not general AV1
+or Chromium/VAAPI support. Need diverse corpus/lifecycle and actual producer/driver
+transport integration before enabling AV1. Producer source patch updated in
+producers/ffmpeg-av1-native-diagnostic.patch; host model tools/verify-ffmpeg-av1-discard.py.
+All runners now exited/refcnt0, current exact build/boot, hardware lease idle. No4K60,
+battery, end-to-endzero-copy or separately measured kernel memory claims.
+
+LATEST EXPANDED ACTUAL RESULTS (2026-10-02): post-removal strict full gate
+production.TNrrXm PASS; real-use run.u738ry1i PASS 4K3120byteexact70.98s43.956FPS
+467568KiBRSS; Chromium PASS, before/after runtime PM PASS, null-output600frame
+PASS/cleanexit/no lingering children. All windows clean. Current b86c3104 exact
+persistent build remains unchanged; all runners exited/refcnt0. Idle removal/reload
+and fresh post-reload supported decoding now actually qualified; active/busy removal
+refusal not yet witnessed, no force removal support.
+Native compressed AV1 diagnostic av1-native-full.b86c3104.r1a6fsod FAIL299vs300
+full parity/order, native exit0, complete clean kernel/no lingering children. All299
+output hashes appear in software reference, only1same position; not a success.
+Host source investigation: Iris maps NOSHOW to ERROR and zero payload/timestamp;
+legacy FFmpeg converts zero-payload captures to frames, including stale pixels;
+while draining, its zero-payload path can prematurely signal EOF. Original AV1
+trace300frameheaders149hidden151shown149show-existing (displayed total300).
+Fresh AV1-only empty-capture recycling diagnostic av1-empty-capture.b86c3104.5421jg6p
+also FAIL at1frame/FFmpeg internal receive error, exit190, clean completed kernel
+observer and clean process teardown. No firmware fault, do not mark boot faulted.
+Both failures preserved; no unchanged retries. Return-NULL empty-capture path
+needs host receive/pacing/drain modeling before another hardware diagnostic.
+Installed driver/module unchanged; AV1 remains gated/unqualified. Native backend
+alone cannot establish Chromium/VAAPI support or absent header metadata contract.
+PM freezer dry-run packet prepared pm-freezer-packet.b86c3104.pcu9rbpb; read-only
+preflight PASS exactbuild/ref0/runtime suspended/pm_test none. Operator-led ONLY:
+sudo python3 packet/tools/qualify-iris-pm-stage.py run freezer packet/evidence
+First isolate task freezing before devices/platform, following kernel PM docs.
+Temporary debug/test controls restored on return; restoration host regression PASS,
+6focused PMstage and172tooling tests PASS. No PM transition executed by agent.
+Screen may pause; operator saves work first. Failure stops; no retry. Device-stage
+and actual sleep/wake/post-wake decode still pending; dry run NEVER sleep support.
+Prior deep sleep failure evidence retained; no another unchanged deep attempt.
+
+LATEST POST-RELOAD STATUS: Full strict gate production.TNrrXm PASS on b86c3104,
+H264/HEVC/VP9/graphics/churn/EOS/seeks and all clean kernel windows, final identity.
+Original continuation stopped BEFORE real-use hardware: live_source_changed_since_packet_capture.
+Diff proves five added host sleep/removal tools only; zero changed/removed original files.
+Failure preserved. Fresh post-removal-real-use.b86c3104.xay_2ckl retains exact frozen
+source/harness/driver and copies same current-boot passed full gate, with explicit origin.
+Its source_root binds immutable snapshot, original live root retained in origin-identity;
+no validation weakened or passing hardware rerun. Conditional continuation now ACTIVE;
+PM then strict4K/Chromium/null-output. Inspect new continuation.log/real-use.log.
+Expanded AV1 and sleep still incomplete; no new operator action required.
+
+EXPANDED SUPPORT STATUS (2026-10-02; latest overrides historical scoped completion).
+Current boot b86c3104-05ca-4e40-a913-9226ea801cfb, exact installed module
+build231cb9f3a0141c3ddfa7b8df87df0889eff2f5f2 and unchanged v15 VA verified.
+Operator idle normal removal/reload PASS, complete clean kernel observer,
+exit0/no lingering descendants; evidence expanded-module-cycle-packet.b86c3104/evidence.
+This qualifies only the idle removal/reload operation; post-reload decode pending.
+Fresh post-removal.b86c3104.bi6pjj5c full strict gate ACTIVE exec71938,
+full-gate.log; conditional continuation exec45994 runs runtime PM, strict4K,
+Chromium and bounded null-output only after full strict PASS. No competing hardware.
+Before-gate runtime PM and frozen identity PASS. Kernel activation record explicitly
+binds current-boot operator reload, not historical insertion. No sudo/reboot needed.
+User-authorized operator sleep on prior ec980588 FAILED: login/unlock occurred
+before delayed sleep request entered deep, then no recorded suspend exit; user
+forced shutdown. No recorded Iris fatal/BUG proves cause. Evidence retained in
+expanded-idle-sleep-r2.ec980588. Do not repeat unchanged deep sleep. Sleep observer
+now refuses PM dry runs/missing pm_test as genuine sleep;7 host witness tests PASS.
+Exact distro system-sleep framework host7cases PASS, PM28/removal4 hostcases PASS;
+models alone do not qualify sleep. AV1 native compressed-input diagnostic host build
+PASS in av1-native-diagnostic-packet; no hardware run or AV1 profile enablement yet.
+Expanded AV1/system sleep/live removal support remains INCOMPLETE. Firefox deferred.
+Never agent-initiate sleep/unload/reboot; only controlled operator-led tests authorized.
+Preserve failures and strict supported limits; no4K60/battery/general firmware-cause claim.
+
+SCOPED INSTALLED PRODUCTION QUALIFICATION COMPLETE (2026-10-02).
+Boot ec980588-64dd-447d-a29a-00e44e786ae8 automatically loaded persistent
+candidate build231cb9f3a0141c3ddfa7b8df87df0889eff2f5f2, module SHAa604eda3...230aa,
+VA unchanged v15 SHAa1cbbb6b...50ff. Read-only cold identity PASS.
+Fresh installed-routing.ec980588.fdr663c_/production.69Uych full strict gate
+PASS matrix/graphics/resolution/long-codecs/churn/EOS/seeks, clean kernel.
+real-use/run.mpwcqztq scoped PASS:4K3180byteexact77.47s41.048FPS491152KiB
+(<512MiB), Chromium playback/seek/cleanexit PASS. Ordinary runtime PM before/
+after PASS active then suspended usage0/auto. Null-output regression PASS600
+frames/exit0/no lingering children/complete clean kernel window.
+Actual installed launch-chromium.py persistent profile smoke r2 PASS759frames
+25.0005s30.359FPS781hardwarecompletions/seek/cleanexit/clean kernel. All runners
+exited, refcnt0, hardware lease free. Release evidence saved bundle/v15/
+installed-qualification.json. Kernel/device/VA identities verified; no more
+privileged actions needed. Root installer state remains its original successful
+installed_pending_cold_boot transaction label; independent user-readable cold
+verification/qualification records establish actual completion, no root state edit.
+Early boot renumbered Iris decoder video16->video0; launcher now resolves unique
+sysfs qcom-iris-decoder with hash-checked selector and exports V4L2_VA_DEVICE.
+Headless clients must set same selector-derived override as documented. Original
+wrong-node vainfo gate failure installed-boot.ec980588.z_e5zt05 retained clean;
+launcher initial smoke blocked missing execute permission retained; chmod fixed
+and fresh r2 real smoke PASS. Driver and kernel binaries unchanged.
+Supported scope ONLY opt-in Chromium and headless H264/HEVC/VP9. Firefox,
+AV1, system sleep and live module removal remain unsupported/unqualified.
+No4K60/battery/end-to-endzero-copy/separately-measured-kernel-memory claim.
+Backup/rollback remains documented; original distro module/GRUB/default profiles
+preserved. Qualification heartbeat stopped after scoped completion.
+
+Historical status below is retained evidence; latest completion above governs.
+
+LATEST INSTALLED-BOOT ROUTING STATUS:
+Installed cold boot ec980588-64dd-447d-a29a-00e44e786ae8 verified PASS:
+actual loaded build231cb9f3a0141c3ddfa7b8df87df0889eff2f5f2, persistent
+selected module exact SHAa604eda3...230aa. No reboot/sudo required.
+Initial installed-boot full gate installed-boot.ec980588.z_e5zt05 FAIL at
+vainfo initialization: old default/dev/video16 is now a camera; sysfs proves
+Iris decoder/dev/video0 after early initramfs load. Completed kernel window
+clean, no firmware fault; failure preserved, no downstream gates ran.
+Corrected opt-in launcher resolves exactly one qcom-iris-decoder via read-only
+sysfs and exports V4L2_VA_DEVICE; tests cover video0/video27, encoder/camera
+rejection, ambiguous/missing decoder fail-closed. Original launcher retained.
+Driver/module binaries unchanged. Fresh routing gate packet
+resume-20261002/installed-routing.ec980588.fdr663c_ ACTIVE exec77534.
+Conditional continuation exec27515 runs PM/strict4K/Chromium/null regression
+ONLY after full gate PASS. No competing hardware. Final real launcher smoke
+pending; installed-boot production not yet qualified. Preserve old evidence.
+System sleep/live removal/Firefox/AV1 unsupported; no4K60/battery claim.
+
+Historical status follows; latest above governs.
+
+LATEST PERSISTENT INSTALL STATUS:
+Installer R2 operator completed. Independent read-only checks confirm persistent
+module selection is updates/libva-v4l2-production/qcom-iris.ko with exact SHA
+ a604eda3918b0f8f8d3422d8a5dd53268792a93b59bb5ef9c9bcd9cf228230aa,
+and candidate path is present in current initramfs; explicit hook exists.
+Current boot5d252b15 still runs original buildd32b38c1...da8a6b. No live unload
+or decoder open. Operator normal restart and read-only verify-cold-boot.py next;
+installed-boot hardware qualification remains pending. No further sudo requested.
+
+LATEST INSTALLER R2 STATUS:
+- Installer r1 operator FAIL: candidate missing from initramfs because generic
+  image builder excludes media drivers; omitted explicit Iris hook. Root restore
+  returned selection to original; override absent, original initrd SHA7ff09fa2...
+  eaae5141. Full root backup/state unreadable unprivileged. R2 verifies prior
+  rolled_back state plus exact backup/current image+metadata before mutation,
+  retains r1 backup, uses fresh backup v15-a1cbbb6b-r2. Adds version-gated
+  manual_add_modules Iris hook; rollback removes owned hook.6host tests PASS,
+  real staged depmod/dracut-install candidate/dependency copy PASS exact SHA
+  (initramfs-r2-rehearsal._yb4c8ft). No r2 privileged writes: sudo-n refused
+  interactive authentication. Necessary terminal retry presented; no restart
+  until corrected installer succeeds. No decoder opens/live module changes.
+
+CURRENT DEPLOYMENT PREPARATION (supersedes earlier current-boot status):
+Host restarted to5d252b15-eafd-43a6-8d71-85303f9673de and currently loads the
+originald32b38c1...da8a6b module. No decoder opens or privileged installation.
+V15 hardware PASS evidence remains bound to prior8558e0e1. Prepared operator
+bundle /home/mq/snap/chromium/common/libva-v4l2-production/v15/INSTALL.txt:
+installer preflight/4transaction host tests PASS, frozen payload hashes match.
+Future-boot updates override+depmod+verified initramfs, root-owned backups,
+rollback restores exact original boot image/metadata. Never unload/load live
+module, reboot or request sleep. Pending operator privileged install then
+normal restart and read-only verify-cold-boot.py; persistent hardware gates
+must pass on actual new installed boot. Scoped opt-in Chromium launcher avoids
+global VA settings and normal profiles; final launcher smoke check pending.
+System sleep/live removal/Firefox/AV1 unqualified; no battery/4K60 claim.
+
+Iris PM deadlock fix: scoped runtime checks PASS (2026-10-02)
+=================================================================
+V13 ACTUAL RUNTIME RESULTS: PASS on boot8558e0e1-9603-47ce-a869-aec46cb12efb.
+Activation cold-boot.Zl7IlH PASS; actual loaded build231cb9f3...2f5f2 verified.
+Full strict headless gate production.NKVdIq PASS, clean kernel windows.
+Scoped real-use run.txbs4s6m PASS scope=chromium-headless. Sustained4K3540
+byteexact frames69.88s/50.658FPS/479708KiBRSS (~468MiB), strict30FPS/512MiB
+and60s limits PASS. Chromium758presented/25.002s30.318FPS,779hardware
+completions,correct seek and clean exit, all kernel observations clean.
+Wrapper qualification.htORNl/runtime-pm-before.json and runtime-pm-after.json
+PASS: before suspended usage0/auto; after workload active then suspended
+usage0/auto. Active time102952->225840ms and suspended73148->78045ms;
+same boot and exact loaded build. Ordinary runtime autosuspend/resume observed
+without deadlock. Model coverage28cases/10000cycles complements this runtime
+result; it does not establish system sleep, live unload or all error races.
+All operator runners exited, module refcnt0. No persistent deployment yet.
+Current boot uses command-line modprobe.blacklist=qcom_iris, while persistent
+GRUB defaults do not contain that blacklist. Keep original installed module
+unchanged. Do not rerun the cold activation wrapper with a live module.
+
+User requested the fix and deferred Firefox. Supported release scope remains
+Chromium and headless H.264/HEVC/VP9; AV1 stays unadvertised. All old failures
+are preserved. Persistent deployment, system sleep and live unload remain open.
+
+Patch: kernel/0005-iris-quiesce-irq-before-power-transitions.patch, applied after
+0001 bounds,0003 removal,0004 decode-order. Speculative0002 remains excluded.
+
+Runtime suspend uses disable_hardirq before core->lock. If an IRQ thread is
+active, balance the temporary mask, mark last busy and return EBUSY; no power
+state changes occur. This avoids the IRQ/core-mutex cycle and a second cycle
+where the IRQ thread itself waits for runtime PM. Resume keeps a temporary
+mask through power-on, firmware boot and error rollback. Successful suspend
+must leave no threaded handler active; violating that invariant fails resume
+closed. A resume error is fatal in the runtime-PM framework, not a retry claim.
+
+Core init/deinit synchronously drain IRQ work before taking core->lock. Balance
+temporary masks after dropping that lock and before waiting for core-init
+completion. Power-off retains its persistent mask and takes it before hardware
+clocks/domains are removed. IRQ watchdog mask semantics remain preserved.
+No unlocked hardware teardown or unsynchronized IRQ shutdown was substituted.
+
+Validation:
+- Actual-function pthread/UBSAN model reproduces original suspend deadlock.
+-28candidate scenarios PASS: pending IRQ on suspend/resume/init/deinit/removal;
+ successful transitions; inactive core; watchdog; PC/hardware/firmware failure;
+ init rollback stages; cold/PM-failure removal;10000suspend/resume cycles with
+ balanced IRQ depths. Tests use modeled MMIO/IRQ/PM, not actual kernel callbacks.
+-152tooling regressions PASS. Scoped runner records Firefox unsupported and
+ retains default all-browser behavior;4K/kernel and Chromium limits unchanged.
+-Matching7.3.0-15-qcom-x1e module W=1 build PASS;153imported symbol CRCs match.
+-Exact patch application with fuzz0 matches candidate source. Clean same-path
+ rebuild produces identical module bytes. Different build paths change debug
+ metadata/build IDs; no cross-path identical-binary claim.
+-Checkpatch0errors,1commit-description line-width warning. Shell syntax and
+ frozen source/harness/VA/kernel artifact identities PASS. Cold preflight PASS.
+
+Evidence base /home/mq/.cache/libva-v4l2-qualification/resume-20261002/:
+kernel-pm-model-final.log, kernel-pm-tooling.log, kernel-pm-abi.json,
+kernel-pm-clean-rebuild.log, kernel-pm-preflight.json.
+Source tree kernel-pm-candidate; old v12 source/module/evidence untouched.
+
+New frozen packet recovery-v13/packet.20vamb24:
+VA SHA2568d85fbfc1606cb8d56e7b15b8872c73d14ea4264ad9df17aabee6df5f944cd69.
+Module SHA256a604eda3918b0f8f8d3422d8a5dd53268792a93b59bb5ef9c9bcd9cf228230aa.
+Module buildID231cb9f3a0141c3ddfa7b8df87df0889eff2f5f2.
+Current boot8558e0e1-9603-47ce-a869-aec46cb12efb, qcom_iris absent.
+Original installed module unchanged; no module loaded, unloaded or installed.
+
+Operator step (no further restart required while Iris remains absent):
+/home/mq/.cache/libva-v4l2-qualification/resume-20261002/qualify-cold-order-reviewed.sh
+
+The same reviewed wrapper now points to v13; v12 wrappers preserved. It rejects
+all known faulted boots and any loaded Iris before sudo, verifies artifacts and
+activation build identity, then runs the full strict headless gate followed by
+4K and Chromium with --scope chromium-headless. Before and after real-use it
+observes ordinary runtime autosuspend under the shared lease; it requires
+suspended/usage0/auto and increased active+suspended counters on the same
+boot/build. No system sleep, reboot or live unload is requested. Failure stops
+and keeps evidence. Earlier v12 passes cannot qualify this new packet/module.
+Rollback remains cold restart without blacklist to the original installed
+module; this original module retains known defects. No persistent boot changes.
+
+Subsequent60FPS-overhead diagnostic4k-hash-cost._scxn3nv failed in CPU-download
+with null-output (vaSyncSurface10s timeout at212frames, IO/decode errors).
+Hash-output control600frames13.35s44.94FPS, clean observed kernel window.
+No-hash arm lacked a completed kernel observer after bounded termination;
+independent journal shows no firmware/kernel fault and all processes exited,
+refcnt0. No PM/kernel fault was observed; cause remains unproven. This does not overturn the recorded PM
+transition witnesses, but exposes a separate unqualified userspace lifecycle
+path to investigate. No hashing-cost/60FPS inference or production completion.
+
+Userspace OUTPUT pacing follow-up (v14, unqualified on hardware): actual-function
+host reproducer with a permanently writable /dev/null exhausts the old2500poll
+budget in2.477656ms. New ordinary OUTPUT pacing/free-slot waits share a5s
+elapsed deadline and sleep1ms on no progress, preserving allocations, inflight
+limits and STOP/START behavior. Candidate reproducer waits5.000077s;228Rust,
+232integrated host tests,strictClippy/release/frozen identities PASS. Evidence
+output-pacing-host.k9jgjefw and output-pacing-candidate.4zemv3v3.
+Frozen packet recovery-v14/packet.sgawj23n VA SHA256
+60d19057790b9bcb6bf48c250154f7fbf917f3f02071eeb5bee33e97e84f3081.
+It reuses the unchanged live v13 kernel; same-boot successful activation and
+actual build independently verified. Full strict gate PASS production.e7ss6l, output-pacing-gate.log;
+no cold wrapper, restart or sudo required. This establishes a host wait-budget
+fix, not the null-output failure cause, hardware fix or4K60 capability. Preserve
+failed original comparison. Hardware qualification is required before deployment.
+
+V14 latest actual results: full strict gate production.e7ss6l PASS. Scoped real-use
+run.jnj6owfo PASS:4K3060byteexact69.5s44.0288FPS486832KiB; Chromium759frames
+25.0004s30.3595FPS780hardwarecompletions,seek and cleanexit. Runtime PM before/
+after PASS current boot/build, after active then suspended usage0/auto. All
+completed gate windows clean. Single null-output regression45yi30c_ FAIL at
+same212frames with OUTPUT pacing stalls after natural-keyframe STOP/START;
+inner45s timeout124, complete kernel observer PASS clean. Timeout left private child PID69657 alive/refcnt1; explicit TERM cleanup
+required; process then exited and refcnt0 verified. Observer window is clean but does not establish complete teardown.
+Five-second elapsed pacing fixes premature host timeout but does not
+resolve this hardware stall. Production deployment remains incomplete. Preserve
+failure; investigate drain/resume buffer lifetimes on host before more hardware,
+no unchanged repetition, reboot or sudo request. No new kernel fault observed.
+
+V15 preparation/hardware gate ongoing: natural-keyframe grace now uses elapsed
+100ms rather than five2ms poll calls, allowing pending prior-GOP pictures to
+finish before compatibility STOP. Actual-submit-frame host model with injected
+20ms completion: v14 fails at11.176ms/fifo1/STOPfail1; v15 finishes20.641ms/
+fifo0/noSTOP. Evidence keyframe-grace-model.eoy2kvrg. Firmware timing/cause is
+not proved by this model. Ownership, allocations, inflight limits and required
+seek drain remain unchanged.228Rust/strictClippy/build/frozen identity PASS.
+New recovery-v15/packet.8mtqzw6u VAa1cbbb6b41019104d5f5057e05cb4d569dd7984c278cdc5804ad8ea033ee50ff,
+reuses exact live v13 kernel and matching successful activation/build. Full
+strict gate ACTIVE exec83144/keyframe-grace-gate.log. No reboot/sudo needed.
+Prepared v15-null-output-regression.7qeohvdy uses existing process-tree monitor
+inside kernel observer, checks clean exit/no lingering descendants, avoiding
+GNUtimeout/time parent-exit cleanup gap. Run only after full/scoped gate passes.
+Do not claim hardware fix or persistently deploy until actual regression passes.
+
+V15 full strict gate production.jn0UWB PASS, all required matrix/churn/EOS/seeks
+and completed clean kernel windows; frozen final identity PASS, exec83144 exited0.
+Next scoped real-use ACTIVE exec83394/v15-real-use.log; before PM PASS matching
+boot/build suspended usage0/auto. Conditional runner executes after-PM and the
+single prepared null-output regression ONLY after scoped real-use passes. No
+competing hardware or operator step. Hardware fix and deployment still unproven.
+
+V15 actual scoped results PASS: full strict gate production.jn0UWB, real-use
+run.x3kheaho4K3180byteexact86.93s36.581FPS490544KiB; Chromium757frames25.0004s
+30.2795FPS781hardwarecompletions/seek/cleanexit. Before/after ordinary runtime
+PM PASS same boot/build active then suspended usage0/auto. Previously failing
+null-output regression7qeohvdy now PASS600frames/7.664s, exit0/no lingering
+children, complete clean kernel observer. All runners exited/refcnt0 verified.
+Natural-keyframe grace resolves this reproduced workload; no general firmware
+root-cause,4K60 or battery-savings claim. All previous failures retained.
+No permanent installation/boot edits yet; prepare reversible scoped deployment.
+System sleep/live unload remain unqualified and must not be triggered by agent.

@@ -1,0 +1,79 @@
+Cold-boot Iris recovery — 2026-10-01
+
+The earlier Iris removal deadlocked in the kernel. The user has since
+recovered and successfully cold-inserted the reviewed candidate on
+boot4492e975-80dc-4be5-97cd-6de4431d6b5e. Keep these steps for later recovery.
+If another Iris removal is deadlocked, stop testing. Another unload, forced
+removal, lock deletion, or decoder open cannot recover it. Save work and perform
+a normal reboot. This agent has not rebooted the machine or changed installed
+modules or boot configuration.
+
+Prepared candidate contains timestamp-bounds patch0001 and removal patch0003.
+It builds, passes the source regression models and checks all152symbol CRCs;
+its first cold insertion passed with exact loaded identity verified. The removal patch is limited to device removal;
+general PM power-off lock ordering remains unresolved. Production qualification
+must still run after activation. The PSC candidate0002 is excluded.
+
+One-boot recovery
+-----------------
+1. Save work. Reboot normally and bring up GRUB (usually Esc during startup).
+   Select the same kernel7.3.0-15-qcom-x1e and press e. Append this argument to
+   its linux line, leaving existing arguments intact:
+
+       modprobe.blacklist=qcom_iris
+
+   Boot the edited entry with Ctrl-X or F10. This is a one-boot edit; no installed
+   module or persistent GRUB configuration needs to change. The installed GRUB
+   configuration has a hidden menu with timeout0; access can depend on firmware.
+   If the menu cannot be reached, stop and arrange a reviewed boot configuration
+   change instead of attempting live removal again.
+
+   modprobe accepts this command-line blacklist and suppresses automatic alias
+   loading. Direct explicit loads may bypass it; absence is checked by the
+   wrapper before insertion. Official distro reference:
+   https://manpages.ubuntu.com/manpages/resolute/man8/modprobe.8.html
+
+2. Log in without opening decoder applications. Run as mq:
+
+       bash /home/mq/.cache/libva-v4l2-qualification/resume-20261001/activate-cold-reviewed.sh
+
+   It verifies the immutable source/harness/driver and module artifacts. Its
+   unprivileged preflight creates the shared lease, rejects the old boot and
+   requires Iris to be absent. Only then does it request interactive sudo for
+   dependency loading and insertion under the lease, rechecking absence before
+   insmod. The helper never unloads the original and leaves installed files
+   intact. If Iris is already loaded or any check fails, stop; preserve the
+   evidence and review boot setup. Do not retry an unfinished kernel operation.
+
+   Expected candidate identity:
+   SHA256 b333a5b676942ccc816d8011d868e0dc850a666bb6522fb3ea601426c04a29bc
+   GNU build ID de5d3d265214e6c64edddf31a4040983abc46288
+   srcversion 8057268C3554915BE16E951
+
+   Fresh evidence is under resume-20261001/cold-boot.XXXXXX/. Successful
+   activation.json must have status=pass, phase=complete and matching
+   loaded_build_id_after. A pending/failed/unresolved record is not success.
+   A bounded helper can report an unfinished child PID; it cannot clear a
+   kernel deadlock. An ordinary failed insertion may restore the original;
+   that fallback does not permit hardware qualification on the original.
+
+3. Resume the production task after successful activation. The prepared gate is:
+
+       bash /home/mq/.cache/libva-v4l2-qualification/resume-20261001/recovery-v5/packet.j8fpi63u/run-gate.sh
+
+   No later session is allowed after a kernel fault or incomplete observation.
+   Preserve failures. A clean gate is required before real-use qualification:
+
+       python3 tools/run-real-use-qualification.py /home/mq/.cache/libva-v4l2-qualification/resume-20261001/recovery-v5/packet.j8fpi63u --gate-results /path/to/that/packet/production.RUN
+
+   Required outcomes include strict CPU/GL parity, resolution/long-playback,
+   codecs, churn/EOS/seek, sustained4K memory/FPS and browser hardware playback
+   with seeks. Recovery-v4 failed its mixed TS seek fixture, with parser/reference errors
+   reproduced in software. Recovery-v5 uses indexed Matroska containing the
+   same390frames/pixel hashes, and is undergoing a fresh full gate. Persistent kernel
+   deployment remains a separate pending task after actual validation.
+
+For rollback, a later ordinary reboot without the one-boot blacklist reloads
+installed modules. It also restores the original known bounds defect; it is
+not a release-qualified runtime. The activation helper refuses live teardown
+of the original and bounds-only builds.

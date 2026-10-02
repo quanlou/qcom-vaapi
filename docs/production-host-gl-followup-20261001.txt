@@ -1,0 +1,93 @@
+Host qualification GL follow-up — 2026-10-01
+
+User-run fixed source: /tmp/libva-host-source-vb44oco9
+Results: /tmp/libva-host-qualification.wTcndX
+
+Observed: 57 Python tests, 193 injected Rust tests passed. Hardware CPU
+sample-1, sample-30 and sample-full matched native output. GStreamer export
+reached the driver. Strict GL produced 18 frames against 300 reference frames.
+The kernel window reported zero firmware errors, warnings and power cycles.
+The gate stopped at GL; subsequent matrix and lifecycle probes did not run.
+
+At seq=18, START followed the previous synchronous STOP before its empty
+CAPTURE marker was dequeued. Replay filled OUTPUT slots; the delayed empty
+CAPTURE was classified as a new firmware abort. Rebuild then failed its FIFO
+ownership check. The trace shows output pacing stall and Dead surfaces.
+
+Narrow fix: track the post-START empty marker separately from EOS. Consume
+one empty marker while not draining, or expire the allowance on the first
+nonempty capture, including ownerless replay. An additional unexpected empty
+capture remains eligible for the existing fatal classification. Retain bounds,
+strict frame count/order, cache maintenance and independent kernel checks.
+
+Host unit regression checks one-shot consumption and that an active drain
+cannot spend a previous START allowance. Hardware validation of this fix is
+pending. Repeated STOP/replay remains a performance and reference-recovery
+risk; this change does not qualify production or prove 300-frame GL parity.
+
+Second user run: /tmp/libva-host-qualification.A1KZRr
+The marker fix worked: the delayed empty CAPTURE was recognized, no FIFO
+rebuild was attempted. CPU 300-frame parity and clean kernel window repeated.
+GL remained at 18/300 frames. OUTPUT retained 11 buffers after replay while
+normal submission waited for the two-buffer pacing limit. Replay had filled
+all OUTPUT buffers before pumping and before normal CAPTURE replenishment.
+
+Follow-up source fix: replenish stable working CAPTURE before replay and
+while pumping; pace replay at the same OUTPUT limit as ordinary submission,
+with the existing source-change exception and whole-GOP wait budget. Preserve
+abandonment on incomplete references and errors. Pacing failures now include
+queue counts/state in logs. 202 integrated Rust tests and strict Clippy pass.
+A fresh fixed source with a GL-only host runner is prepared at
+/tmp/libva-gl-pacing-source-c_pnm7vt. Hardware result remains pending; no claim
+that the starvation hypothesis or complete GL parity is proved by host tests.
+
+Third user run: /tmp/libva-host-gl-check.qMG2Ca
+GL still produced 18/300 frames, with a clean kernel window. New diagnostics
+showed out=2/16, cap=6/32, no FIFO owners and no abort. This rules out the
+previous full-OUTPUT hypothesis as sufficient explanation. The pacing and
+replenishment changes did not resolve the hardware failure.
+
+Trace/kernel finding: START was issued before the previous STOP's empty
+completion was dequeued. Local Linux iris_vdec_start_cmd clears vb2's
+last_buffer_dequeued; vb2_dqbuf sets it again when dequeue returns LAST.
+Thus dequeuing a late LAST after START can leave CAPTURE DQBUF stopped even
+while firmware has resumed. Hardware logs did not previously include flags,
+so matching the actual late buffer's LAST flag still needs confirmation.
+
+Fix: track dequeue of LAST while draining; include that completion in the
+existing bounded drain-before-replay wait. START cannot precede the LAST
+DQBUF. A slow drain remains retryable and no pending owners are discarded.
+Successful STOP resets the completion flag; START resets it for the next
+cycle. New CAPTURE logs include flags. Existing synthetic completed-drain
+fixtures now explicitly carry LAST completion; stale LAST is cleared by a
+new STOP. Hardware result remains pending at fixed source
+/tmp/libva-gl-last-source-z88fqfmg. Do not claim release readiness.
+
+Fourth user run: /tmp/libva-host-gl-check.5HPJnr
+Fixed source: /tmp/libva-gl-last-source-z88fqfmg
+Strict GL PASSED: 300/300 frames in display order, zero missing/tolerated
+frames, matching 1280-byte strides. Wrapped command exit 0. Kernel window:
+zero session/system errors, power cycles, vb2 warnings or kernel bugs.
+This qualifies the supplied GL stream on the staged binary and current kernel.
+Full production matrix, churn, EOS and seek on this source remain required.
+Kernel patch boot, small-stream compatibility, 4K/browser performance and AV1
+release blockers are not closed by this isolated 720p GL result.
+
+Production continuation: /tmp/libva-host-qualification.OQuT34
+The same binary again passed CPU 1/30/300 parity, GStreamer export and strict
+GL 300/300. The next optional hwmap diagnostic stalled in terminal job-control
+stop: FFmpeg omitted -nostdin; both FFmpeg and its timeout were stopped in a
+background terminal group. The run was terminated and its lease released.
+Corrected verifier adds -nostdin; corrected exact-binary host runner also
+redirects stdin from /dev/null. Host execution requested:
+bash /tmp/libva-exact-production-stdin-20261001/run-production-exact.sh
+No final kernel-window summary or subsequent lifecycle results exist for this
+interrupted run. Full diagnosis: docs/production-stall-diagnosis-20261001.txt.
+
+Direct continuation completed after environment recheck (2026-10-01):
+/tmp/libva-exact-production-results.e1tXqa passed CPU/GL, resolution, long and
+HEVC/Main10/VP9 with clean kernel; strict production fails native one-frame EOS.
+/tmp/libva-exact-lifecycle-results.jezSwc passed churn7/7 and EOS; seek failed.
+Startup RPC race fixed, but corrected seek/debug runs expose empty-CAPTURE
+abort and recovery FIFO mismatch. See docs/production-host-continuation-20261001.txt.
+Hardware is currently accessible directly; prior host-request limitation is obsolete.

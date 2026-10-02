@@ -1,0 +1,92 @@
+Production qualification lane — 2026-10-01
+
+Result: HOST CHECKS PASS; HARDWARE QUALIFICATION BLOCKED / NOT RUN.
+This lane did not modify driver source, install a driver, boot a kernel, or
+probe hardware while another owner held the shared serialization lock.
+
+Exact input identity
+--------------------
+Frozen source: /tmp/libva-gl-last-source-z88fqfmg
+Verified every entry in its source-sha256.txt: 87 files, all unchanged.
+Previously GL-passing binary:
+/tmp/libva-host-gl-check.5HPJnr/driver/msm_drv_video.so
+SHA256: fc08226fcc18c257f52d2159ad8ebb5ed57f2a580dbf23640f9340b60ffa6e10
+This equals /tmp/libva-gl-last-source-z88fqfmg/prebuilt-driver/msm_drv_video.so.
+The user-supplied GL 300/300 result applies to these exact inputs; it is not
+new matrix/churn/EOS/seek evidence.
+
+Execution and artifacts
+-----------------------
+Executable host runner:
+/tmp/libva-exact-production-20261001/run-production-exact.sh
+Results from this actual invocation:
+/tmp/libva-exact-production-results.JieBxK/qualification.log
+/tmp/libva-exact-production-results.JieBxK/results/provenance.json
+/tmp/libva-exact-production-results.JieBxK/results/host-stress.glgvGj/stress.log
+/tmp/libva-exact-production-results.JieBxK/results/host-stress.glgvGj/parallel-suite.log
+/tmp/libva-exact-production-results.JieBxK/hardware-preflight.log
+/tmp/libva-exact-production-results.JieBxK/harness-selftest.log
+
+PASS: cargo fmt check; strict cargo clippy; 75 Python tooling regressions;
+4 concurrent stress tests; 208 integrated Rust tests (204 frozen driver tests
+plus 4 injected stress tests); host_stress_status=0 parallel_suite_status=0;
+production source/fixture/kernel provenance check.
+
+Actual production gate exit: 1, production=fail reason=hardware_in_use.
+A separate bounded 20-second serialization wait also reported hardware_in_use.
+Independent filesystem discovery: /dev/video16 and /dev/dri/renderD128 absent
+in this sandbox. This is an additional hardware-access blocker, not the actual
+first gate failure. No lock was stolen or deleted. No matrix/CPU, GL, churn,
+EOS, seek, codec, small-stream or kernel-window hardware pass is claimed here.
+
+Reviewable host package
+----------------------
+The package contains a separate harness copied from the exact frozen source.
+The ONLY harness change replaces build-rust-driver.sh with hash-verified
+staging of the already-tested binary. Production and all verification scripts
+are unchanged; required fixtures, strict frame counts/order, edge/codec checks,
+no-skipped-release semantics, kernel classification and serialization remain.
+This also handles the nested build request inside verify-rust-driver.sh so a
+rebuild cannot silently replace the GL-passing binary mid-qualification.
+The original frozen source and original tested binary remain untouched.
+
+Source/binary hashes are checked before execution; the normal production
+provenance checks then bind source, fixtures, kernel and the staged driver.
+Results use a fresh directory per invocation. A 3600-second outer bound with
+10-second kill grace complements the existing individual probe bounds.
+Positive staging produced the exact SHA256; a deliberately changed binary was
+rejected. Original-source and harness hashes remained unchanged after tests.
+
+Host command
+------------
+bash /tmp/libva-exact-production-20261001/run-production-exact.sh
+
+Run once when the physical-host hardware lock is free. The gate preserves
+probe order (required 1/30/300 matrix, export/full GL before diagnostics) and
+stops at the first failed strict probe; later unrun probes remain pending.
+A known small-stream firmware failure may stop this full release gate before
+lifecycle probes; that must remain a release failure, never be relabeled pass.
+Browser/4K measurements and patched-kernel boot are separate qualification
+lanes. AV1 remains disabled and is not certified by this package.
+
+Storage failure follow-up — 2026-10-01
+-------------------------------------
+User's eDLZvx hardware run passed CPU1/30/300, then GL filesink reported
+"Disk quota exceeded". The raw dump was partial; the pipeline exited134 and
+the strict verifier correctly failed. All seven kernel counters were zero.
+This failed attempt does not demonstrate renewed frame-completion regression.
+
+The generated exact-production runner now defaults results and Cargo targets
+to $HOME/.cache/libva-v4l2-qualification, on the disk-backed filesystem instead
+of /tmp tmpfs. V4L2_VA_QUALIFICATION_ROOT can select another result root;
+explicit CARGO_TARGET_DIR is respected. Driver/harness hashes and gate strictness
+are preserved. The same runner command automatically uses the new destination.
+
+Direct leased GL-only rerun on that storage with the exact fc08226...a6e10
+binary passed all300 frames in order, missing0 tolerated0, command exit0,
+all seven kernel counters zero. Log and raw dumps:
+/home/mq/.cache/libva-v4l2-qualification/gl-storage-retest-20261001.log
+/home/mq/.cache/libva-v4l2-qualification/gl-storage-retest-20261001/
+
+No old evidence was deleted. This run does not close the separately recorded
+native one-frame EOS or seek failures in production-host-continuation-20261001.txt.

@@ -1,9 +1,9 @@
 # 09 · Browser VA-API: why hardware decode falls back to software
 
-> **Status:** Phase 3 (browser-grade zero-copy) diagnosis. Written 2026-09-18.
-> Establishes *exactly* why no browser has selected hardware decode through this
-> driver, with evidence that the blocker is **snap confinement**, not the driver,
-> the hardware, or the GL stack.
+> **Status:** historical diagnosis from 2026-09-18, qualification tooling updated
+> 2026-10-01. Earlier logs demonstrate browser initialization blockers and later
+> driver selection; they do not qualify current playback, GL correctness or
+> teardown. Current source still requires a deployment-host browser run.
 
 ## The Phase 3 browser exit criterion
 
@@ -11,8 +11,9 @@
 > to software decode.
 
 Two browsers are installed, both as **snaps**, on **aarch64 + Wayland**:
-Chromium 152 and Firefox 147. Neither reaches this driver. The failure is
-different for each, and neither is our fault.
+Chromium 152 and Firefox 147. The initial experiments below did not reach this
+driver. The later Chromium experiment did reach it and encountered a decode
+error; both observations are historical evidence rather than release approval.
 
 ## Evidence: the whole non-browser stack works
 
@@ -25,8 +26,10 @@ Measured on this host (outside any browser sandbox):
 | OpenGL / EGL | `freedreno` / Adreno X1-85, OpenGL 4.6, GLES 3.2, Mesa 25.1.4 |
 | Decode via FFmpeg/mpv/GStreamer | 720p H.264 works, byte-exact vs native |
 
-So GL, Vulkan, VA-API, and the decoder all work. The only thing that does not
-work is a **snap-confined browser** reaching them.
+These individual smoke checks do not establish sustained browser playback or
+current GL export correctness. Browser flags and confinement can prevent driver
+selection; decoder completion, synchronization and firmware stability remain
+separate concerns after selection succeeds.
 
 ## Firefox: capability gate off, VAAPI never attempted
 
@@ -128,15 +131,82 @@ V4L2_VA_BROWSER=chromium V4L2_VA_BROWSER_CHROMIUM_MODE=vulkan \
 V4L2_VA_BROWSER=/opt/firefox/firefox tools/verify-browser-vaapi.sh /tmp/libva-v4l2-rust-driver
 ```
 
-The probe prints one of: `reached_driver` (success — our driver was loaded),
+The diagnostic probe prints one of: `reached_driver` (driver-load diagnostic,
+`qualification=not_proven`, not a playback qualification),
 `hw_decode_gate_off` (Firefox never tried VAAPI), `gpu_gl_init_failed` (Chromium
 GPU process died), `software_decoder`, or `blocked_*`.
 
-## Bottom line for the roadmap
+## Deployment playback and performance qualification
 
-Phase 3's browser exit criterion is **blocked by the browser sandbox, not by the
-driver**. Every layer the driver depends on is proven working. Closing it needs
-an unconfined browser (a user install decision), after which the existing probe
-should be able to show `reached_driver` and then real hardware decode — subject
-to the separate export-lifetime and firmware-stability work tracked elsewhere.
+`V4L2_VA_BROWSER_STRICT=1` (also inherited from `V4L2_VA_STRICT=1`) requires an
+explicit positive FPS requirement, RSS budget, and sustained measurement
+duration. Select these for the deployment workload; the numbers below are
+examples, not universal hardware limits:
+
+```sh
+V4L2_VA_BROWSER=chromium V4L2_VA_BROWSER_STRICT=1 \
+V4L2_VA_BROWSER_MIN_FPS=24 V4L2_VA_BROWSER_MAX_RSS_KIB=2097152 \
+V4L2_VA_BROWSER_MIN_SECONDS=20 V4L2_VA_BROWSER_SECONDS=30 \
+  tools/verify-browser-vaapi.sh /path/to/qualified-driver
 ```
+
+The sample must be more than eight seconds long. A fresh private profile and
+run ID bind telemetry to one browser invocation. The page reports forward
+playback, requests an actual seek, checks the resulting playback position,
+reports progress afterwards, and closes its window. Chromium runs an app
+window; the private Firefox profile enables script-driven window closure. Use
+`V4L2_VA_BROWSER_KIND=firefox` for a custom Firefox launcher whose executable
+name does not identify it. Chromium defaults to `native` GL selection.
+
+Strict acceptance additionally requires at least as many actual driver CAPTURE
+publications as observed video frames, rejects logged software fallback or
+decode failure, checks all seven kernel/firmware summary counters, and requires
+a natural zero-status browser exit with no observed surviving descendants.
+A timeout, blocked closure, failed seek, missing frame-quality API or missing
+kernel log access fails qualification. The driver name is fixed to `msm`.
+The local HTTP server only accepts bounded same-origin telemetry.
+
+`measurement.json` records observed process-tree peak RSS; `events.jsonl` holds
+the playback evidence; `performance.json` records presented FPS (dropped frames
+excluded), the memory budget result, seek evidence and clean process exit.
+`V4L2_VA_BROWSER_MAX_DROP_RATIO` defaults to 0.01. RSS is sampled every 100 ms
+and sums shared pages separately for each observed process; it is a conservative
+process budget rather than unique memory. PPID ancestry and PID/start-time
+tracking retain observed descendants that change sessions or are reparented.
+Very short-lived peaks or descendants that detach completely between samples
+may evade observation. This does not prove pixel parity at seek targets,
+zero-copy rendering, or absence of gradual leaks across days of use.
+
+The default diagnostic mode can still return zero for `reached_driver` even
+when the browser later times out. Only a strict `browser_vaapi_probe=pass
+qualification=playback_seek_and_clean_exit` result satisfies this browser gate.
+The headless production gate records browser qualification as separate; run
+this strict check in the actual deployment session on the same driver, kernel,
+firmware and fixtures. Browser playback/performance has not yet been qualified
+for the active candidate. The physical host currently has an active Iris
+candidate and a serialized strict hardware gate; wait for that gate to finish
+before opening another decode session. See the [current resumption report](production-resumption-20261001.txt).
+
+## Sustained 4K CPU-download qualification
+
+The 4K verifier preserves required 1-frame, 30-frame and full-stream byte-exact
+checks, including repeated playback. It forces `LIBVA_DRIVER_NAME=msm` and
+rejects stale result directories. Default measurements report
+`performance=unqualified` because no deployment thresholds have been supplied.
+Strict mode requires positive thresholds and rejects nonfinite, malformed,
+zero or fractional frame/RSS measurements. It also checks complete clean kernel
+evidence for both the native reference and driver legs.
+
+```sh
+V4L2_VA_4K_STRICT=1 V4L2_VA_4K_LOOPS=10 \
+V4L2_VA_4K_MIN_FPS=30 V4L2_VA_4K_MAX_RSS_KIB=1048576 \
+V4L2_VA_4K_MIN_SECONDS=30 V4L2_VA_4K_LOG_DIR=/tmp/fresh-4k-results \
+  tools/verify-4k-decode.sh /path/to/qualified-driver
+```
+
+Choose a clip and repeat count that exercise the required duration within the
+120-second command limit. `performance.json` reports end-to-end FFmpeg decode,
+CPU download and checksum throughput and peak FFmpeg RSS; this is not a
+zero-copy rendering benchmark or a full device-memory accounting result.
+Run for every supported codec/workload needed in the deployment. Both browser
+and 4K tools take the shared hardware lock to avoid simultaneous firmware use.

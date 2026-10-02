@@ -1,0 +1,58 @@
+Read-only CAPTURE credit audit — 2026-10-01
+
+Scope: authenticated linux-qcom-x1e7.3.0-15.15 source, failing frozen packet
+5cb03057ffc2f278055b724c6ed87fce994fbbee0eb5381aad8ca148aced077e at
+/home/mq/.cache/libva-v4l2-qualification/seek-eos/packet.eufa1nd_/production.xrSLy6.
+No Rust edits, kernel patch, hardware open, or new decode occurred. Header
+inspection used software FFmpeg bitstream trace only, not a decoder device.
+
+Findings from matching deployed kernel source
+
+1. V4L2_CID_MIN_BUFFERS_FOR_CAPTURE defaults4 at session initialization. This
+   is provisional: output_min_count (iris_vpu_buffer.c2053-2072) returns
+   inst->fw_min_count when nonzero for H264. At SOURCE_CHANGE,
+   iris_hfi_gen2_response.c656-664 copies firmware subscribed fw_min_count,
+   recalculates min_count, updates the V4L2 control and min_reqbufs_allocation.
+   Reading4 before headers/source change does not establish a permanent4.
+
+2. NV12 is split mode (iris_utils.c35-40). Internal decoded-picture buffers
+   are separate kernel allocations; iris_vpu_dpb_count2213-2223 uses firmware
+   min_count, or pre-discovery output min_count. Their reference capacity cannot
+   be inferred simply by counting userspace NV12 working buffers. Firmware
+   COMV sizing/count also tracks fw_min_count after discovery.
+
+3. Gen2 host setup sends HFI_PROP_BUFFER_FW_MIN_OUTPUT_COUNT from min_count
+   (iris_hfi_gen2_command.c322-336). Per-buffer HFI_CMD_BUFFER submits actual
+   buffers individually (1310-1335). No Gen2 property equating REQBUFS32 to
+   required32 concurrently queued NV12 buffers was found. Gen1 actual-count
+   properties exist but are not evidence for Gen2 x1e. vb2 start_streaming
+   doesn't compare count to allocated32; queue setup validates plane sizes
+   and opens the session, with no such firmware contract shown.
+
+4. Therefore six working QBUFs against32 allocations is not by itself a
+   demonstrated kernel/firmware contract violation. A hardcoded6 can underfeed
+   a session if negotiated post-SOURCE_CHANGE min_count exceeds6; allocation
+   count alone supplies no queue credits. Actual failing-session fw_min_count
+   and queued-buffer evolution are needed. If post-change control stays4,
+   source does not prove6 insufficient, and scheduling/hold/requeue/DRC state
+   must be assessed instead. Earlier six-slot stable GL success cannot prove
+   later CPU session scheduling correct, or a universal minimum.
+
+Fixture/log evidence
+
+Software trace of original test_720p.mp4: H264 level3.1,1280x720,
+max_num_ref_frames4, max_num_reorder_frames2, max_dec_frame_buffering4.
+Evidence: /tmp/libva-kernel-deployment-20261001/sample720-sps.log.
+These SPS fields do not prove firmware's negotiated output min_count; actual
+VA submission headers/firmware negotiation may differ from original packets.
+
+Frozen packet217 host tests pass; sample1 matches, then sample30 fails end
+picture/sync. Kernel summary reports0 session/system fatal, power cycle,
+warning and bug. It contains no V4L2 debug queue counts or post-PSC minimum.
+The strict failure is real, but a firmware minimum shortage is unestablished.
+
+Discriminating evidence for the capture owner/root on a later authorized run:
+query/log MIN_BUFFERS_FOR_CAPTURE on the same session after SOURCE_CHANGE and
+record working Queued/Free/reserved/export counts plus DQ/requeue/deferred/
+resume state. Do not open a separate control session to infer this session's
+minimum. No new hardware probe requested or performed in this audit.

@@ -176,8 +176,8 @@ connected yet:
 VA-API (what apps use)  ←———  ???  ———→  V4L2 stateful decoder (what Iris offers)
 ```
 
-This repository is the `???`: `msm_drv_video.so`, a Rust library loaded
-by libva, translating every VA-API call into V4L2 ioctls. The name
+This repository, **qcom-vaapi**, is the `???`: `msm_drv_video.so`, a Rust
+library loaded by libva, translating every VA-API call into V4L2 ioctls. The name
 `msm` comes from the GPU/DRM driver name libva discovers on Qualcomm
 platforms (explained in [chapter 2](02-stack.md#3-how-libva-finds-and-loads-this-driver)).
 

@@ -1,0 +1,142 @@
+Seek / EOS fixes and qualification — 2026-10-01
+
+This continuation supersedes the absent-device limitation in older reports.
+The current execution environment has direct decoder/DRM access. Every host
+probe is serialized with /tmp/libva-v4l2-hardware.lock; nothing was installed
+and the machine was not rebooted.
+
+Stalled-run repair
+------------------
+The optional FFmpeg hwmap probe omitted -nostdin. Terminal job control stopped
+both FFmpeg and its watchdog, preventing timeout expiry. The shared verifier
+now uses -nostdin, and qualification runners redirect stdin from /dev/null.
+Original OQuT34 artifacts are preserved. At the user's request, a subsequent
+old-run instance was terminated (groups 172030, 172037 and 174643); all verified
+processes exited and an independent flock check proved the lease released.
+
+Source fixes
+------------
+* vaBeginPicture waits once, with the existing bounded sync, for a same-context
+  Pending surface before reuse. It releases the mutex during sync and then
+  revalidates handles/state. InProgress and cross-context ownership still fail.
+  A seek otherwise loses its new IDR when the client reuses an old surface.
+* V4L2 ownership timestamps are unique submission cookies, independent of media
+  POC. Replays retain their original cookies; allocation fails before wrap.
+* An IDR finishes previous owners before replacing the GOP. A short bounded
+  completion wait precedes STOP to avoid resetting ordinary pipeline tails.
+* Only after dequeuing LAST and returning all OUTPUT buffers, owners that
+  firmware discarded become explicit failed completions. They receive no
+  successful pixels; publication marks them Dead and preserves export lifetime.
+* SOURCE_CHANGE resume cycles an already-streaming CAPTURE queue for CPU-copy
+  sessions too. The kernel's streamon path restores input-internal buffers and
+  STAGE/PIPE; bare START left the one-frame session unable to consume OUTPUT.
+* mpv startup accepts only the typed transient property-unavailable response
+  within its original bounded wait. Post-seek hardware-property loss still fails.
+* H.264 synthesis now reads the bounded, unescaped slice prefix and preserves
+  its PPS identity, which VA's parsed fields omit. Every slice in a picture
+  must agree, and truncated/invalid prefixes fail. Synthesized PPS points to
+  the driver's SPS0; the compressed slices retain their original identity.
+  IDR recognition accepts reference headers25/45/65 and rejects nonreference05.
+* Concurrent CPU working-pool bounds exposed top-up assumptions in submission,
+  pre-IDR completion waits, drain waits and replay. These now replenish the
+  whole unreserved working pool for streaming CPU sessions too, preserve
+  foreign/exported reservations, and latch replay top-up failures.
+
+Edge reference correction
+-------------------------
+The native FFmpeg wrapper exits successfully with zero one-frame output. Its
+result cannot certify this edge. one-frame-eos and bframes-240p now use complete
+software-decoded NV12 references, independently counted with ffprobe, and force
+VA hardware frames followed by hwdownload. Truncated reference/driver pairs
+and failed commands cannot pass. Native sample-1/30/full remain required.
+
+Evidence before final qualification
+-----------------------------------
+An isolated CAPTURE-cycle driver decoded the actual one-frame 320x240 fixture
+and matched software MD5 31357095c263c15fdce9a108daf8abbf (one frame) with a
+clean kernel window: /tmp/libva-oneframe-cycle-probe.ckENV8.
+
+Intermediate lifecycle builds passed churn 7/7, EOS full300/cut45/post300, and
+24 same-resolution seeks. Mixed-resolution seeks still failed and do not
+qualify production. /tmp/libva-seek-drain-lifecycle.TSUeUd retained a clean
+kernel window and post-storm sanity, but an empty CAPTURE with consumed OUTPUT
+could not satisfy the fail-closed reference/FIFO rebuild guard.
+
+/tmp/libva-seek-small-production.Fx2fKe (driver SHA256
+40a2a6d8e6d72ebbe05b9a9876ebbfac37c3f33e6ff2db39ac78fbd9393e7681)
+passed host checks, native CPU1/30/300, export and strict GL300. Resolution
+decode failed at 63/780 after repeated STOP/START, with no firmware/kernel
+errors and passing post-decode sanity. The decode had already exited when
+termination was attempted; its complete kernel observation is preserved.
+Later probes were unrun. This failure motivated the bounded pre-STOP wait.
+
+Current immutable candidate
+---------------------------
+Packet: /home/mq/.cache/libva-v4l2-qualification/seek-eos/packet.z5bonbls
+Driver SHA256:
+b2e7ce849994a5b44deb10962a2c577697d6ae6f790e5df1d2d41370f810ba0c
+source-sha256.json and harness-sha256.json bind captured code and the isolated
+hash-verifying builder. run-gate.sh uses disk-backed scratch/results and stages
+this exact binary throughout. Host Rust209/fmt/strict Clippy passed before
+capture. First packet run production.V5QP6a stopped at hardware_in_use after
+host checks, without a hardware test. Fresh production.7joXxQ passed Python86,
+Rust209, injected/stress213, fmt and strict Clippy. Its required native-backed
+CPU1/30/300, GStreamer export, strict GL300 (missing=0 tolerated=0), resolution
+780, long3600, HEVC30/Main10-30/VP9-30, one-frame1 and B-frames150 all passed.
+Churn7/7 and EOS full300/cut45/post300 passed on this same binary. All complete
+hardware windows are clean. Optional hwmap is blocked before reaching driver;
+disabled AV1 is not qualified by the codec expansion result.
+
+The final seek stage failed before driving any seeks: its 109-byte Unix socket
+name exceeded Linux's sun_path limit. This is a harness failure, not evidence
+of a decoder seek failure. The verifier now allocates a private short /tmp IPC
+directory independently of the long disk-backed results path and removes it
+on exit. A real Unix bind regression with a long results/TMPDIR path passes;
+all 13 seek harness/controller tests and shell syntax pass. New immutable
+packet.a35ws49e includes that harness fix and rebuilds the SAME b2e7ce...0ba0c
+driver. Independent bounded seek.mWHu1M is running on that packet.
+The earlier gate remains failed; independent passes cannot relabel it.
+
+Subsequent integration evidence
+-------------------------------
+packet.a35ws49e/seek.mWHu1M passes24 ordinary seeks but fails mixed, clean kernel
+and closing sanity. Client verbosity at seek-client-trace.s3mp9l7q shows
+illegal reference/header syntax BEFORE VA failures. Both generated segments
+use parameter-set ID0 with incompatible profiles/resolutions. Software-only
+mpv seeks1.95/11.05/5.2 reproduce37 parser syntax errors on the original mixed
+stream; using a separately generated low-resolution segment with SPS/PPS ID1
+gives0 syntax errors at the same targets. Evidence:
+~/.cache/libva-v4l2-qualification/seek-eos/software-seek-parser-trace/.
+The old driver fails even initial valid ID1 decode because it synthesizes PPS0;
+this motivated actual PPS-ID support rather than a recovery-guard exception.
+No default fixture change has been made yet; distinct-ID hardware is pending.
+
+Concurrent capture.rs changes bound CPU queues and improve late exports. The
+combined dc9739 and5cb030 candidates fail CPU30 with clean kernels. Diagnostic
+packet.eufa1nd_/cpu30-debug.e8sxkg shows the first IDR drain starved CAPTURE,
+failed, then replay starved at cap=1/32. The preceding full32 CPU queue had
+hidden the stable-capture-only top-up assumptions. Full replenishment was
+extended to pre-IDR/drain/replay; consumed-reference rebuild guards remain.
+
+packet.dojf_84g stopped on host regressions before hardware: its frozen tests
+captured an unfinished 4K test string and an obsolete churn diagnostic
+assertion. These are corrected in current source; command9 must explicitly
+fail before the next session, even with complete checksum output. Bad frozen
+packets remain failed and are not rewritten.
+
+Current candidate packet.igmkrc1v:
+SHA256 b086f9c9e227f6a45de72c93e533497331d4bf0f86a6bdc0e3e6b7315ccc83a1.
+Rust219 and fmt pass before capture; strict Clippy passed after runtime changes.
+Full gate is running with the separately supplied distinct-ID960x640 segment,
+the original required native1/30/full checks and the stronger peer-owned seek
+completion/progress verifier. No prior hardware pass qualifies this identity.
+
+Storage: Fx2fKe GL raw files were copied to disk, checked by SHA256 and then
+removed from tmpfs to relieve its quota. Both SHA256 values are
+c8048d2d25a1ae9822b7db804ad53a52a74d8585d607a50a0ad0c1850d61c822;
+new path ~/.cache/libva-v4l2-qualification/seek-eos/archived-Fx2fKe-gl/.
+Original user qualification artifacts were not moved or removed.
+
+Production remains unqualified until the complete strict gate passes. Browser,
+4K/performance, matching patched-kernel boot and disabled experimental AV1
+are separate outstanding lanes.

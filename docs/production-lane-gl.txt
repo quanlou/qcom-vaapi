@@ -1,0 +1,49 @@
+GL/export completion lane — 2026-10-01
+
+Source fixes complete; hardware qualification remains blocked by absent
+/dev/video16 and /dev/dri/renderD128. No hardware playback was performed in
+this lane. Root must attempt required matrix/churn after integration and retain
+strict full-stream GL qualification on the target deployment host.
+
+Additional defects fixed
+
+1. Strict GL shell verification previously compared a default 30-frame CPU
+   reference with an unrestricted GStreamer stream. Ordered comparison then
+   inevitably failed on a longer sample. Strict mode now decodes the complete
+   reference to EOS and compares every GL frame in order, with exact count.
+   Diagnostic non-strict mode retains bounded reference comparison. Strict mode
+   deliberately overrides V4L2_VA_GL_RT_FRAMES because GL itself is unbounded.
+2. Stable CAPTURE mode is session-wide, but an older Ready surface can still
+   point at a working slot after another surface enables stable mode. Late
+   export now verifies that the actual surface owns its reservation. Otherwise
+   it copies the immutable published snapshot into its own stable allocation.
+   A queued/foreign working mapping can no longer bypass stabilization merely
+   because the session has entered stable mode.
+3. Late-export snapshot validation previously accepted a nonempty but truncated
+   image and zero-filled missing pixels. It now verifies complete semiplanar
+   storage before allocating a reservation or writing any destination pixels.
+
+Files changed by this lane
+
+rust/src/surface_export.rs — per-surface reservation ownership check.
+rust/src/v4l2/capture.rs — checked snapshot storage and expanded regression.
+tools/verify-gl-roundtrip.sh — complete strict reference decode.
+tools/gst_gl_roundtrip.py — clarify strict vs diagnostic comparison contracts.
+tools/tests/test_gl_production.py — mocked end-to-end shell regression.
+
+Validation
+
+cargo test --locked --manifest-path rust/Cargo.toml --quiet: 189 passed.
+cargo clippy --locked --manifest-path rust/Cargo.toml --all-targets -- -D warnings: passed.
+python3 -m unittest discover -s tools/tests -v: 57 passed.
+rustfmt focused files, shell syntax, git diff --check: passed.
+
+The capture regression proves truncated snapshots leave the free reservation
+untouched and a second late-export surface gets its own allocation even after
+stable mode was enabled by the first surface. /dev/null intentionally prevents
+actual EXPBUF; reservation ownership and pixel copies are checked before it.
+The shell regression proves strict mode compares three complete frames despite
+a two-frame diagnostic prefix setting. Existing tests reject reordered and
+extra corrupt GL frames. These host regressions do not prove GPU fence/cache
+behavior, full-stream hardware parity, or recovery/export across a real source
+change. No new allocation-heavy frame clones were added to production code.

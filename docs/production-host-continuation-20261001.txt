@@ -1,0 +1,102 @@
+Production host continuation — 2026-10-01
+
+Direct execution correction
+---------------------------
+The current execution environment exposes /dev/video16 and /dev/dri/renderD128
+and permits execution. The earlier statement that hardware execution required
+user intervention carried forward an obsolete environment restriction. The
+corrected production and lifecycle probes were executed directly after the
+user's clarification, under /tmp/libva-v4l2-hardware.lock. No system driver
+installation, kernel change or production Rust source edit was performed.
+
+Exact tested binary
+-------------------
+SHA256: fc08226fcc18c257f52d2159ad8ebb5ed57f2a580dbf23640f9340b60ffa6e10
+Frozen driver source: /tmp/libva-gl-last-source-z88fqfmg
+All runs stage this exact GL-passing binary. Harness changes are recorded
+separately and hash-verified; provenance binds each harness, fixtures, kernel
+and binary. Hardware runs remained serialized. Lock free after completion.
+
+Production gate
+---------------
+Runner: /tmp/libva-exact-production-stdin-20261001/run-production-exact.sh
+Results: /tmp/libva-exact-production-results.e1tXqa
+Production log: /tmp/libva-exact-production-results.e1tXqa/qualification.log
+Kernel-wrapped matrix: /tmp/libva-exact-production-results.e1tXqa/results/rust-driver.log
+
+PASS: fmt, strict Clippy, 75 Python tooling tests, 204 frozen Rust tests,
+208 injected Rust/stress tests, source/fixture/kernel/binary provenance.
+PASS: required H.264 CPU sample-1, sample-30 and sample-full native parity.
+PASS: GStreamer export reached_driver status=0.
+PASS: strict GL 300/300, missing=0 tolerated=0, stride=1280.
+PASS: resolution churn, 780/780 frames, 4 source changes, 2 cycles.
+PASS: long playback, 3600/3600 frames, 12 segments.
+PASS: HEVC Main, HEVC Main10 P010, VP9 Profile 0, 30-frame parity each.
+Main10 reference is software HEVC; Main and VP9 references are native V4L2.
+AV1 remains unadvertised and unqualified.
+Diagnostic hwmap completed status=218, blocked_before_driver; no terminal stall.
+FAIL: strict one-frame-eos native decoder emitted zero frames. The gate exited
+1 before bframes-240p and before its embedded lifecycle stages. Requirements
+were not weakened or skipped to turn this into a production pass.
+Complete outer kernel window: session/system fatals, power cycles, vb2 warnings,
+other session/system errors and kernel bugs all zero.
+
+Independent lifecycle continuation
+----------------------------------
+Runner: /tmp/libva-exact-production-stdin-20261001/run-lifecycle-exact.sh
+Results: /tmp/libva-exact-lifecycle-results.jezSwc
+Same exact binary and frozen harness; checked original production provenance
+before each subsequent stage. This separate run does not override the failed
+production gate. Each stage is kernel-wrapped and stops on failure/faults.
+PASS: session-churn pass=7 fail=0, including three mpv cuts, SIGKILL of FFmpeg
+and GStreamer, SIGTERM of GStreamer and complete post-cut/kill frame parity.
+PASS: eos-drain, 300-frame natural EOS, 45-frame mid-cut and full post-cut
+parity, teardown flush observed, sanity=ok.
+FAIL: seek startup race: mpv IPC available before hwdec-current property;
+controller rejected property unavailable before completing the seek storm.
+All completed lifecycle kernel windows were clean.
+
+Seek harness correction and fresh qualification
+-----------------------------------------------
+Workspace tools/mpv_seek_drive.py now distinguishes property unavailable
+from other RPC errors. During its existing bounded 10-second startup wait,
+only that specific error is retried; wrong decoder, rejected seek, lost IPC
+and post-seek decoder loss still fail. Four new regressions cover initial
+unavailability, bounded startup timeout, post-seek failure and error typing.
+12 seek tests pass; full tooling suite 79/79; git diff --check passes.
+
+Separate hash-verified package /tmp/libva-exact-seek-startup-20261001 contains
+only the additional controller/test changes; driver source/binary unchanged.
+Runner: /tmp/libva-exact-seek-startup-20261001/run-seek-exact.sh
+Fresh normal result: /tmp/libva-exact-seek-results.PIvRqk
+One bounded V4L2_VA_DEBUG=1 diagnostic: /tmp/libva-exact-seek-results.svZYKG
+Both fail seek, exit 1; kernel windows clean and sanity=ok. Mixed-resolution
+seek phase not reached. Neither completed 24 seeks; no seek pass is claimed.
+
+Diagnostic findings
+-------------------
+/tmp/libva-exact-seek-results.svZYKG/seek/720p-mpv.log
+The driver initially publishes correct decoded frames. Subsequent submissions
+restart timestamps while retaining the same context. Its reference-history
+tracker reports history unavailable until the next bounded keyframe GOP.
+At seq=24: CAPTURE idx=5 bytes=0 flags=0x4061, nine pending owners,
+empty CAPTURE without drain; recovery armed; rebuild attempt 1;
+session rebuild fifo mismatch. Another empty completion follows with eight
+pending owners. Teardown reaches LAST flags=0x104001, but four owners remain.
+The controller then receives property unavailable for hwdec-current after
+initial hardware selection. This trace establishes a userspace session failure,
+not merely the startup timing race. It does not prove the firmware's reason
+for empty completions or how many seeks were acknowledged before failure.
+The fail-closed recovery guard must not be removed to conceal the mismatch.
+
+Current release blockers and next work
+-------------------------------------
+Production is NOT qualified: native one-frame EOS remains failed; seek must
+handle timestamp/reference reset and empty completion/recovery with pending
+consumed OUTPUT owners correctly. Preserve exact CPU/full GL acceptance,
+complete reference chains, bounded recovery and kernel checks. A future driver
+fix requires a new frozen binary and reruns of matrix/churn/EOS/seek, rather
+than inheriting fc08226...a6e10 evidence as proof of the new code.
+Small-stream bframes-240p was not reached in this production run. Kernel patch
+boot, strict 4K/browser performance and experimental AV1 remain open.
+No hardware processes from these runs remain; the serialization lock is free.

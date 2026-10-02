@@ -1,0 +1,106 @@
+Pending lane 1 — seek/recovery peer audit, 2026-10-01
+
+Status: read-only code audit and host validation completed. Fresh final-candidate
+seek hardware outcome is pending root execution after external owner's source
+freeze. Child hardware nodes are now visible; root retains exclusive central
+probe ownership. No Rust/shared verifier changes or hardware runs in this lane.
+
+External owner: Diagnose stalled hostqualification / Seek/EOS claim in PROGRESS.
+Latest reviewed source uses monotonically increasing session submission IDs,
+not media POC, for V4L2 timestamp ownership. An incoming IDR with withheld owners
+attempts STOP before submission. Drain resume waits for LAST dequeue, pending
+owners and queued OUTPUT; terminal-drain failures publish explicit Dead owners
+instead of inventing pixels. Preserve these ownership checks.
+
+Concrete findings handed to root and external owner
+
+1. IDR recognition in rust/src/codec/h264.rs finish_picture scans only for
+   exact Annex-B header 00 00 00 01 65. Header bytes 25 and 45 also encode
+   reference IDR NAL type 5, with different nonzero nal_ref_idc. They currently
+   fail the keyframe test and bypass the new pre-IDR withheld-owner drain.
+   Regression: invoke finish_picture with otherwise identical valid picture
+   and slice parameters, payload headers 25/45/65; require keyframe=true for
+   all three. Header 41 must remain non-IDR. Reject malformed IDR header05
+   rather than accepting a non-reference IDR. Use NAL-type/ref-idc masking
+   and proper NAL boundaries. Do not classify all I slices/open GOPs as IDR:
+   an intra picture alone does not prove old references can be discarded.
+
+2. tools/mpv_seek_drive.py currently accepts any finite time-pos after each
+   acknowledged seek, while hwdec-current remains vaapi-copy. This does not
+   establish completion or playback progress. Existing test FakeSocket always
+   returns time-pos1.25, and the three-target acknowledgment test passes.
+   Regression: a server acknowledging every command but retaining the same
+   playback position for different targets must fail; a stuck seeking=true
+   must fail within a bounded deadline; completing a keyframe seek and then
+   progressing hardware playback must pass. Wait for seek completion and
+   forward decoded/playback progress, with tolerance based on actual keyframe
+   landing rather than exact target time. Continue rejecting fallback, lost
+   properties, mismatched request IDs and disconnects. This still does not
+   establish pixel parity at every target; that needs independent frames.
+
+Consumed-reference rebuild remains explicitly unsupported when snapshot_pending
+OUTPUT no longer contains a complete GOP. The fifo mismatch guard in recovery.rs
+must stay. Larger retained history alone does not fix replay completion ownership
+or reinstate dropped VA/export identity. Preventing seek aborts on random access
+is a separate solution; do not weaken the guard to label recovery successful.
+
+Historical evidence (not current-candidate qualification)
+
+/tmp/libva-exact-seek-results.svZYKG/seek-storm.log failed720p after24requested
+seeks; mixed phase unrun. Driver fc08226fcc18c257f52d2159ad8ebb5ed57f2a580dbf23640f9340b60ffa6e10.
+720p-mpv.log shows replay history repeatedly unavailable after reused media
+POC, bytes0 CAPTURE flags0x4061 with9pending owners, recovery fifo mismatch,
+then hwdec-current unavailable. Kernel window and post-decode sanity clean.
+This is a real seek failure, not a firmware-fatal window, and predates the new
+monotonic completion IDs/pre-IDR drain. No result has been relabeled as pass.
+
+Validation on current live shared tree
+
+cargo test --locked --manifest-path rust/Cargo.toml v4l2:: --quiet:
+52 passed,157 filtered (209 total at this observation).
+python3 -m unittest tools.tests.test_seek_ipc -q:12 passed.
+Source was still under active external modification; these host checks do not
+identify a final frozen binary or certify seek behavior on hardware.
+
+Prepared bounded root executor
+
+bash /tmp/run-frozen-seek-20261001.sh IMMUTABLE_PACKET_PATH
+
+Run only after external owner declares source stable and packet passes required
+CPU/GL matrix. Uses packet verify-identity.py and driver, fresh packet/seek-peer.*
+artifacts, exclusive /tmp/libva-v4l2-hardware.lock lease, disk TMPDIR,24ordinary
+and12mixed seeks,900s hard ceiling, debug trace, pre/post driver identity and
+kernel window. Any timeout, missing pass/observation or detected kernel fault
+fails. Root may use this for scoped diagnosis; it cannot override failed full
+production qualification. bash syntax check passed; no hardware run yet.
+
+Seek verifier source closure — subsequent root delegation
+
+Finding2 is now fixed in tools/mpv_seek_drive.py and its IPC tests. The
+controller retains fresh seek/playback-restart event ordering independently
+of command acknowledgments, requires seeking=false, then requires two forward
+position advances while vaapi-copy remains active. The completion/progress
+budget is4seconds per seek, shared with every RPC response timeout. Exact
+landing time is not required; keyframe offsets remain valid. Per-seek trace
+records target, landing and progressed position before the final pass summary.
+A fresh pair is required for every seek; prior-seek events cannot certify the
+next command. Events before and after command replies are both supported.
+This verifies restart/completion and playback motion; it does not prove pixel
+parity, correctness of every target landing, or actual hardware throughput.
+
+Validation after changes:22 seek IPC/shell tests pass; complete Python suite
+101/101passes; Python compilation and git diff --check pass. Nine added tests
+cover constant position, stuck seeking, missing fresh events, offset keyframe
+landing, fallback during progress, invalid boolean position, replies before
+restart events, and previous-seek event reuse. Three new regressions fail the
+actual old controller from the historical seek harness, with "TimeoutError not
+raised", and pass the fixed controller. Evidence:
+/tmp/seek-verifier-observed-before-r1kilpvs/before.log
+/tmp/libva-seek-verifier-tests-20261001.log
+An earlier HEAD-based replay did not have the drive API and is not regression
+evidence; only the historical-harness replay above is used.
+
+No hardware was opened after the small-stream firmware fatal. Hardware seek
+qualification requires a healthy device and a newly frozen packet containing
+this verifier plus the external owner's final Rust fixes. Finding1(IDRheader
+masking) remains with the external Rust owner. No Rust files were changed here.

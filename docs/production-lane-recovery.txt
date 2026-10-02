@@ -1,0 +1,106 @@
+Recovery production lane — 2026-10-01
+
+Implemented (host validated, not hardware qualified)
+
+* Replaced the 64-access-unit sliding suffix with complete-GOP retention:
+  maximum 1,024 access units and 32 MiB of compressed bytes per session.
+  A keyframe starts the chain. Exceeding either limit, allocation failure,
+  or a duplicate timestamp clears the complete chain. Further inter pictures
+  do not rebuild a suffix; only another bounded keyframe restores eligibility.
+  Normal decoding can continue without recovery history; a subsequent transition
+  requiring unavailable references fails explicitly.
+* Published-timestamp proof retains 1,024 entries to match the history cap.
+* Drain replay permits at most 2,500 pump(2 ms) iterations across the entire
+  GOP, rather than a separate budget per picture. The nominal requested wait
+  budget is five seconds; ioctl/processing overhead adds wall time. Work is
+  additionally bounded by the 1,024-access-unit cap. START followed by failed
+  or aborted replay latches abandonment, and submission rejects abandonment
+  even when the aborted flag is unset. Replay temporarily duplicates the
+  retained compressed history (up to another 32 MiB).
+* Rebuild no longer truncates FIFO owners to fit queued OUTPUT. A consumed
+  input can still own an unpublished VA surface; dropping it would strand
+  the surface after an apparently successful rebuild.
+* Drain resume pumps existing FIFO owners, hidden-waiting owners, and queued
+  OUTPUT to completion before START, including when a new keyframe arrives.
+  Waiting is bounded by 2,500 pump iterations and a five-second wall deadline.
+  Completed surfaces remain queued for normal publication. A budget expiry
+  returns a retryable session error without START, abandonment, or owner loss.
+  Keyframe submission no longer clears hidden owners, and newly submitted
+  headers are stored only after successful drain resume. Hidden CAPTURE markers
+  cannot safely be attributed to ownerless replay while old owners remain.
+  A trailing hidden reference without publication/completion proof still fails
+  closed instead of silently omitting that dependency.
+
+Compatibility limit and remaining implementation blocker
+
+The consumed-reference rebuild guard remains. Complete history alone cannot
+safely restore references in the current completion routing. Display CAPTURE
+uses timestamp-to-FIFO ownership, but empty hidden CAPTURE retires FIFO.first()
+without an independently verified replay owner/epoch. Feeding consumed hidden
+references while current owners are present can retire an unrelated pending
+surface. A correct implementation needs explicit replay-epoch ownership and
+completion evidence for every hidden access unit, suppression of duplicate
+published output, and preservation of pending surface/export identity across
+new pools. Do not replace the guard with synthesized SPS/PPS or a queued tail.
+
+STOP acceptance does not imply drain completion. Before START, existing owners
+are pumped within the bounded wait above. If delayed owners cannot finish in
+that budget, the session stays healthy and draining, so later completion and
+resubmission remain possible. A fresh keyframe bypasses old references but does
+not permit dropping outstanding owners. The submit API currently returns only
+Result<(), ()>: budget expiry maps to VA decoding error and marks the new picture
+Dead, rather than reporting VA_BUSY. Preserving VA-level retry of that same
+picture requires a typed submit failure and matching decode callback changes.
+Host tests cover pending visible/hidden owners and real keyframe submission
+with hidden owner [7], preserved headers, no queued input, and a later retry;
+only hardware can establish successful asynchronous completion timing. Existing
+long-GOP pixel correctness must be rerun on the decoder host.
+GOPs above either budget remain explicitly unrecoverable until the next keyframe.
+
+Validation
+
+cargo test --locked --manifest-path rust/Cargo.toml v4l2:: --quiet
+  47 passed (including complete 300-picture GOP, 1,024-unit boundary, 32 MiB
+  boundary, duplicate timestamps, consumed-reference tail rejection, hidden
+  reference proof, outstanding owners, and abandoned submission).
+cargo clippy --locked --manifest-path rust/Cargo.toml --all-targets -- -D warnings
+  passed.
+Focused rustfmt passed. Earlier full suite passed 194/194 before concurrent
+AV1 changes; the mandatory matrix attempt then found an in-progress AV1 test
+failure (197 passed, one failed), notified root. Root performs final integrated
+suite after all lanes settle.
+
+Mandatory hardware attempts were serialized with
+/tmp/libva-v4l2-hardware.lock:
+  tools/verify-rust-driver.sh /tmp/libva-v4l2-recovery-driver
+    exit 101: stopped at that concurrent AV1 host regression, before device init.
+  tools/verify-session-churn.sh /tmp/libva-v4l2-recovery-driver
+    exit 1: native reference decode failed (no decoder device available).
+Artifacts: /tmp/libva-v4l2-recovery-lane/{matrix,churn}.log;
+churn diagnostic: /tmp/libva-v4l2-churn/last-leg.log.
+/dev/video16 and /dev/dri/renderD128 are absent in this environment.
+Neither attempt qualifies recovery on hardware. Required matrix and churn
+remain release blockers for this change.
+
+Files: rust/src/v4l2/replay.rs, recovery.rs, submit.rs, and one isolated
+published-timestamp-cap hunk in poll.rs. No installation or commits performed.
+
+Peer-review correction: removed the keyframe hidden-owner guard bypass and
+replaced immediate healthy-session abandonment with bounded drain completion.
+Latest targeted tests: 47/47, strict clippy and focused formatting pass.
+
+Final integration follow-up
+
+The external hardware owner concurrently added replay OUTPUT pacing and stable
+CAPTURE top-up before replay and during pacing. Those changes are preserved.
+This lane additionally replenishes only Free/unreserved stable working slots
+while completing the old drain. Replay top-up failure after START latches
+abandonment; pre-START top-up failure preserves the existing draining sequence.
+Two regressions verify QBUF rejection never queues or changes an exported
+Reserved slot, keeps its owner/export count, and distinguishes those failure
+states. Real keyframe submission retains hidden owner [7] and recovery headers.
+Latest full integrated suite: 204/204; strict clippy and focused formatting pass.
+These proposed GL stall fixes still need hardware qualification. The supplied
+external result (CPU1/30/300 pass, GL18/300 fail, clean kernel) predates this
+follow-up and cannot qualify its successful playback.
+Final follow-up edits: rust/src/v4l2/submit.rs and this lane report only.

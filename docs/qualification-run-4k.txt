@@ -1,0 +1,64 @@
+4K qualification run — 2026-10-01
+
+Status: hardware BLOCKED, harness checks PASS. No 4K hardware throughput,
+memory measurement, pixel parity, or sustained playback pass is claimed.
+This container has no /dev/video* or /dev/dri nodes. The pinned runner failed
+closed with exit 1 before launching any decode: missing_render_device.
+
+Exact passing GL binary preserved
+Original evidence: /tmp/libva-host-gl-check.5HPJnr/driver/msm_drv_video.so
+Frozen source: /tmp/libva-gl-last-source-z88fqfmg
+Frozen prebuilt and passing GL binary SHA256 match:
+fc08226fcc18c257f52d2159ad8ebb5ed57f2a580dbf23640f9340b60ffa6e10
+No rebuild, installation, source fix, or production hardware run in this lane.
+
+Host validation completed
+- Frozen tools with tests from the shared tree: all 75 tooling regressions pass.
+  Includes complete repeated reference counts/timestamps, truncated references,
+  wrong repeated pixels, command failures, dirty/missing kernel windows, strict
+  runtime/FPS/RSS thresholds and browser seek/teardown acceptance checks.
+  python3 -m unittest discover -s \
+    /tmp/libva-4k-pinned-qualification-20261001/tools/tests -v
+- bash -n on the runner and pinned verify-4k-decode.sh passes.
+- ffprobe counted all four existing fixtures: H.264, HEVC, HEVC Main10, VP9;
+  each is 3840x2160, 60 frames, 30/1 FPS, 2 seconds. Full fixture hashes and
+  metadata saved; runner rechecks fixture, tool and binary hashes before use.
+
+Hardware-ready package and command
+/tmp/libva-4k-pinned-qualification-20261001/run-four-codecs.sh
+
+Run that command in the host session that exposes the decoder/render nodes.
+It uses the exact passing GL binary, frozen verification tools, fresh result
+paths and the shared /tmp/libva-v4l2-hardware.lock lease for every codec.
+No simultaneous decoder tests are allowed. Integration review made the runner
+stop at the first failed codec, preserving logs and leaving later codecs unrun;
+it must not repeatedly open sessions after a firmware/kernel failure. Each codec retains native versus
+VA CPU-download 1-frame, 30-frame and complete repeated-stream parity legs,
+with clean kernel evidence and byte-exact checksums required.
+
+Explicit exploratory qualification requirements
+- At least 30 FPS, derived from these fixtures' stream rate.
+- Peak FFmpeg RSS at most 524288 KiB (512 MiB), a chosen test requirement;
+  this is not a universal deployment specification or total GPU memory.
+- At least 60 observed seconds in the measured full decode/checksum leg.
+- Default 50 loops = 3000 frames per codec; bounded override through
+  QUALIFICATION_4K_LOOPS=1..100. No arbitrary passing budgets are inferred.
+
+Sustained-duration limitation
+At 30 FPS the default 3000-frame leg takes about 100 seconds; at 50 FPS it
+takes about 60 seconds. Faster completion fails the minimum-duration check
+honestly. A second run can use a fresh results directory and increase loops
+based on the observed speed, up to the existing 100-loop bound. If throughput
+exceeds 100 FPS, even 6000 frames cannot sustain 60 seconds: a longer fixture
+or an explicitly reviewed harness change is required. Each leg also has a
+120-second timeout; a long/slower loop choice may timeout. Do not remove the
+minimum-duration threshold to claim sustained qualification. The current
+measurement includes decode, CPU download and checksum, not display/render
+throughput, and peak process RSS does not establish long-term leak freedom.
+
+Artifacts
+/tmp/libva-4k-pinned-qualification-20261001/fixture-metadata.json
+/tmp/libva-4k-pinned-qualification-20261001/qualification-sha256.txt
+/tmp/libva-4k-pinned-qualification-20261001/fixture-sha256.txt
+/tmp/libva-4k-pinned-qualification-20261001/attempt.log
+/tmp/libva-4k-pinned-qualification-20261001/attempt-status.json

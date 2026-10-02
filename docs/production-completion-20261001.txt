@@ -1,0 +1,62 @@
+Six-agent production-readiness completion sweep — October 1 2026
+
+Status: achievable host implementation and integration complete. Production
+release qualification remains blocked. No system installation or commits.
+
+Completed lanes
+1. Qualification: reject substituted driver/reference identity, stale evidence
+   directories and changed source/fixtures/binary; preserve exact provenance.
+2. GL: complete-stream count/order verification, per-surface stable reservation
+   ownership, and truncated-snapshot rejection before copying/exporting.
+3. Kernel: expanded actual-function UBSAN reproducer, bounded firmware probes,
+   independent output counts/pixel comparisons, deployment evidence procedure.
+   Candidate applies and sanitizer passes against /home/mq/oss/linux as well;
+   this tree/build does not match the running deployment kernel.
+4. Recovery: whole-GOP retention bounded at 1,024 units / 32 MiB; preserve old
+   owners, bounded completion pumping before START, keyframe guard correction,
+   replay pacing/top-ups, and abandonment after partial replay failure. External
+   hardware agent's concurrent pacing/top-up changes are preserved.
+5. Performance: explicit FPS/RSS/runtime budgets; browser forward playback,
+   real seek, hardware frame coverage, fresh telemetry, clean kernel/exit checks.
+6. AV1: reject malformed tile/layout/header data; exact missing metadata and
+   producer requirements documented. Production AV1 remains disabled.
+
+Frozen integration verification
+Source: /tmp/libva-six-agent-20261001/source
+Hashes/revision: /tmp/libva-six-agent-20261001/source-sha256.json
+Release binary: /tmp/libva-six-agent-20261001/final-driver/msm_drv_video.so
+Release hash: /tmp/libva-six-agent-20261001/release-sha256.txt
+Rust suite: 204/204 passed.
+Isolated suite with four concurrent/defensive stress cases: 208/208 passed.
+Python verifier/tooling suite: 75/75 passed.
+Formatting, strict Clippy, shell syntax, release build, whitespace: passed.
+Full production gate: host stages and provenance check passed, then exit 1
+  missing_hardware (/dev/video16 and /dev/dri/renderD128 absent here).
+Final required matrix: 204 host tests/build passed, then vainfo could not open
+  the DRM device. Final churn: no VA display for that DRM device. Neither ran
+  hardware decode. Logs/artifacts are under /tmp/libva-six-agent-20261001/.
+
+Independent hardware evidence supplied by user
+/tmp/libva-host-qualification.A1KZRr/results/rust-driver.log passed H.264 CPU
+1/30/300 exact reference parity and export reached the driver, then failed
+strict GL: 18 actual frames versus 300 reference frames. Kernel summary was
+clean. The hardware owner is actively diagnosing the OUTPUT/replay stall.
+That immutable binary predates the last recovery corrections in root's frozen
+source. Do not relabel that hardware result as qualification of the final fixes.
+
+Remaining work
+- Hardware owner must freeze/test the latest integrated source, resolve full
+  GL playback and rerun matrix/churn/production gates with healthy next sessions.
+- Apply/build/boot the Iris candidate through the deployment kernel workflow,
+  prove the booted build/firmware identity, resolve small-stream firmware failures.
+- Run strict sustained 4K and browser checks on the deployment session with
+  explicit performance budgets and preserve all artifacts on the same binary.
+- Consumed-reference recovery needs replay-epoch/hidden completion ownership;
+  current fail-closed guard remains. A bounded old-owner wait timeout rejects
+  the new VA picture while preserving the existing session; it is not VA_BUSY.
+- Full AV1 needs original OBUs or authoritative metadata from the producer,
+  then broad full-stream parity. Driver-only refresh inference cannot close it.
+
+Each lane's details: docs/production-lane-{qualification,gl,kernel,recovery,
+performance,av1}.txt. Source remains shared with active external hardware work;
+the evidence above binds the frozen snapshot, not subsequent edits.

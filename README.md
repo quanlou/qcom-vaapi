@@ -1,15 +1,83 @@
-# msm_drv_video — Rust VA-API driver for Qualcomm Iris (X1E80100)
+# qcom-vaapi
 
-A Rust VA-API/libva driver backed by the stateful V4L2 M2M `iris` decoder at
-`/dev/video16`. libva derives the driver name `msm` from the DRM driver on
-X1E80100, so the built module must be named `msm_drv_video.so`.
+A Rust VA-API backend for Qualcomm Iris video decoding through Linux V4L2.
+
+It currently targets Qualcomm's Iris stateful V4L2 M2M decoder on the
+Snapdragon X Elite X1E80100. libva derives the driver name `msm` from the DRM
+driver on this platform, so the loadable module must remain named
+`msm_drv_video.so`.
+
+The `qcom-vaapi` name describes the vendor/API area, not a promise of support
+for every Qualcomm decoder. Current hardware support is limited to Iris on the
+X1E80100; other Qualcomm video blocks and SoCs are not implied to work.
 
 **Current scope:** H.264 Baseline/Main/High, HEVC Main, HEVC Main10, and VP9
 Profile 0 decode to NV12 or P010 as appropriate; CPU-copy output through
 `vaCreateImage`/`vaGetImage`/`vaDeriveImage`; and a read-only DRM PRIME export
-path for ready V4L2 CAPTURE buffers. AV1 remains hidden until complete
-sequence/frame OBU synthesis is implemented. Browser-grade zero-copy still
-needs validation in a browser.
+path for ready V4L2 CAPTURE buffers. AV1 remains experimental and unadvertised
+by default until full-stream reference parity passes. Browser-grade zero-copy
+rendering is not established merely by browser playback or PRIME export.
+
+## What this project is
+
+This is a **user-space VA-API driver**: it translates the standard interface
+used by Linux video applications into commands for Qualcomm's Iris decoder. It
+is neither the decoder hardware nor the kernel driver. Apps provide compressed
+video and decode parameters; Iris returns decoded NV12 or P010 video surfaces.
+
+```mermaid
+flowchart LR
+    app["Apps: FFmpeg, mpv, GStreamer, browsers"] --> libva["libva: VA-API library and driver loader"]
+    libva --> driver["qcom-vaapi: this Rust driver"]
+    driver -->|"V4L2 ioctls on /dev/video16"| v4l2["Linux V4L2 core"]
+    v4l2 --> iris["Qualcomm Iris kernel driver"]
+    iris --> vpu["Iris video processor"]
+    vpu -->|"decoded frames"| iris
+    iris --> v4l2 --> driver --> libva --> app
+```
+
+**Upstream dependencies** are the interfaces and components this driver builds
+on: libva's driver ABI, Linux's V4L2 decoder interface, and the Iris kernel
+driver. **Downstream consumers** are applications and media libraries that use
+VA-API, including FFmpeg, mpv, GStreamer, Chromium, and Firefox. Here,
+“upstreaming” can also mean contributing code back to a project's canonical
+repository; this driver is a separate project, not a patch to libva or Linux.
+
+FFmpeg's `h264_v4l2m2m` decoder is a **sibling path**, not a dependency: it
+speaks V4L2 directly and bypasses both libva and this driver. Its output is used
+as a reference when checking that this driver's VA-API-to-V4L2 translation
+produces matching frames.
+
+## Production readiness
+
+This driver is not yet qualified for unrestricted production use. The v13
+kernel fix passed strict correctness/lifecycle checks and ordinary runtime
+power-management checks on the current boot. Sustained 4K pixel parity reached
+50.66 FPS with 468 MiB peak process RSS, below the 512 MiB budget. Chromium
+passed playback, seeking and clean shutdown. Firefox is explicitly deferred
+and unsupported for this release; AV1 remains unadvertised. System sleep,
+live module removal and permanent deployment remain unqualified. Failed
+evidence is preserved and known faulted boots remain excluded.
+See [the current continuation record](docs/production-next-cold-20261002.txt)
+and [the production review](docs/production-review.txt) for evidence and limits.
+
+Use the release gate before deployment:
+
+```sh
+V4L2_VA_SAMPLE=/path/to/sample.mp4 ./tools/verify-production.sh /tmp/libva-v4l2-production-driver
+```
+
+Supply the edge and codec fixtures documented below through their environment
+overrides. This gate requires every headless probe, full-stream GL pixel coverage,
+HEVC/Main10/VP9 parity, EOS, seek, and session churn. Missing fixtures, skipped
+probes, pipeline failures, and expected decode failures fail the gate. Browser
+playback still requires the separate browser probe in the deployment session.
+Hardware-free Rust and verifier regression checks run in GitHub Actions.
+
+These results are scoped to the tested kernel, module, browser, codecs, and
+fixtures. Firefox, active-playback suspend/resume, live module removal, and
+permanent deployment are not qualified. AV1 remains experimental and
+unadvertised pending VA-API producer integration and full-stream parity.
 
 ## Documentation
 
@@ -70,8 +138,9 @@ HEVC Main10 uses software HEVC converted to P010 because FFmpeg's
 platform. It records DRM PRIME/export probe logs under
 `/tmp/libva-v4l2-verify/`. The required H.264 matrix covers one decoded frame,
 30 decoded frames, and the full 300-frame 720p sample.
-It also keeps stricter local probes visible: the one-frame EOS file is skipped
-when native V4L2 produces no frame rows, and `bframes-240p.mp4` is reported as
+The baseline verifier also keeps stricter local probes visible: the one-frame
+EOS file is skipped when native V4L2 produces no frame rows, and
+`bframes-240p.mp4` is reported as
 an expected failure until the remaining H.264 synthesis edge is fixed. When
 GStreamer VA and OpenGL plugins are available, the script also runs
 `tools/verify-gst-export.sh`, which decodes one frame through
@@ -131,6 +200,12 @@ sudo cp /tmp/libva-v4l2-rust-driver/msm_drv_video.so /usr/lib/aarch64-linux-gnu/
 
 ## Environment variables
 
+- `V4L2_VA_STRICT=1` — make skipped probes and edge decode failures fatal in
+  `verify-rust-driver.sh`; `verify-production.sh` enables this automatically.
+- `V4L2_VA_PRODUCTION_DIR=...` — output logs for the production release gate.
+- `V4L2_VA_ONE_FRAME_SAMPLE=...` and `V4L2_VA_BFRAMES_SAMPLE=...` — edge fixtures.
+- `V4L2_VA_CODEC5_DIR=...` — HEVC/Main10/VP9 fixture directory.
+
 - `V4L2_VA_DEBUG=1` — verbose Rust driver tracing.
 - `V4L2_VA_DEVICE=/dev/video16` — override the V4L2 device node.
 - `V4L2_VA_DUMP=/tmp/frame` — dump assembled Annex-B frames as
@@ -170,102 +245,20 @@ sudo cp /tmp/libva-v4l2-rust-driver/msm_drv_video.so /usr/lib/aarch64-linux-gnu/
   codec assembly, buffer ownership, and surface bookkeeping live in Rust data
   structures.
 
-## Verification status
+## Latest qualification snapshot — 2026-10-01
 
-Validated locally on the sample at `/home/mq/tmp/vaatest/test_720p.mp4`:
+Recovery-v4 passed the required H.264 1/30/300 parity, strict GL 300/300,
+resolution churn (780 frames), long playback (3,600 frames), 30-frame HEVC,
+Main10 and VP9 parity, edge clips, churn (7/7), EOS, and 24 ordinary seeks,
+with clean observed kernel windows. It failed mixed seeks on the supplied
+transport stream. An indexed Matroska remux passed all 12 mixed seeks without
+changing the hardware checks, but that does not erase the strict-gate failure.
+Recovery-v5 is running the full strict gate with the indexed fixture; no result
+is claimed until that run completes. See [the detailed run record](docs/production-resumption-20261001.txt).
 
-- Rust unit tests pass for H.264 SPS/PPS synthesis, DRM PRIME descriptor
-  construction, surface publish behavior, export-state bookkeeping, and NV12
-  image layout/copy helpers.
-- `cargo clippy --all-targets -- -D warnings` passes for handwritten Rust; the
-  generated libva bindings are excluded from project linting because their C ABI
-  naming and bindgen transmute patterns are intentional.
-- `vainfo` loads the Rust driver and reports H.264 Baseline/Main/High, HEVC
-  Main, HEVC Main10, and VP9 Profile 0 VLD.
-- Rust VA decode matches native `h264_v4l2m2m` byte-for-byte for the 30-frame
-  framemd5 test.
-- The full 10-second sample now matches native `h264_v4l2m2m` for all 300 frames.
-- `tools/verify-rust-driver.sh` passes the required matrix locally:
-  `sample-1`, `sample-30`, and `sample-full`.
-- `tools/verify-resolution-churn.sh` decodes all 780 frames across four
-  960x640/1280x720 transitions in one FFmpeg VAAPI-copy process, with four
-  `SOURCE_CHANGE` events, no firmware faults, and a healthy post-run decoder.
-- `tools/verify-long-playback.sh` decodes a 12-segment, 3,600-frame playlist
-  without a mismatch, firmware fault, or post-run decoder failure.
-- `tools/verify-codec-expansion.sh` verifies 30 HEVC Main, 30 HEVC Main10, and
-  30 VP9 Profile 0 frames byte-for-byte. HEVC Main and VP9 compare against
-  `hevc_v4l2m2m` and `vp9_v4l2m2m`; Main10 compares against software HEVC
-  output converted to P010 because the native FFmpeg V4L2 wrapper aborts on
-  the same Main10 sample.
-- The `/home/mq/tmp/vaatest/one-frame.mp4` probe is optional: it is skipped when
-  native V4L2 produces no frame rows and remains an expected failure when the
-  Rust path cannot recover a usable frame. The stricter
-  `/home/mq/tmp/vaatest/bframes-240p.mp4` probe is kept as `framemd5_xfail`:
-  native V4L2 can produce frames, while the Rust VA path still hits decode
-  errors in that edge case.
-- mpv `--hwdec=vaapi-copy --frames=60` and GStreamer `vah264dec ! fakesink`
-  complete with the isolated Rust driver.
-- `tools/verify-session-churn.sh` passes locally: mpv mid-stream cuts,
-  GStreamer follow-up playback, SIGKILL/SIGTERM teardown probes, and full
-  framemd5 recovery decodes do not wedge the next session.
-- Initial `vaExportSurfaceHandle` support fills `VADRMPRIMESurfaceDescriptor`
-  for read-only DRM PRIME 2 NV12 export. `tools/verify-gst-export.sh` reaches
-  the callback locally through `vah264dec ! glupload`. Export bookkeeping keeps
-  driver-owned duplicate fds as Rust `OwnedFd`s and retires those fds before
-  requeueing the CAPTURE buffer on surface reuse/destroy. The local ffmpeg
-  `hwmap` probe is still blocked before it reaches the driver export callback
-  because derived DRM device creation returns `Function not implemented` in this
-  environment. The standalone C export verifier is also blocked until
-  libva/libav development headers and unversioned `.so` links are installed.
-  The former linear GStreamer hold stress exposed a pending OUTPUT/session
-  stall after seven submissions; the current hold probe uses a bounded leaky
-  tee so that importer retention is tested while decoder input continues.
-- The standalone browser probe now initializes the Rust driver from Chromium's
-  bundled libva after the driver added `__vaDriverInit_1_0`. On this machine the
-  Chromium snap still launches its GPU process with GL disabled, so playback
-  falls back before a VAAPI decode call; Chromium's in-process GPU experiment
-  crashes in the snap. Firefox reaches the page but selects its software FFmpeg
-  H.264 decoder. These are browser-launch/selection blockers, not passing
-  zero-copy validation.
-- The VAImage callbacks now live with the NV12 layout/copy helpers in
-  `rust/src/image.rs`; `lib.rs` retains only driver initialization and shared
-  state/status helpers.
-- VA buffer allocation, mapping, metadata, and handle callbacks now live in
-  `rust/src/buffer.rs`; the shared entrypoint module no longer owns those
-  storage details.
-- H.264 `vaBeginPicture`/`vaRenderPicture`/`vaEndPicture` callbacks now live in
-  `rust/src/decode.rs`, leaving the entrypoint module focused on driver-wide
-  lifecycle while `rust/src/vtable.rs` owns callback installation.
-- Surface attribute negotiation, allocation, status, destruction, and CAPTURE
-  retirement now live in `rust/src/surface.rs`, with focused tests for NV12 and
-  VA/DRM-PRIME memory types.
-- Profile/configuration negotiation and the precise empty display/subpicture
-  capability responses now live in `rust/src/config.rs`; the callback groups
-  are independent of the small driver entrypoint.
-- Decode-context creation and teardown now live in `rust/src/context.rs`,
-  leaving picture submission in `rust/src/decode.rs` and keeping context
-  lifecycle out of the entrypoint.
-- Surface synchronization and timeout diagnostics now live in
-  `rust/src/sync.rs`; `rust/src/vtable.rs` connects those callbacks to libva.
-- `vaExportSurfaceHandle` validation and descriptor publication now live beside
-  the export bookkeeping in `rust/src/surface_export.rs`; the export module
-  owns its lifetime and descriptor rules.
-- Vtable installation now lives in `rust/src/vtable.rs`; all unsupported core
-  and VPP callbacks use exact C signatures instead of an incompatible generic
-  function-pointer stub. `lib.rs` is now 84 lines and retains only driver
-  initialization, state lookup, and shared status helpers.
-
-## Remaining work
-
-- Keep end-of-stream drain covered by full-file framemd5 regression tests.
-- Fix the 240p High-profile B-frame compatibility probe.
-- Complete exported dmabuf lifetime/importer validation before relying on
-  zero-copy in browsers.
-- Test Chromium and Firefox with a working hardware-decode launch path, then
-  implement the callbacks and surface-import behavior they require.
-- Extend mixed-resolution stress beyond four transitions once native Iris
-  firmware handles the same workload reliably.
-- Keep splitting the Rust driver into smaller modules around VA entrypoints,
-  sync/publish logic, export handling, codec handling, V4L2 backend, and DRM
-  interop.
-- Add AV1 sequence/frame OBU synthesis before advertising that profile.
+Still pending after the strict gate: sustained 4K and browser performance checks
+on the deployment session, persistent kernel deployment, and AV1 producer-data
+support plus broad full-stream parity. The supplied one-frame and B-frame edge
+fixtures passed in recovery-v4; broader small-stream reliability and the
+historical firmware failures remain under investigation. Historical probes are
+tied to their recorded binaries and do not qualify the current release.

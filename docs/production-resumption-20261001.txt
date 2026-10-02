@@ -1,0 +1,278 @@
+Production resumption — 2026-10-01
+
+User confirmed there are no other active editors/hardware owners. No subagents,
+commits or persistent driver installation were performed by this agent.
+The user later ran the reviewed privileged activation wrapper; see incident below.
+
+Current environment: physical decoder and DRM nodes available; kernel
+7.3.0-15-qcom-x1e; boot c5ace5e4-12f0-4e9f-a222-639256685bf8. Original loaded Iris
+build ID d32b38c1a71add26795cf6719c71268188da8a6b. Earlier absent-device reports
+and stale Active-task owners are historical, preserved under Previous handoffs.
+
+Fresh actual production attempt
+-------------------------------
+Packet: ~/.cache/libva-v4l2-qualification/resume-20261001/packet.hxix0_32
+Run: packet.hxix0_32/production.oeTqVg
+Driver SHA256: 5f79f6e4e7e430f162658746f3f349520af3b50f0af2ed44d8a344340f1eab98
+Matches latest previous integrated binary; source and harness frozen anew.
+PASS: fmt, strict Clippy, Python115, Rust219 and isolated/stress223.
+PASS: native-backed CPU1/30/300; export; ordered full GL300, missing0/tolerance0;
+resolution780 across four source changes and closing sanity, clean stage window.
+FAIL: rust-driver gate rc141 before long playlist decode. Its before.md5 is one
+frame. Outer kernel observer records two actual UBSAN index32 reads in
+iris_buffer.c:869 and870 (iris_ts_metadata[32]). No session/system fatal, power
+cycle or vb2 warning in that outer window. All later stages are UNRUN.
+Hardware STOP after this memory-safety fault; do not retry the defective module.
+Actual original failure artifacts and frozen packets remain unchanged.
+
+Implemented follow-up
+---------------------
+- Shared tools/hardware-session.sh checks all seven complete kernel counters
+  after each native/VA matrix session, each GL reference/pipeline session,
+  codec reference/driver leg, resolution/long sanity, and seek sanity/phase.
+  Faults or incomplete observation terminate the parent verifier even when its
+  command is called optionally or with errexit disabled, before another open.
+- Long ffprobe/awk counts consume all producer output. Repeated identical
+  program counts agree; conflicting counts cannot certify the playlist.
+  A100000line producer control reproduces oldSIGPIPE141/new0. An actual
+  software ffprobe replay of the saved playlist reports3600 with status0
+  for BOTH variants: the original failure is intermittent, and its exact
+  origin is not independently established by that replay. Originalrc141
+  remains failed. Logs: frame-count-{stress-control,regression}.log.
+- Production provenance pins boot ID, loaded Iris srcversion and build-ID note
+  hash, not only uname. Supplied resolution fixture overrides are now hashed.
+  A reboot or module reload with unchanged release invalidates earlier evidence.
+- Generated mixed-seek low segment uses SPS/PPS ID1, distinct from provided
+  baseline720p ID0. Actual trace_headers confirms ID1 and all90frames; software
+  mpv performs seeks1.95/11.05/5.2 with forward positions and no parser errors.
+  This fresh software control also reports zero errors for the freshly generated
+  colliding-ID stream; it does not independently reproduce or close the older
+  archived37error reproduction. Hardware mixed seeks remain UNRUN here.
+- tools/activate-iris-candidate.py provides check-only, temporary activation and
+  explicit rollback with shared lease, pinned candidate bytes, exact SHA256,
+  fullvermagic/importedCRC validation, loaded build-ID proof, no forced unload,
+  and original-module restore after failed insertion/identity verification.
+  Root opens an existing user-owned /tmp lease without O_CREAT/O_TRUNC;
+  symlink leases are rejected. Installed module files remain unchanged.
+
+Kernel fix preparation
+----------------------
+Existing authenticated matching distro source retained under
+~/.cache/libva-v4l2-qualification/kernel/review-20261001/.
+Actual-function metadata verifier re-reproduces baseline index32 with UBSAN;
+patched4096inputs plus reordered history/flags/staleindices pass. PSC candidate
+also passes isolated256baseline/256patched cases; it remains unactivated and
+is not assumed to cure real firmware faults.
+Historical bounds-only candidate initially proposed for the memory defect:
+SHA2569a68f9b5ba9a1e5ff1023dd8091af58a5ba316ec48917b800e524574476ada9a
+BuildIDc034f2232b2e6cf509c1eec1e9762e00edaf7ef4.
+Pre-incident check-only verified all151imported symbol CRCs and loaded original ID.
+Evidence: resume-20261001/kernel-activation-preflight-v2.json.
+Interactive sudo is required (sudo -n rejected authentication). User was asked
+with exact reviewed activation command. The user subsequently executed the
+wrapper; removal of the original module deadlocked before candidate insertion.
+
+Host validation and continuation
+--------------------------------
+Complete tooling run130tests PASS: resume-20261001/final-host-tooling.log.
+After lease-open hardening, all12activation regressions PASS (3additional).
+Shell syntax and git diff --check PASS; new release packet rebuilds the SAME
+Rust binary. No Rust implementation changes in this resumption.
+Fresh final-v2 immutable packet: final-v2/packet.1dhmu2kk. It contains all
+harness changes through lease hardening, but predates module-transition and
+known-deadlocking-build guards; old
+final/packet.rbplqh5n predates lease hardening and is preserved, not relabeled.
+Incident and recovery (17:25–17:38 local)
+----------------------------------------
+The user ran activate-reviewed.sh with sudo. Its evidence filename is
+kernel-activate.json (not the earlier proposed kernel-activation.json).
+No successful activation evidence exists. The original module remains Unloading
+with refcount -1; the bounds candidate was NEVER inserted. Installed files
+remain unchanged. Do not rerun activation, rollback or decoder qualification.
+
+Kernel at17:27:27 proves a teardown deadlock: the Iris IRQ thread waits for the
+core mutex, likely owned by modprobe38044. That task waits in synchronize_irq
+through disable_irq/iris_vpu_power_off/iris_core_deinit/iris_remove. Source
+confirms core_deinit holds the core mutex across synchronous IRQ disable.
+The helper's subprocess timeout cannot recover an uninterruptible kernel wait.
+Idle module refcounts did not establish safe teardown. Live unload is now
+explicitly refused for both the original and bounds-only builds that share this
+path. A reviewed teardown repair and a boot-based activation procedure are
+needed before runtime qualification can proceed; neither is validated yet.
+
+At17:27:32 GNOME Shell4760 separately aborted on Mesa Freedreno assertion
+state->view_rsc_seqno[i] == seqno, fd6_texture.cc:782. Coredump logs confirm
+signal6/ABRT; systemd reports org.gnome.Shell@user.service dumped core. GDM
+returned to the greeter at17:27:34; the user logged back in. Mesa installed
+26.2.2-1ubuntu1, GNOME51beta. The causal link between Iris removal and this
+GPU assertion is UNPROVEN. No GDM restart or logout command was issued here.
+Evidence: tmp/incident-20261001/{desktop-crash.log,iris-unload-deadlock.log,
+module-state.txt}. Hardware checks now reject Loading/Unloading before opens.
+Save work and perform a normal reboot to recover the stuck original module.
+A reboot alone does not repair the original metadata bounds fault.
+
+After safe boot activation and identity proof, freeze a fresh packet and run
+one strict gate. On clean pass, run tools/run-real-use-qualification.py with
+that packet and gate results for4K512MiB/30FPS/sustained60s and browser evidence.
+If a clean gate fails, fix the concrete cause, freeze a new packet, retain the
+failed outcome; do not waive counts, parity, seeks, budgets or kernel checks.
+
+Production remains UNQUALIFIED. Churn/EOS/mixed seeks, sustained4K and browsers
+need actual latest-runtime qualification. Persistent kernel deployment is also
+pending. AV1 stays disabled pending authoritative producer metadata and broad
+full-stream parity; the driver-only inference path cannot supply missing data.
+
+Post-incident host checks
+-------------------------
+Known teardown-build unload guard: all13activation regressions PASS.
+Full tooling suite:136tests,135PASS and1FAIL. The seek IPC bind control is
+blocked by this session sandbox: AF_UNIX socket.bind returns EPERM. No skip
+or relaxed test was introduced. Log: /tmp/libva-v4l2-host-tests-20261001.log.
+Shell syntax and git diff --check PASS. No further hardware session opened.
+
+Latest recovery preparation (after the incident)
+------------------------------------------------
+The current boot still has live activation Python38033 and uninterruptible
+modprobe38044; Iris IRQ712 is also blocked. The subprocess timeout sent a kill
+but cannot finish that kernel syscall. No candidate has been inserted. New
+tooling does not modify or recover those already-running processes.
+Full journal evidence is retained in resume-20261001/activation-unload-kernel.log.
+
+Added kernel/0003-iris-quiesce-irq-before-remove.patch for the proven removal
+lock cycle. IRQ synchronization occurs outside the core mutex with an extra
+runtime-PM reference, then pending system-error work is canceled before core
+teardown. Synchronization is retained. The actual-function pthread/UBSAN model
+reproduces the original deadlock; patched active/cold/PM-failure/null cases pass.
+This does not test real PM callbacks, firmware, or open-handle unbind. General
+power-off lock ordering remains unresolved and must not be declared fixed.
+
+Bounds-plus-removal candidate (patches0001+0003, excluding PSC0002):
+SHA256 b333a5b676942ccc816d8011d868e0dc850a666bb6522fb3ea601426c04a29bc
+Build ID de5d3d265214e6c64edddf31a4040983abc46288
+srcversion 8057268C3554915BE16E951
+Build against exact 7.3.0-15-qcom-x1e headers with aarch64-linux-gnu-gcc-15 PASS.
+ABI review checks all152imports;151match original imports and the added
+cancel_delayed_work_sync matches the complete matching-kernel Module.symvers.
+All proposed imports present in that table must agree, including shared ones.
+Evidence: kernel-remove-abi-v4.json, recovery-{metadata,remove}-model.log,
+kernel-remove-build.log. Candidate has NEVER been loaded or runtime qualified.
+
+Activation helper now journals each phase before mutation and records failures.
+Only status=pass/phase=complete with loaded ID proves completed activation.
+If killing a timed-out command cannot reap it within2s, the helper records
+status=unresolved with PID and returns; it never starts a competing rollback.
+Cold insertion supports absent Iris, with --require-absent enforcing that state
+again immediately before insertion. --exclude-boot-id rejects the faulted boot.
+Known deadlocking original/bounds-only modules are never live-unloaded.
+Cold insertion loads declared dependencies under the same lease, then rechecks
+absence before insmod; dependency failure does not insert or restore original.
+Decoder guards reject Loading/Unloading before commands. GL test fixtures now
+mock kernel observation and module state so they do not depend on the real host.
+
+Latest unified tooling suite147/147PASS, including24activation regressions.
+Log: recovery-v4-host-tests.log. This supersedes the earlier host suite's
+environmental AF_UNIX failure without any skip or test relaxation. No Rust
+implementation changes in this resumption. Source models and release build PASS.
+
+Latest immutable packet: recovery-v4/packet.cuishazj. Source/harness/binary
+identity verification PASS, same Rust driver5f79f6...eab98. It includes all
+current guard/journal/kernel patches and copied reviewed module artifacts with
+their SHA manifest. Hardware gate/lifecycle/real-use results for this packet
+remain UNRUN. Older packets/results remain preserved with their original status.
+
+Cold-boot recovery instructions: docs/production-cold-boot-20261001.txt.
+Prepared wrapper: resume-20261001/activate-cold-reviewed.sh. It verifies packet
+and module artifacts, refuses the faulted boot or any loaded Iris before sudo,
+and writes fresh preflight/activation evidence. It changes no installed modules
+or boot configuration. A normal reboot is required to recover this deadlock;
+one-boot modprobe.blacklist=qcom_iris prevents alias-based automatic loading so
+the candidate can be inserted without unloading the faulty original. If Iris
+still loads, the wrapper refuses and the boot setup needs review; do not unload.
+No reboot or system boot/module configuration change has been performed here.
+
+Production remains UNQUALIFIED pending this recovery and all real hardware gates.
+
+Post-reboot audit (2026-10-01, after user restart)
+------------------------------------------------
+Boot4b7653c6-f7d0-484f-b86c-d973cab0e0cf, same7.3.0-15-qcom-x1e.
+Original Iris buildIDd32b38c1a71add26795cf6719c71268188da8a6b is Live/refcnt0.
+Old unload deadlock cleared. No module blacklist on kernel command line.
+The prepared cold wrapper verifies immutable packet and artifacts PASS, then
+refuses cold_boot_requires_iris_absent before sudo or module changes. Hardware
+qualification remains stopped on the original bounds-defective runtime. Need
+one-boot modprobe.blacklist=qcom_iris and reviewed cold insertion. No hardware
+probe, system configuration change, or live unload performed in this audit.
+
+Successful activation and first patched-runtime gate
+----------------------------------------------------
+User cold insertion PASS: cold-boot.aBPa3b/activation.json, statuspass and
+phasecomplete. Actual boot4492e975-80dc-4be5-97cd-6de4431d6b5e, buildID
+de5d3d265214e6c64edddf31a4040983abc46288 and srcversion match. Candidate and
+installed module hashes independently verified; installed module unchanged.
+
+Recovery-v4 packet.cuishazj/production.nwCTqs FAILED mixed seeks. PASS: native
+CPU1/30/300, strictGL300, resolution780, long3600, HEVC/Main10/VP9 30each,
+one-frame/Bframes, churn7/7, EOS full300/cut45/post300, and24ordinary seeks.
+All complete hardware windows clean. Mixed TS loses hardware after2seeks.
+Detailed trace shows missingPPS0/mmco errors before VA errors and an unexpected
+empty CAPTURE; FIFO/reference recovery correctly fails closed. The SAME TS
+reproduces missingPPS0/mmco errors in SOFTWARE mpv at1.95/11.05/5.2. Do not
+relax the hardware-property/progress checks or recovery guards.
+
+Indexed Matroska remux of the same video removes software parser errors; the
+unchanged hardware controller passes all12mixed seeks, clean kernel. Direct
+concat to Matroska also has zero software seek parser errors. Decoded390frames
+(90low960x640 +300high1280x720) and ordered software pixel hashes match TS
+exactly. Evidence: cold-boot.aBPa3b/seek-trace/ and seek-mkv-trace/.
+Harness now generates mixed.mkv and retains mpv player logs. No Rust changes,
+no reduced seek counts or relaxed validation. Earlier failure remains failed.
+
+Fresh recovery-v5/packet.j8fpi63u rebuilds identical VA SHA5f79f6...eab98.
+Copied reviewed kernel artifacts and successful activation record retained.
+Full strict gate running anew; real-use qualification awaits its clean pass.
+
+Strict headless completion and real-use failures
+------------------------------------------------
+Recovery-v5/packet.j8fpi63u/production.ko9Muo PASS all required CPU/GL,
+resolution, long, codecs, small-stream, churn, EOS and24+12seek gates.
+Every complete kernel observation clean. Identity/binary/module match.
+
+Real-use run.wnlwtp_t FAIL, preserved under qualification/real-use/:
+H2644K calibration300frames byteexact native,21.61FPS and867236KiBRSS
+fail30FPS/524288KiB budgets. Sustained run intentionally NOT RUN after
+failed calibration. Chromium wrong seek(7.5 requested,0.000352 reached),
+137drops/469total and13.28presentedFPS; Firefox software fallback and
+15drops/743total. Firefox monitor signal cleanup denied by AppArmor, no
+measurement/complete kernel summary; failed observation remains failed.
+Independent journal inspection found no kernel fault, and private Firefox
+test PID no longer exists. Never disable sandbox/policy to conceal failure.
+
+Monitor now records permission-denied signal details/unresolved test PIDs
+and returns within bounded cleanup, including interruption evidence.
+Targeted playback/monitor tests19PASS. This harness change invalidates
+old packet identity for new tests; retain old gate as its original pass.
+Further resource/throughput/browser investigation underway. Production
+remains UNQUALIFIED; no persistent system driver/module installation.
+
+2026-10-02 continuation
+----------------------
+Reduced allocation v6 FAILED native-full after VA1/30pass, five session-fatal
+firmware errors. Hardware STOP on boot4492e975. Original v5 allocation restored;
+unqualified experiment preserved. Decode-order candidate v7 built/ABI/source
+model PASS,220Rust+148tooling tests PASS, hardware UNRUN. New cold runner and
+rollback details: docs/production-next-cold-20261002.txt. No persistent changes.
+
+Latest actual 2026-10-02 recovery
+-------------------------------
+V7 cold activation PASS boot311d78af; fullgateproduction.b1URqY PASS, real-use
+FAILmemory/browser. V8 OUT4 independently fullgateproduction.u25Ko0 PASS and
+Chromium strictPASS after actual HTTP Range repair.4K803260KiBRSS FAIL512MiB.
+Firefox6/764drops and correctseek/hardware buttimeout; a remaining background
+privacy tab is proved by private sessionstore and the installed Firefox policy
+source. User closed it. V9 CAP8/growth fullgateproduction.jl3QBF FAIL:5session
+fatal at00:39:22 inVA30, no other kernel counters; STOP, reverted allocation.
+V10 retainsCAP32/OUT4 and maps capture on demand, no claim of lower reserved
+kernel memory.222Rust/149tooling,Clippy/fmt/build/identities PASS;hardwareUNRUN.
+Same cold runner updated, excludes all faulted boots; guard refusal PASS before
+sudo. Full current identities, operator step and rollback are in
+docs/production-next-cold-20261002.txt. Production still UNQUALIFIED.

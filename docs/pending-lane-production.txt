@@ -1,0 +1,105 @@
+Final production orchestration lane — 2026-10-01
+
+Status: PREPARATION COMPLETE; final current-code hardware gate remains pending.
+No Rust/driver or shared verifier edits were made in this lane. Root is the
+central physical hardware executor; this existing child retains a masked
+sandbox. Child masking is not an objective-wide hardware blocker.
+
+Current chronology and exact identity
+------------------------------------
+Preserved baseline /tmp/libva-host-gl-check.5HPJnr/driver/msm_drv_video.so:
+SHA256 fc08226fcc18c257f52d2159ad8ebb5ed57f2a580dbf23640f9340b60ffa6e10.
+Baseline source /tmp/libva-gl-last-source-z88fqfmg remains unchanged.
+Previous genuine e1tXqa fullgate passed CPU1/30/300, GL300, resolution780,
+long3600, HEVC/Main10/VP9 but failed native one-frame EOS; independent jezSwc
+churn7/7 and normal EOS passed, seek failed. Those are baseline-only results.
+
+Newer /home/mq/.cache/libva-v4l2-qualification/production.QhPEpj was inspected
+read-only while active. Its top-level log passed 208 Rust/stress tests and
+75 Python tests, checked provenance and bound the SAME fc082 baseline binary.
+Its results/rust-driver.log reached strict GL300/300, missing=0 tolerated=0.
+At inspection it had no terminal production result, so it is not a gate pass.
+Root subsequently asked the external stalled qualification owner to stop it.
+An aborted/stopped old-binary run must not be attributed to new-code failure.
+Disk capacity: /home/mq/.cache on persistent filesystem with about548GiB free;
+/tmp is a tmpfs with about4.6GiB free at inspection. Final artifacts/builds and
+TMPDIR must use disk storage to avoid the earlier quota failure.
+
+Prepared final capture tool
+---------------------------
+/tmp/stage-final-qualification-20261001.py
+Root command, only AFTER external seek/EOS owner declares source stable:
+python3 /tmp/stage-final-qualification-20261001.py \
+  --root /home/mq/oss/libva-v4l2 \
+  --output-root /home/mq/.cache/libva-v4l2-qualification/final
+
+The tool fingerprints Rust, tools and kernel files before and after capture,
+rejects concurrent source changes, builds the frozen snapshot once with
+--locked --release, records a new identity and produces run-gate.sh plus an
+independent run-lifecycle.sh. Each runner creates a fresh results directory,
+uses packet-local disk TMPDIR/CARGO_TARGET_DIR and preserves all logs.
+Only the isolated harness builder is replaced by hash-verified staging of
+that packet's new binary; nested verification cannot rebuild a different
+binary. No required probe, strict count, fixture or kernel condition is changed.
+run-gate.sh keeps the existing strict production order and lock ownership.
+run-lifecycle.sh independently serializes churn/EOS/seek with kernel windows,
+stops on failure/fault and NEVER overrides a failed production release gate.
+The new build is pending qualification; old GL evidence is not inherited.
+
+Smoke verification actually completed
+-------------------------------------
+Prepared a packet against the immutable old frozen source, rather than the
+actively edited workspace, under /tmp/libva-final-packet-smoke/packet.9lrvkvc2.
+Release build succeeded; reproduced EXACT baseline fc082 binary SHA256.
+Python compile/help, generated shell syntax, full source/harness/driver identity
+and hash-verified staging all passed. Deliberately modified packet binary was
+rejected by verify-identity.py, then restored and rechecked successfully.
+No smoke hardware gate or repeated full host suite was run. The smoke packet
+is not the final new-code release candidate.
+
+Next execution prerequisites
+----------------------------
+1. External seek/EOS code and relevant verifier ownership finished/stable.
+2. No live previous qualification or decoding process; shared hardware lease
+   available. Do not steal the lease or blindly repeat a stalled fullgate.
+3. Root captures the final current source with the prepared tool and records
+   the exact resulting binary identity.
+4. Root runs the emitted run-gate.sh; unrun stages remain pending on failure.
+   If scoped independent lifecycle evidence is needed after a clean failure,
+   root may execute run-lifecycle.sh while retaining the failed gate outcome.
+5. Review real logs before reporting pass; pass requires no skipped probes,
+   complete media parity and clean observed kernel windows. Browser, 4K,
+   patched-kernel boot and disabled AV1 are separate release lanes.
+
+Repository staging tool follow-up
+--------------------------------
+The temporary helper above is superseded by the reproducible repository tool:
+tools/stage-production-qualification.py
+Run only after all source owners finish:
+python3 tools/stage-production-qualification.py \
+  --output-root /home/mq/.cache/libva-v4l2-qualification/final
+
+Captured Python scripts are compiled and each captured shell script is syntax
+checked before the release build. Invalid source capture reports the exact
+captured file and does not attempt to build. Every generated shell script is
+validated separately, instead of passing several scripts as bash arguments.
+Identity checks compare complete source/harness file membership and content,
+rejecting additions and deletions as well as changed files; generated Python
+cache remains excluded. Binary staging verifies both the stored binary and
+the copied staged file against the frozen build hash before atomic replacement.
+The generated independent lifecycle runner uses the same complete seven-counter
+kernel evidence checker as the production gate; partial summaries cannot pass.
+
+Actual validation: seven new regression tests pass. They exercise one build
+with repeat immutable staging, added/deleted/modified source and harness files,
+changed-driver rejection, independent live workspace edits, ignored generated
+Python cache, captured Python/shell syntax failures before build, and lifecycle
+fail-stop on incomplete kernel observation. All generated script syntax checks
+are exercised individually. Full host tooling suite: 115 tests pass; log:
+/tmp/libva-stage-qualification-tests-20261001.log
+Final focused rerun after staged-copy hash hardening: seven pass; log:
+/tmp/libva-stage-qualification-focused-20261001.log
+Python compile, CLI help and git diff --check pass.
+No new final packet or hardware qualification was launched in this follow-up.
+Root/external hardware access is available; source-owner stability and current
+serialized hardware run completion are the pending execution prerequisites.

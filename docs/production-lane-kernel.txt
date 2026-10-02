@@ -1,0 +1,80 @@
+Kernel / Iris firmware production lane — 2026-10-01
+
+Status: host work complete; kernel boot and firmware qualification BLOCKED.
+No kernel was installed, patched in-place, rebuilt, or rebooted. No hardware
+sessions or privileged logging changes were performed in this lane.
+
+Environment
+- Running kernel: 7.3.0-15-qcom-x1e, aarch64.
+- /usr/src contains headers. Read-only follow-up found a full-looking Linux
+  checkout at /home/mq/oss/linux (core source/build directories and Iris files).
+  HEAD d8a9a4b11a137909e306e50346148fc5c3b63f9d describes as
+  v7.0-rc6-187-gd8a9a4b11a13; Makefile reports 7.0.0-rc6. Its ARM64/QCOM
+  config enables VIDEO_QCOM_IRIS=m and disables UBSAN. Generated kernel.release
+  is stale: 6.18.0-12865-g0048fbb4011e. No vmlinux exists. These disagree with
+  running 7.3.0-15-qcom-x1e, so this is usable source, not a proven deployment
+  source/config/build. No outside-repository source was modified.
+- /dev/video16 and /dev/dri/renderD128 are absent.
+- The existing function-source fixture /tmp/iris-kernel-reproducer was usable
+  for isolated sanitizer tests. It is not a deployment kernel source/build.
+
+Completed
+- Kept kernel/0001-iris-wrap-timestamp-metadata-index.patch unchanged: the
+  candidate fix wraps the next metadata write index immediately after advance.
+  It prevents the unmatched CAPTURE timestamp fallback from reading index 32.
+- Strengthened tools/verify-iris-metadata.py against actual fixture functions:
+  original code still reproduces the index-32 UBSAN failure; patched code passes
+  4,096 submissions, every retained timestamp in reverse completion order,
+  matching/missing timestamps across wraps, unrelated flags preservation,
+  timestamp flag masks, existing fallback semantics, and stale initial writer
+  indices 32/33/UINT32_MAX. The original source tree remains untouched.
+- The privileged dynamic-debug diagnostic now checks tools, readable source
+  fixtures/driver, and device nodes before enabling logging. Reference counting
+  and hardware commands have time bounds. Each leg requires independently
+  counted complete output, capped at 30 frames. The 720p VA driver output must
+  match native NV12 pixel checksums and display order.
+- Added tools/check-iris-probe-output.py to reject header-only, short, extra,
+  malformed/empty frames, wrong pixels/order, and incomplete native references.
+- Added V4L2_VA_IRIS_SMALL_DECODER=native for a separate cold/recovered-device
+  native small-stream comparison. Default is driver. Stop after any first
+  failure; never run repeated opens into a crashing firmware session.
+- kernel/README.md now provides concrete bounded probe commands, fixture
+  overrides and deployment evidence requirements.
+
+Validation
+- python3 tools/verify-iris-metadata.py /tmp/iris-kernel-reproducer: PASS;
+  baseline fault reproduced, all patched sanitizer cases passed.
+  Evidence: /tmp/libva-kernel-lane-ubsan.log
+- Same isolated verifier against /home/mq/oss/linux: PASS; candidate patch
+  applies in the temporary copy, baseline reproduces index 32, expanded patched
+  tests pass. Evidence: /tmp/libva-kernel-lane-real-tree-ubsan.log. Iris common
+  and buffer files have no tracked changes; source functions are real upstream
+  checkout functions, not just the earlier two-file fixture.
+- python3 -m unittest discover -s tools/tests -p test_iris_probe.py: 6/6 PASS.
+- bash -n tools/capture-iris-dynamic-debug.sh: PASS.
+- Python compile checks and git diff --check: PASS.
+- Unprivileged diagnostic preflight: correctly returns 77 with
+  requires_sudo_from_decoder_user; did not create probe artifacts or enable
+  kernel logging. Privileged end-to-end restoration remains untested here.
+
+Remaining deployment work
+1. Obtain the matching distro kernel source and apply/check this exact patch.
+2. Build and boot it through the deployment kernel workflow. Record source,
+   patch and kernel/module build IDs, boot ID, running release, firmware
+   artifact hashes and firmware version/loading evidence. A matching uname
+   release or firmware file hash does not prove those bytes are running.
+3. Run the production matrix/churn and full repeated 4K parity with clean
+   kernel windows on that same boot and driver binary.
+4. Run bounded small-stream native/driver dynamic-debug comparisons in
+   separate recovered-device sessions. Resolve the underlying firmware/HFI
+   failure; a host sanitizer pass does not close the small-stream blocker.
+5. Investigate whether next-slot timestamp fallback is semantically correct
+   for unmatched timestamps. This bounds patch preserves existing behavior.
+
+Source fixture hashes
+iris_common.c: b3a29dfdda4a925074657af6097a5444d851f168dd197b16f26060956fdcfb1d
+iris_buffer.c: 800862e3d6ef4ec444df0f0393a45c74eacf5e15a14661de5e3521a31acf3815
+
+Read-only real Linux checkout function-source hashes
+iris_common.c: 351acd7c549a3699aa5365259cc56ea64d600878dcbf784cd6616201fc9e838b
+iris_buffer.c: b88bd70a032b9cd342f0931d142589f925ed43ce0f48234c8a2a75ff501efb99

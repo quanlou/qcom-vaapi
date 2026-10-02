@@ -1,0 +1,165 @@
+Small-stream production lane — 2026-10-01
+
+Scope and fixture
+
+No Rust recovery/seek or kernel changes. Root owns serialized hardware execution;
+this lane owns the prepared diagnostic and fixture/reference analysis.
+Input: /home/mq/tmp/vaatest/bframes-240p.mp4
+SHA256: 2a4472a9a2a4d3e7e2ecaee481e61132e7ae219a342630dc3bff4dec8409b275
+Independent software decode succeeds for all 150 frames, NV12 framemd5 stored
+at tmp/smallstreams/software.md5. ffprobe reports H.264 High, 8-bit 4:2:0,
+320x240, 30 fps, level 1.3, 4 reference pictures, reorder depth 2.
+Frame census: 1 I, 52 P, 97 B. Exactly one initial keyframe/IDR, so this is a
+150-access-unit GOP, already beyond the historical 64-unit recovery limit.
+
+Original compressed header evidence
+
+FFmpeg trace_headers over the original compressed packets records:
+profile_idc=100, level_idc=13, chroma_format_idc=1;
+log2_max_frame_num_minus4=0, pic_order_cnt_type=0, max_num_ref_frames=4;
+pic_width_in_mbs_minus1=19, pic_height_in_map_units_minus1=14;
+frame_mbs_only_flag=1, frame_cropping_flag=0;
+CABAC=1, default L0 minus1=2, default L1 minus1=0;
+weighted_pred=1, weighted_bipred_idc=2, scaling matrix present=0.
+P/B slice headers use explicit reference-count overrides. These are ordinary
+progressive 4:2:0 H.264 features already supported by the driver's High path.
+The current dimension-based inferred SPS level is also 1.3 (300 MB/frame), so
+an inferred-level mismatch is not established for this fixture. Four retained
+reference pictures need 1,200 MB of DPB and 30 fps needs 9,000 MB/s; neither
+requires raising the original level. This is not proof that synthesized SPS/PPS
+are byte-equivalent: authoritative comparison needs a compressed submission
+dump from the exact failing binary. Header evidence: tmp/smallstreams/headers.log.
+
+Firmware/source contract
+
+The local Iris gen2 source declares 96x96 minima in platform_inst_cap_sm8550;
+320x240 is above those advertised limits. That checkout is not proved identical
+to the deployment kernel and cannot explain a deployment failure by itself.
+iris_hfi_gen2_response.c classifies 0x04000003 as HFI_ERROR_FATAL, separately
+from HFI_ERROR_STREAM_UNSUPPORTED, and marks both queues/session erroneous.
+A fatal session event supplies no offending command/property in that report.
+Therefore a fatal log alone cannot establish unsupported B-frames, an SPS error,
+or a particular HFI buffer-allocation defect. Historical native failures also
+prevent claiming the VA translator is uniquely responsible, but history does
+not replace a fresh exact-binary reproduction.
+
+Prepared one-shot probe
+
+Executable: tmp/smallstreams/probe.sh DRIVER_DIR NEW_RESULTS_DIR [native|driver]
+Default mode native. The script acquires /tmp/libva-v4l2-hardware.lock itself;
+do not wrap it in another flock of that same lock. It validates fresh software
+references (150 small / 30 baseline), records binary/fixture hashes, boot ID and
+kernel, then runs native 720p and VA 720p pixel-parity sanity checkpoints before
+one full-150-frame selected small-stream leg. Each hardware leg uses timeout
+40 s plus 3 s kill grace and its own journal window. No retries or post-fault
+decoder opens; decode error, kernel fault, missing pixels or wrong pixels stop
+immediately. A native failure prevents a subsequent VA open. Run driver mode
+only if root establishes the native package passed and the device remains clean.
+Driver internals retain their existing bounded recovery policy; this harness
+adds no recovery loop and does not modify release requirements.
+
+Host validation: bash -n tmp/smallstreams/probe.sh passed;
+check-iris-probe-output.py software.md5 --expected 150 passed.
+Hardware evidence is pending root execution. No production compatibility fix
+is justified yet, and no native/VA small-stream hardware pass is claimed.
+
+Fresh hardware result (root executed, exact baseline binary)
+
+Results: /home/mq/.cache/libva-v4l2-qualification/smallstream-20261001-root-1
+Binary SHA256: fc08226fcc18c257f52d2159ad8ebb5ed57f2a580dbf23640f9340b60ffa6e10
+Kernel: 7.3.0-15-qcom-x1e (#15-Ubuntu, aarch64)
+Boot ID: a7a9d742-2485-4bcd-9119-cf49746e225c
+Native720 and VA720 sanity checkpoints both pass 30/30 software pixel parity.
+All three journal windows report zero session-fatal, system-fatal, power-cycle,
+vb2-warning, other-session, other-system, and kernel-bug counters.
+
+Native-small FAILS: FFmpeg process exits zero, but logs capture: driver decode
+error, corrupt decoded frame, then Decoder returned EOF. It reads only eleven
+input packets and emits ONE frame instead of 150. That sole checksum is
+4b992e1f8388fb308ce652623c570ace, exactly the MD5 of 115,200 zero bytes
+(320*240*3/2), whereas the software first frame is
+9f5ecb2f7a0d23a1440938d45c7fef65. Count and pixels both fail. The strict harness
+correctly exits failure despite the successful FFmpeg process exit.
+
+This directly establishes native failure on the original compressed stream,
+without synthesized VA SPS/PPS, after healthy 720p baselines. It does not prove
+a firmware fatal: no 0x4000003/0x5000003 event appeared in this fresh window.
+The earlier historical HFI fatal signature must not be assigned to this run.
+An all-zero corrupted completion followed by premature EOF narrows the current
+problem to native decode/completion/error handling below VA translation, but
+identifying the offending kernel/HFI command needs an exact running-kernel
+source match and detailed trace. Do not claim a dimension ban or firmware fix.
+
+VA-small was deliberately not opened after this failure. It remains pending
+root scheduling after other clean checkpoints; no retries or post-failure
+hardware opens were performed by this lane. Root's active external owner also
+has a resolution-restart stall on changing source, so final binary qualification
+cannot inherit this older binary's baseline results.
+
+Lane deliverables are complete: reproducible bounded probe, software frame/header
+proof, fresh native failure evidence, and a specific contract-level blocker.
+Small-stream production compatibility remains failed; no unsupported speculative
+Rust, kernel, firmware or fixture workaround was introduced.
+
+Local FFmpeg source corroboration: libavcodec/v4l2_buffers.c:468-470 prints
+"capture: driver decode error" when the dequeued CAPTURE has V4L2_BUF_FLAG_ERROR,
+then sets FF_DECODE_ERROR_INVALID_BITSTREAM and returns success. This explains
+why the frame can be emitted and process status can remain zero. Source/binary
+identity is not proved here; the fresh observed output already independently
+establishes the bad frame and premature EOF.
+
+Distinct VA-small diagnostic (root executed, subsequent HARDWARE STOP)
+
+Results: /home/mq/.cache/libva-v4l2-qualification/smallstream-va-20261001-root-1
+Same fc08226...a6e10 binary and fixture hashes. VA-small produces ZERO frames,
+FFmpeg exits 251 (wrapped -5). Kernel window now contains five
+session-fatal 0x4000003 messages, all at 15:26:16.942 on this boot; system-fatal,
+power-cycle, vb2 warning, other session/system, and kernel bugs remain zero.
+Root stopped all subsequent hardware opens and posted the hardware-stop lease
+handoff. This lane performed read-only inspection only.
+
+Sequence before failure:
+* OUTPUT 320x240; CAPTURE negotiated 384x256, stride384, 147456 bytes.
+* Four access units queued (timestamps0,100000,33333,66667), zero OUTPUT dequeues.
+* SOURCE_CHANGE 384x256 -> 384x256 with CAPTURE already streaming.
+* First empty CAPTURE has flags0x104041: LAST and ERROR. It is treated as a
+  source-change marker and requeued; paired EOS is suppressed.
+* DECODER_CMD START follows that source-change handshake.
+* Another empty LAST CAPTURE flags0x104001 follows, still suppressed as PSC.
+* Sync initiates STOP with four FIFO and four queued OUTPUT owners, then times
+  out after10s: no ready output, no rebuild attempted, pending owners unchanged.
+* No checksum frame is written. The five fatal messages are captured in the
+  same command window. Driver debug lines lack comparable timestamps, so their
+  precise ordering relative to the HFI fatal cannot be inferred from this log.
+
+Concrete source-level lead (hypothesis, not an implemented fix)
+
+/home/mq/oss/linux/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
+maps either HFI_BUF_FW_FLAG_LAST or HFI_BUF_FW_FLAG_PSC_LAST to V4L2 LAST.
+Its output-buffer completion function (around394) marks a zero-sized buffer
+ERROR while STREAMING unless HFI_BUF_FW_FLAG_LAST is set; PSC_LAST is not
+exempted there. Thus a zero-byte PSC_LAST can become LAST|ERROR even when it is
+an intentional picture-sequence-change marker, without corrupt/overflow flags.
+iris_buffer.c (around767) then handles ERROR by clearing payload/timestamp and
+returning before its LAST/EOS/v4l2_m2m stopped bookkeeping. This asymmetry is a
+specific candidate for inconsistent PSC completion state. It also fits the
+native all-zero corrupt-frame symptom: local FFmpeg returns an AVFrame when
+V4L2 ERROR is present instead of treating an empty marker as decoded pixels.
+However, no matching-running-kernel source/build identity or raw HFI marker
+trace is available in this lane. The first LAST|ERROR could alternatively be
+actual firmware data_corrupt/NOSHOW/overflow or error-buffer return. The fatal
+may precede that buffer rather than result from START. Do not call the source
+asymmetry the proved cause, and do not apply a kernel patch from this checkout.
+
+Next discriminating evidence (after hardware lease owner authorizes a healthy
+checkpoint): identify exact deployed Iris source/build and trace raw HFI buffer
+flags/data_size, frame data_corrupt/overflow, sub-state DRC/DRAIN/LAST, and
+resume-command order around initial small-stream SOURCE_CHANGE. Compare native
+and VA paths using the existing 720p controls. An actual zero-size PSC_LAST with
+no corruption flags would justify testing a narrow PSC_LAST exemption and its
+LAST/EOS state effects in matching kernel source. A firmware fatal preceding
+resume instead requires investigation of initial HFI setup/internal buffer
+contracts. Neither requires weakening the production checksum or kernel gate.
+
+No Rust/kernel edits, extra hardware opens, or unsupported-compatibility claims
+were made after the fatal. Small-stream compatibility remains a release failure.

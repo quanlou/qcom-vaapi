@@ -1,0 +1,180 @@
+Production readiness review
+October 1 2026
+
+The driver has a working H.264 CPU-copy path, but unrestricted production
+readiness is BLOCKED. A hardware run passed 1, 30, and all 300 H.264 frames
+against the native V4L2 decoder. Strict GL comparison found one missing
+reference frame. The next decoder session failed, and the kernel recorded
+Iris system-fatal 0x5000003 errors and a vb2_start_streaming warning.
+The cause of the missing frame and the cross-session failure is unresolved.
+
+Review scope
+
+Reviewed initialization, capability/config negotiation, context creation,
+picture submission, buffer mapping, surface synchronization, CAPTURE
+publication/export, V4L2 setup/teardown, and verification scripts. Changes
+were made to the driver and checks, not installed system-wide.
+
+Other H.264/AV1 edits were occurring concurrently in this checkout. The
+initial hardware matrix applies only to the saved tested binary. A later
+bounded run of the final build also decoded all 300 H.264 frames byte-for-byte
+against the saved native reference, with zero observed Iris/vb2 errors.
+That establishes CPU-copy behavior for this sample, not general qualification.
+
+Changes made during this review
+
+1. Device and queue initialization
+   - Use opened-node device_caps when V4L2_CAP_DEVICE_CAPS is present.
+   - Require streaming plus M2M or both multi-planar queue directions.
+   - Reject substituted coded/raw formats and unsupported memory planes.
+   - Require source-change/EOS event subscription to succeed.
+   - Bound format enumeration; reject zero-length QUERYBUF mappings.
+   - Retry interrupted ioctls, rather than treating a signal as device failure.
+   - Open decoder and recovery fds with CLOEXEC. Duplicate export fds with
+     atomic CLOEXEC so media helper processes do not keep sessions alive.
+
+   Capability selection follows the kernel's QUERYCAP contract:
+   https://docs.kernel.org/userspace-api/media/v4l/vidioc-querycap.html
+
+2. Context and picture lifecycle
+   - Validate render-target pixel format and initial context dimensions.
+   - Refuse premature reuse of pending surfaces without retiring their
+     CAPTURE backing or letting an old completion publish into a new frame.
+   - Reject rendering mapped buffers; borrow validated buffers directly
+     instead of cloning compressed payloads.
+   - Clear stale CPU pixels when beginning a new picture.
+   - Close malformed/incomplete pictures and mark their surfaces dead so
+     sync returns a decode error and context teardown can proceed.
+
+3. Synchronization and export
+   - Respect zero-timeout polling and infinite sync timeout semantics.
+   - Late PRIME exports copy the saved dequeue-time snapshot instead of
+     reading a requeued mapping which firmware may already have overwritten.
+   - Reject damaged CAPTURE completions, unsupported data offsets/planes,
+     excessive bytesused, and undersized NV12/P010 storage.
+   - Do not publish a successful black frame after a failed CAPTURE snapshot.
+
+4. Build and release checks
+   - Build with Cargo.lock and a predictable target directory; publish the
+     shared object by atomic rename so existing clients keep their mapped inode.
+   - Required missing media fails before hardware access; frame comparisons
+     check nonzero and requested frame counts.
+   - Remove automatic native-decode retries from normal verification.
+   - A failed GL pipeline fails the probe even when partial pixels match.
+   - Missing GL frames fail by default; duplicate reference frames require
+     separate matching occurrences. Truncated forced-stride dumps fail.
+   - Add hardware-free verifier regression tests and GitHub Actions checks.
+   - Add tools/verify-production.sh: all existing headless probes must pass,
+     including full-stream GL coverage, HEVC/Main10/VP9, edge fixtures,
+     session churn, EOS, and seek storm. Skips and observed kernel errors
+     fail the gate. Browser validation remains a separate deployment check.
+
+Observed hardware evidence
+
+- vainfo loaded the isolated driver and advertised H.264 Baseline/Main/High,
+  HEVC Main/Main10, and VP9 Profile 0. AV1 was not advertised by default.
+- Required H.264 native framemd5 comparisons passed for 1, 30, and 300 frames.
+- The one-buffer GStreamer export probe reached the driver and exited zero.
+- The GL pipeline downloaded 300 frames and exited zero, but only 29 of
+  the first 30 reference frames matched with zero tolerance. Reference
+  frame 22 was missing. The verifier correctly exited 1. Correct partial
+  pixels do not establish complete playback or correct display ordering.
+- The subsequent resolution probe exited 77 after its pre-decode failed.
+  Kernel messages in that window included system-fatal 0x5000003,
+  session-fatal 0x4000003, and vb2_start_streaming warnings.
+- After the firmware recovery window, the final build passed the full
+  300-frame CPU-copy comparison with no observed kernel errors. The full
+  GL check then downloaded only eight frames, none matching the reference,
+  and failed, despite the pipeline exiting zero. This final GL run had
+  no observed Iris or vb2 errors.
+- A diagnostic with GStreamer VA tracing identified repeated "vaBeginPicture:
+  surface is in use" warnings: the importer/pool recycles pending surfaces.
+  The new guard exposes this incompatible lifecycle instead of retiring
+  an in-flight capture and publishing stale/foreign pixels. Supporting this
+  client requires completion synchronization and correct reuse pacing;
+  the guard intentionally does not restore premature reuse. This is a
+  material compatibility limitation of the hardening change.
+- Long playback, codec expansion, EOS/churn/seek and browser qualification
+  were not completed for this final revision. Prior README success entries
+  are historical evidence, not results of this review.
+
+Local evidence is saved under:
+  /tmp/libva-v4l2-production-review-results/
+  /tmp/libva-v4l2-gl-roundtrip/
+
+The first directory includes verify.log, vainfo.log, native/rust checksum
+files, resolution.log, kernel.log, the tested shared object and SHA256,
+and final build/check logs. final-hardware.log records the later passing
+300-frame decode; final-gl.log and gl-diagnostic.log record the final GL
+failure and pending-surface reuse warnings. Both tested shared objects and
+SHA256 records are saved. Temporary files are local and not committed.
+
+Local checks at completion: 162 Rust tests and seven verifier regression
+tests pass; Clippy with warnings denied, formatting, shell syntax, release
+build and git diff whitespace checks pass. CI configuration was added but
+has not been executed on a hosted GitHub runner.
+
+Remaining release blockers and limits
+
+- Resolve pending-surface reuse and decode-to-importer synchronization,
+  including assessing implicit dma-buf fencing for pre-decode exports.
+  Removing the busy check is not a fix for completion/identity ownership.
+- Resolve missing GL frame/output lifetime and ordering; require full-stream
+  coverage and a healthy immediately following session before deployment.
+- Diagnose Iris session/system failures on a clean device. Do not infer
+  that a firmware error is independent of userspace queue handling merely
+  because the next native or VA session also fails.
+- Revalidate small B-frame and one-frame EOS streams without expected-failure
+  exemptions. Nonstandard H.264 scaling matrices remain a code-review gap:
+  the synthesizer records IQ matrices but does not emit their scaling lists.
+- Validate browser selection and end-to-end playback with the deployment
+  browser/kernel/firmware versions, including seeks, pool reuse and teardown.
+- Capability discovery still has a process-global cache and H.264 fallback
+  when enumeration yields no recognized codec. Device overrides or unavailable
+  nodes can therefore report stale/optimistic capabilities.
+- Only one decode context per driver instance is allowed. Concurrent playback
+  and higher resolutions require explicit qualification, not extrapolation
+  from the 720p matrix. Object limits are not an aggregate process-memory cap.
+- PRIME export uses CPU copies into stable reservations; reaching the export
+  callback does not establish a copy-free decode-to-display path.
+
+Revalidation procedure
+
+Use a clean device window and a stable checkout. Provide every fixture via
+V4L2_VA_SAMPLE, V4L2_VA_ONE_FRAME_SAMPLE, V4L2_VA_BFRAMES_SAMPLE, and
+V4L2_VA_CODEC5_DIR. Run tools/verify-production.sh with an isolated output
+directory. Its first failed or skipped stage blocks release. Then run the
+browser probe in the actual desktop/deployment session and check successful
+hardware decoding, not just driver initialization. Preserve logs, exact
+binary/source revision, kernel and firmware versions for the release record.
+
+Additional host input/image audit, October 1 2026
+
+The hardware results above remain historical; this additional audit did not
+run hardware or qualify the concurrent GL/queue changes.
+
+Fixed reusable-buffer allocation loss after vaBufferSetNumElements shrinks or
+resets the valid count. Counts can grow back to the original allocation, and
+decode rejects zero active elements or inconsistent active byte lengths.
+Buffer creation checks handle capacity before copying and uses fallible reserve.
+
+NV12/P010 image storage and copies now include the final chroma row for odd
+heights and the complete UV pair for odd widths. CPU image copying validates
+all layout bounds before writes; malformed snapshots return an error instead
+of partially copying or padding into a successful image. Crop origins must
+be even in both axes: chroma resampling for odd origins is unsupported.
+
+All seven new regression tests fail against saved pre-fix implementations.
+The fixed isolated host snapshot passes 193 tests with 16 test threads,
+including four host stress tests. Clippy with warnings denied and whitespace
+checks pass. Evidence: /tmp/libva-v4l2-input-audit/ (before-regressions.log and
+stress-after/stress.log, stress-after/parallel-suite.log). These checks exercise
+host correctness; complete hardware/browser production gates are still required.
+
+Follow-up status (same date)
+
+The source fixes and newer acceptance checks superseding the capability-cache,
+IQ-matrix omission, and exported-buffer completion findings are recorded in
+production-fixes-20261001.txt. New host checks pass. Hardware qualification of
+those changes is blocked by absent decoder/DRM devices in the fixing session;
+none of the older GL/firmware findings is closed merely by those host results.

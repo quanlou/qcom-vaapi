@@ -1,0 +1,61 @@
+Production performance/browser lane — 2026-10-01
+
+Implemented concrete qualification checks; hardware qualification remains
+blocked because this session has no decoder/render nodes or graphical session.
+No browser launch, real throughput/memory number, or hardware pass is claimed.
+
+4K verifier
+- Forces msm driver identity; refuses a conflicting LIBVA_DRIVER_NAME.
+- Preserves required 1, 30 and full byte-exact reference legs/repeated playback.
+- Rejects result directory reuse and incomplete/dirty kernel summaries for both
+  native and driver legs, including device power cycles.
+- Measures full-leg end-to-end decode + CPU download + checksum FPS and peak
+  FFmpeg RSS. Default diagnostics explicitly report performance=unqualified.
+- Strict mode requires explicit positive minimum FPS, maximum RSS KiB and
+  minimum observed seconds. Nonfinite, invalid, zero measurements, fractional
+  frame/RSS counts, exceeded memory budgets and short runs fail closed.
+
+Browser verifier
+- Existing driver-load diagnostic remains usable, but reached_driver says
+  qualification=not_proven. A version string or timeout cannot pass strict mode.
+- Bounded loopback HTTP telemetry binds one private-profile playback to a
+  fresh run ID. Checks real forward playback, an acknowledged seek to a
+  different position, at least 30 progressing frames on each side, post-seek
+  playback and final frame counters. Numeric strings/bools, nonfinite values,
+  stale runs, missing phases and decreasing dropped/total counters fail.
+- Actual msm CAPTURE publications must cover all observed video frames.
+  Software-fallback/decode-error logs, missing or incomplete kernel counters,
+  kernel faults and power cycles reject qualification.
+- Explicit deployment FPS/RSS/runtime budgets required; presented FPS excludes
+  dropped frames, default maximum drop ratio 1%. Runtime crosschecks collector.
+- Chromium app window and private Firefox script-closure preference provide
+  natural closure; timeout/nonzero exit/observed surviving children fail.
+- Dependency-free process sampler follows sessions, PPID descendants and
+  retained PID/starttime identities. It catches observed setsid/reparented
+  children, kills lingering children on failures, and propagates timeout.
+  Shell cleanup stops both the observer and HTTP server on interruptions.
+- Custom Firefox paths are identified or explicitly selected by BROWSER_KIND;
+  Chromium uses native GL selection by default rather than forced ANGLE flags.
+
+Validation
+python3 -m unittest discover -s tools/tests -p test_playback_performance.py -v
+18 regressions pass, including process timeout cleanup and a detached-session
+child surviving its parent. Also covers old version-only false success, failed
+seek, partial hardware evidence, software fallback, stale telemetry, nonfinite
+measurements, incomplete kernel summaries, budgets and dropped-frame throughput.
+bash -n tools/verify-4k-decode.sh tools/verify-browser-vaapi.sh passes.
+
+Limits and next deployment action
+- Real device/browser measurements remain outstanding. Run strict commands in
+  docs/09-browser-vaapi.md on the same qualified driver/kernel/firmware/media.
+- Hardware browser telemetry counts completion and presentation; it does not
+  prove pixel parity for seeks, actual zero-copy rendering or every fallback
+  path in arbitrary future browser versions. Driver/log changes need observer
+  updates and a fresh browser qualification.
+- 100ms summed observed-tree RSS double-counts shared memory, may miss brief
+  peaks or children that detach entirely between samples, and excludes kernel,
+  firmware and uncharged GPU allocations. It is not unique-memory accounting
+  or a long-term leak proof. Natural closure is required; browser variants that
+  refuse scripted closure fail rather than claiming healthy teardown.
+- No installation or commits performed; shared production gate is owned by
+  the qualification lane and still explicitly scopes browser checks separately.

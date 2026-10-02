@@ -1,0 +1,99 @@
+Pending kernel deployment lane — 2026-10-01
+
+Completed: matching distro source and a reviewable compiled patch artifact.
+Still pending: patch activation/boot, runtime qualification and firmware fix.
+No install, module load/unload, bootloader change or reboot was performed.
+Hardware devices are now visible in this lane after permissions/environment
+changed; earlier reports of absent devices describe the earlier namespace.
+Hardware probes remain serialized and owned by root; none ran in this lane.
+
+Exact deployment provenance
+- Running: 7.3.0-15-qcom-x1e; image/modules package source is linux-qcom-x1e
+  7.3.0-15.15, not the older /home/mq/oss/linux checkout.
+- Matching source archive fetched from the installed tobhe/hamoa PPA:
+  https://ppa.launchpadcontent.net/tobhe/hamoa/ubuntu/pool/main/l/linux-qcom-x1e/linux-qcom-x1e_7.3.0-15.15.tar.gz
+- Installed PPA trust key verified signed InRelease. Its SHA512 source-index
+  checksum verified Sources; Sources SHA512 verified dsc and archive; dsc
+  SHA256 verified archive 2519439d088772d8dfe298d5c1c4bcff7c2744abef41183c93e0bd1e97614813.
+- Source changelog confirms 7.3.0-15.15. Exact Iris source extracted separately
+  from archive, avoiding full kernel-tree storage/build.
+- Loaded qcom_iris build-ID note matches installed module:
+  d32b38c1a71add26795cf6719c71268188da8a6b.
+
+Patch/build verification
+- Existing bounds patch applies without fuzz to matching distro source.
+- Isolated original functions reproduce index32 UBSAN fault; patched functions
+  pass 4,096 submissions, all retained timestamps reordered across wraps,
+  flags and fallback semantics, and stale writer-index checks.
+- Baseline and patched full Iris modules compile/link against exact installed
+  kernel headers using aarch64-linux-gnu-gcc-15. All 151 imported symbol CRCs
+  in candidate match installed module; vermagic is 7.3.0-15-qcom-x1e.
+- Candidate SHA256:
+  9a68f9b5ba9a1e5ff1023dd8091af58a5ba316ec48917b800e524574476ada9a
+  Candidate build ID: c034f2232b2e6cf509c1eec1e9762e00edaf7ef4.
+- Unsigned external module; BTF skipped because matching vmlinux absent.
+  Baseline external-build srcversion differs from distro-built module, so this
+  is ABI-checked source preparation, not a byte-reproducible distro build.
+- SecureBoot observed disabled / platform setup mode. No settings changed.
+
+Review packet and safe commands
+/tmp/libva-kernel-deployment-20261001/REVIEW.txt
+/tmp/libva-kernel-deployment-20261001/review.json
+/tmp/libva-kernel-deployment-20261001/patched/drivers/media/platform/qcom/iris/qcom-iris.ko
+/tmp/libva-kernel-deployment-20261001/ubsan.log
+/tmp/libva-kernel-deployment-20261001/build.log
+/tmp/libva-kernel-deployment-20261001/abi-check.txt
+
+Read-only review:
+  cat /tmp/libva-kernel-deployment-20261001/review.json
+  modinfo /tmp/libva-kernel-deployment-20261001/patched/drivers/media/platform/qcom/iris/qcom-iris.ko
+Repeat build into new /tmp directory (no installation or activation):
+  bash /tmp/libva-kernel-deployment-20261001/review-only-rebuild.sh
+
+Remaining outside host-build scope
+- Plan activation/boot through deployment workflow, preserving rollback and
+  installed signed module/kernel. Do not overlap running hardware probes.
+- Verify the running module/build ID after activation; then run production
+  matrix/churn and repeated 4K full-frame parity with clean kernel windows.
+- Bounded native/driver small-stream HFI tracing and firmware resolution remain
+  open. The metadata fix corrects bounds only and preserves timestamp fallback.
+- Kernel-module ABI/source tests cannot certify firmware or patched boot.
+
+Checks passed: signed-source authentication, exact-source UBSAN regression,
+module build/link, 151 symbol CRC comparisons, running/installed build-ID
+comparison, rebuild-script shell syntax and git diff --check.
+
+PSC-LAST follow-up (hardware STOP preserved)
+
+Matching deployed-source audit confirms the small-stream lane's local lead.
+At iris_hfi_gen2_response.c:116-118, both HFI LAST and PSC_LAST become V4L2
+LAST. At393-396, the zero-payload streaming check exempts only HFI LAST;
+therefore a clean PSC_LAST gets synthetic ERROR. iris_buffer.c:899-905 returns
+on ERROR before LAST/EOS/stopped/last_buffer_dequeued bookkeeping at915-924.
+This is a demonstrable source-contract asymmetry in authenticated matching
+source, independent of which raw flags the observed failing session carried.
+
+Added candidate kernel/0002-iris-preserve-empty-psc-last-completion.patch:
+exempt PSC_LAST from synthetic empty-payload ERROR only. NOSHOW, data_corrupt
+and overflow ERRORs are preserved; the genuine ERROR path and state-transition
+helpers are unchanged. Existing metadata bounds patch remains unchanged.
+
+Actual-function isolated regression tools/verify-iris-psc-last.py passes:
+256 baseline cases reproduce clean PSC synthetic error/skipped LAST bookkeeping;
+256 patched cases preserve terminal bookkeeping and all genuine errors.
+Coverage includes four LAST/PSC combinations, empty/nonempty pixels, all eight
+corruption/overflow/NOSHOW combinations, streaming state and already-stopped
+queues. Uses fake queues/sub-state helpers; not full HFI-state verification.
+
+Both patches compile/link together against exact7.3 headers/GCC15, and all151
+imported symbol CRCs match installed module. Review-only combined candidate:
+/tmp/libva-kernel-deployment-20261001/psc-candidate/drivers/media/platform/qcom/iris/qcom-iris.ko
+SHA256: 3f19b2ecb67ecb399f069c2d827f49e5b1dd9a539504fcd57dda474ce8d67be1
+Logs: /tmp/libva-kernel-deployment-20261001/psc-regression.log and psc-build.log.
+Unsigned, BTF skipped, not activated. Original bounds-only module unchanged.
+
+No hardware opens, load/install/reboot, or firmware reset. The observed marker
+could still contain genuine corruption/NOSHOW/overflow, and fatal ordering is
+unknown. Candidate is NOT a proved small-stream fix. Actual clean PSC raw-HFI
+trace, activation and bounded runtime comparison remain required after the
+hardware lease owner authorizes a healthy checkpoint. No release gate weakened.

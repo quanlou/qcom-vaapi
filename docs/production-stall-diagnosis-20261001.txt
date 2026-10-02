@@ -1,0 +1,81 @@
+Stalled production qualification diagnosis — 2026-10-01
+
+Run: /tmp/libva-host-qualification.OQuT34
+Frozen driver source: /tmp/libva-gl-last-source-z88fqfmg
+Binary SHA256: fc08226fcc18c257f52d2159ad8ebb5ed57f2a580dbf23640f9340b60ffa6e10
+Identity matches /tmp/libva-host-gl-check.5HPJnr/driver/msm_drv_video.so.
+
+Saved completed evidence
+-----------------------
+75 Python tooling tests; 4 stress tests; 208 integrated Rust tests pass.
+CPU sample-1, sample-30, sample-full each report framemd5_ok; native and Rust
+framemd5 files independently compared byte-for-byte equal in this follow-up.
+GStreamer export reports reached_driver status=0.
+Strict GL reports ref_frames=300 missing=0 tolerated=0, stride=1280.
+Both saved GL raw files contain 414720000 bytes and independently compare
+byte-for-byte equal. These are results from the interrupted run, not fresh
+hardware execution by this follow-up.
+
+Stall diagnosis
+---------------
+The optional FFmpeg hwmap diagnostic omitted -nostdin and inherited /dev/pts/4.
+Foreground terminal group: 113907. Timeout and FFmpeg group: 115622.
+Both timeout PID 115622 and FFmpeg PID 115623 were in state T (stopped),
+with wchan=do_signal_stop, after approximately 28 minutes despite a 60-second
+bound. Their parents were waiting normally. The hwmap log ended immediately
+after VAAPI initialization, before input-stream processing.
+This is consistent with SIGTTIN from background terminal input: timeout creates
+a separate process group, and FFmpeg's terminal read stops that entire group,
+including its timeout watchdog. The historical signal number cannot be read
+from the stopped process state alone. A hardware-free PTY/lavfi reproducer
+and -nostdin control are saved in /tmp/libva-stall-diagnosis-20261001/.
+Reproducer confirmed the timeout group stopped without -nostdin despite its
+one-second bound; the same software-only command exited 0 with -nostdin.
+
+Recovery and fix
+----------------
+Preserved process snapshot and diagnostic log before termination. Verified
+process identities and group membership, terminated the old wrapper group
+first to prevent further probes, then terminated and continued the stopped
+timeout group so pending termination could be delivered. All six identified
+processes exited. A nonblocking flock check confirmed the hardware lock free;
+the lock file was neither deleted nor replaced.
+Added -nostdin to tools/verify-rust-driver.sh's diagnostic FFmpeg invocation.
+No Rust source, gate requirements, probe order or acceptance rules changed.
+Original frozen source, original host result files and prior runner remain intact.
+
+Corrected exact-binary host package
+----------------------------------
+/tmp/libva-exact-production-stdin-20261001/run-production-exact.sh
+Copied the existing exact-binary package; its build helper still stages only
+hash-verified GL-passing binary fc08226...a6e10. The only additional harness
+change is -nostdin in the hwmap command. Runner redirects stdin from /dev/null
+for all descendants, retains 3600-second timeout with 10-second kill grace,
+and uses fresh results directories. Updated package harness hashes verified.
+Validation: bash -n for changed verifier and packaged runner/verifier;
+python3 -m unittest discover -s tools/tests -q: 75 tests passed.
+
+Requested physical-host execution
+---------------------------------
+bash /tmp/libva-exact-production-stdin-20261001/run-production-exact.sh
+Host execution was requested from the user; this interface cannot issue an
+approval escalation (execution approval policy is never). No new hardware
+probe was launched in this follow-up. Decoder/DRM nodes are visible in the
+current environment, unlike earlier handoff sessions; this does not supply a
+new hardware qualification result.
+
+Qualification limits
+--------------------
+Interrupted outer kernel wrapper did not produce its final observed-window
+summary: kernel cleanliness for OQuT34 is unqualified. Earlier GL-only run
+5HPJnr retains its own clean window, not this run's window.
+Resolution churn, long playback, codec expansion, strict edge probes, session
+churn, EOS and seek were not reached. Strict small-stream failures still stop
+the release gate; later lifecycle probes remain pending if that happens.
+4K/browser performance, candidate kernel boot and experimental AV1 blockers
+remain open. No production release pass is claimed.
+
+Superseding execution update: hardware was accessible directly and the host
+runner has now been executed. The earlier handoff request was unnecessary.
+See docs/production-host-continuation-20261001.txt for actual hardware results
+and the remaining one-frame EOS/seek failures. No production pass claimed.

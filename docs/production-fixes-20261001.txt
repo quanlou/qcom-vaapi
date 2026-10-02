@@ -1,0 +1,88 @@
+Production fix follow-up — 2026-10-01
+
+Status: source fixes and host checks pass; hardware release qualification is
+BLOCKED. This session has no /dev/video16 or /dev/dri/renderD128. Neither a
+successful build nor historical decoder results certify these lifecycle changes.
+
+Changes in this follow-up
+
+- Export-fd regression now verifies EOF on a Unix socket after the last tracked
+  peer is dropped. It cannot mistake a newly reused numeric fd for a leak.
+- EndPicture waits for publication when the target was already exported.
+  Stable exported allocations are filled by a CPU copy, which has no decode
+  completion fence for implicit-sync GL importers. The driver mutex is released
+  before waiting, so submission on another thread can continue.
+- Stable-slot CPU writes keep a CLOEXEC allocation handle, wait for prior
+  importer fences with bounded poll, and bracket CPU access with dma-buf SYNC.
+  Failed cache maintenance, copies, and undersized destinations propagate errors;
+  a failed stable copy cannot publish stale contents as a completed frame.
+  This is an implemented GL correctness fix requiring fresh hardware validation,
+  not a claim that the previously missing GL frame is proven recovered.
+- Profile discovery belongs to each initialized driver rather than a leaked
+  process-global cache. Failed discovery advertises no invented H.264 support.
+  Configuration attribute counts and null lists are bounded and validated.
+- H.264 now emits custom VA raster-order quantization matrices in PPS diagonal
+  scan order, including wrapped signed deltas. Flat defaults retain historical
+  header bytes. Invalid zero scaling values and truncated IQ buffers fail.
+  Host tests reconstruct 4x4 and 8x8 raster matrices independently. Hardware
+  custom-matrix parity still needs qualification alongside the existing fixtures.
+- Strict GL qualification requires exact frame count and display order, rejecting
+  extra corrupt frames as well as missing frames. Reference download requires a
+  hardware frame, so software fallback cannot satisfy the GL gate.
+- Natural EOS compares against an independently decoded complete reference.
+  Sanity decodes must contain one actual frame; header-only output cannot pass.
+- Seek commands require matching request-ID success replies and active
+  vaapi-copy decoding. Events, rejected commands, and disconnections cannot
+  count as seeks. The shell propagates IPC-controller failure as well as player
+  failure, disallows software fallback, and rejects a skipped mixed-resolution
+  seek phase in strict mode. These checks prove accepted seek commands and
+  decoder selection; they do not establish pixel parity for every seek target.
+- The production gate runs defensive/concurrent stress, serializes hardware
+  qualification, rejects missing devices and observed kernel bugs/power cycles,
+  and refuses unqualified experimental AV1. CI includes host stress.
+- Prior Main10 provisional-format negotiation and HEVC tile validation fixes
+  are preserved. Source translation and kernel queue contracts are unchanged
+  by this follow-up outside the completion/copy fixes described above.
+
+Validation
+
+- 189 Rust unit tests passed with 16 test threads.
+- Host stress: 4 defensive tests passed; injected parallel suite 193/193 passed.
+  Includes 4,000 shared-driver buffer lifecycles and 10,000 malformed sequences.
+- 37 Python verifier regressions passed, including ordering, corrupt extra
+  frames, seek acknowledgments, controller/player status, and AV1 release gating.
+- Formatting, strict Clippy, all shell syntax checks, whitespace checks, and
+  release build passed.
+- Candidate Iris metadata bounds patch reproduced the old index-32 UBSAN fault
+  and passed 4,096 patched inputs in the existing isolated sanitizer runner.
+  The kernel patch was not installed or boot-tested.
+- Required Rust-driver matrix was attempted and stopped at vainfo: device absent.
+- Required session churn was attempted and failed its initial hardware decode:
+  no VA display/device. It did not run the churn legs.
+- Production gate passed its host stages and explicitly failed missing_hardware.
+  GL, codec parity, EOS, seek, small B-frame, 4K, and browser qualification of
+  this final source remain outstanding on a real deployment host.
+
+Evidence and immutable source copy
+
+/tmp/libva-prod-final-20261001/source-sha256.txt
+/tmp/libva-prod-final-20261001/source-revision.txt
+/tmp/libva-prod-final-20261001/production.log
+/tmp/libva-prod-final-20261001/matrix.log
+/tmp/libva-prod-final-20261001/churn.log
+/tmp/libva-prod-final-20261001/driver/msm_drv_video.so
+/tmp/libva-prod-kernel-patch.log
+
+The source copy was verified to match rust/src after the release build. The
+live shared checkout also contains changes from other work; no commits or
+system-wide installation were performed by this follow-up.
+
+Next qualification on the real hardware
+
+Boot and verify the matching kernel with the bounds fix. Use a fresh output
+path and the supplied fixtures, then run tools/verify-production.sh on this
+source. Do not relax strict GL coverage, software-fallback rejection, missing
+fixtures, or kernel-fault checks. Run the documented 4K and deployment-browser
+checks on the same binary/kernel/firmware. AV1 remains experimental until full
+reference/refresh metadata and full-stream parity are authoritative. The small
+B-frame/firmware compatibility blocker is not closed without a passing probe.

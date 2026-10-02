@@ -20,6 +20,1009 @@ short and update it whenever a task starts, finishes, or gets blocked.
   before marking it done.
 
 ## Active task
+AV1 PRODUCER COPY-ON-WRITE HEADER OWNERSHIP HOST PASS (2026-10-02):
+New reusable CBS helper clones parsed content through standard CBS writable-unit
+API, retaining tile buffer and writer-held sequence lifetimes. Original parsed
+headers are checked byte-for-byte unchanged after serialization; show-existing
+visibility/reference state remains original. Host five samples including10bit
+PASS690coded/684display exact tiles/pixels/order, Werror build and13 focused tests
+PASS. Evidence av1-producer-ownership-host.1ugsj9kg. No decoder/device opens,
+installed changes or operator step. This is producer ownership groundwork, NOT
+actual VA transport/driver ownership/Chromium qualification. AV1 stays disabled.
+Next wire helper into isolated actual FFmpeg VA producer plus validated full-OBU
+standard slice-data driver path; freeze paired experiment before hardware.
+Baseline remains user-deferred/incomplete; every prior failure retained.
+
+AV1 VA PRODUCER OWNERSHIP INTEGRATION ACTIVE (2026-10-02): implement CBS
+copy-on-write normalization of actual parsed headers, preserving original parser
+visibility/reference state and compressed tiles. Host corpus checks first; no
+hardware or advertised AV1 changes. Baseline stays explicitly deferred.
+
+AV1 NATIVE NORMALIZED DIVERSE PASS / VA INTEGRATION NEXT (2026-10-02):
+User explicitly deferred fresh baseline; interrupted baseline retained incomplete.
+Aom99coded/96display p6yso_fj PASS; corrected active-sequence original300/300
+skv3j30x PASS; rav1e96/96 c9puqkke PASS; SVT96/96 dkg8np7f PASS. All591coded
+and588original-display NV12 pixels/order byteexact, full clean kernel windows,
+exit0/no linger/safe final idle/current3loaded identities unchanged. Summary
+av1-native-normalized-diverse-summary.json. Original300 truncated139 failure
+preserved; corrected input removes superseded differing MP4 extradata sequence
+before actual inband header, full changed run now PASS. Original faulted4f13
+never opens again, operator normal restart currente56c1f3a verified. No extra
+sudo/boot/module edits. Host5samples including10bit/690coded/tileproof/13tests
+PASS; native10bit untested. This establishes normalized native hidden-reference
+pixel path for tested corpus, NOT AV1 VAAPI/Chromium or full production. Next
+implement actual FFmpeg VA producer original/CBS headers+standard slice-data
+transport with validated driver ownership, then strict VA diversity/lifecycle/
+Chromium. AV1 remains advertised disabled; active-playback sleep/streaming
+removal still unqualified. Preserve all failures; no unchanged retries.
+
+AV1 DIVERSE FIRST FAILURE / ACTIVE SEQUENCE HOST FIX (2026-10-02):
+Original300 sample av1-coded-diverse.e56c1f3a.0.op_jii4c FAIL139/300frames,
+clean complete observer/exit0/no linger/ref0. Offline exact hash audit matches all
+139returned frames to originalcoded161..299; no emptyERROR completions. Serial
+runner stopped, rav1e/SVT packets never attempted. Preserve full failure.
+Input has differing MP4-extradata and immediate inband sequence headers before
+frame0; active inband header recurs at frame161. Packetizer now omits superseded
+sequence headers before a coded frame (no intervening frame consumes old header),
+retains last active header and all compressed tiles.13 focused host tests PASS;
+five corpus active-sequence software proof running/completing. Firmware cause
+unproven until changed hardware proof, no unchanged failure retry. Baseline stays
+user-deferred/incomplete; AV1 advertised support remains disabled/unqualified.
+
+AV1 DIRECT CHANGED NATIVE PASS (2026-10-02): av1-coded-native.e56c1f3a.p6yso_fj
+single99coded normalized libaom frames ALL NV12 byteexact/order PASS; original
+96display alias projection PASS. One decoder session(no probe decode), one coded
+frame per packet, passthrough output; complete clean kernel observer/process-tree
+exit0/no linger, safe final idle and3loaded identities unchanged. This proves
+actual hidden reference pixels for tested normalized path, not raw hidden payload
+or VAAPI/Chromium integration. Old system fault/81drop failures remain FAILED;
+boot4f13 permanently excluded. No general firmware root-cause claim. Baseline
+explicitly deferred by user, interrupted incomplete. Next native original300/
+rav1e96/SVT96 diverse checks serial stop first failure, then actual VA producer/
+driver header/reference integration. No extra sudo/reboot/unload/sleep needed.
+
+USER DEFERRED BASELINE / DIRECT CHANGED AV1 EXPERIMENT (2026-10-02): user
+explicitly requested skip baseline to conserve agent bandwidth. Owned baseline
+process tree terminated, no lingering children; user-interruption.json preserves
+incomplete result, never qualification PASS. Currentboot e56c1f3a exact3loaded
+identities/selectedSHA/ref0/suspendedusage0/auto and wholebootclean verified after
+cleanup. Fresh av1-coded-native.e56c1f3a.p6yso_fj frozen99coded libaom packets,
+unique coded timestamps/no probe decode/passthrough output, full99NV12 software
+reference and96original display alias projection. Host five corpus/12tests PASS.
+Explicit baseline defer recorded in frozen plan, remaining safety/parity/timeout/
+cleanup unchanged. Single changed experiment starting, not old failure retry.
+No extra sudo/reboot/module operations. Stop first fault; AV1 remains disabled.
+
+AV1 HOST CODED-FRAME CORPUS PASS / FRESH SUPPORTED BASELINE ACTIVE:
+av1-coded-frame-host.bjt63i9i/corpus all five samples PASS690coded frames,
+684original displays, exact compressed tiles and pixels/order, including10bit.
+One complete FRAME OBU per IVF packet and coded-frame monotonic timestamps;
+no probe decode and output passthrough.12 focused AV1 tests PASS. Firmware fault
+cause remains unproven; no hardware validation of changed framing yet.
+Newboot e56c1f3a operator normal restart, actual3loaded builds/selectedSHA/idle/
+wholeboot journal clean read-only PASS. Current-boot persistent activation evidence
+saved. Fresh av1-prereq-boot.e56c1f3a.yi5595k4 exact unchanged v15 source/harness/
+driver hashes PASS; full supported correctness/lifecycle baseline starting before
+new changed AV1 experiment. Never use faulted4f13 for hardware, preserve old FAIL.
+No privileged writes/reboot/unload/sleep/sudo requested. AV1 remains disabled.
+
+AV1 HOST DIAGNOSIS CONTINUES AFTER OPERATOR NORMAL RESTART: currentboot
+e56c1f3a normal chosen restart confirmed; no hardware opens. Actual private FFmpeg
+host strace with ordinary-file mock (no video-node opens) shows old probe3opens,
+-nofind_stream_info1open. Evidence av1-no-probe-host-r2.bn83mtsn; preliminary
+probe-session fault cause still unproven. Changed host diagnostic uses one complete
+FRAME OBU per IVF packet, monotonic coded-frame timestamps, nofind_stream_info
+and output fps_mode passthrough; unsupported OBU layouts refused. New host corpus
+check active av1-coded-frame-host.bjt63i9i, never hardware. Old fault/drop evidence
+kept, no unchanged hardware retry. Framework fault guard rejects4f13/b86c.
+
+AV1 CHANGED NATIVE EXPERIMENT FAILED / HARDWARE STOP (2026-10-02):
+av1-visible-native.4f13b3c1.0oensoo1 result FAIL, actual Iris system error0x5000003
+and vb2_start_streaming WARN; current4f13b3c1 is FAULTED, never decoder-open again.
+Process monitor exited1 in0.595s, no linger/signal denial/unresolved children;
+private FFmpeg terminated, module ref0. All raw logs/failed packet retained.
+Host normalization five samples684display/690coded/tile parity remains host only.
+Native reported99decoded but muxed81 with18timestamp drops; no pixel pass inferred.
+Producer normalization/header packaging/probe-session fault cause UNPROVEN.
+A later boot now e56c1f3a-108d-4e3e-9440-f0c397aafa6b detected; operator restart
+reason pending. No decoder opens on newboot until identities/clean/prerequisites
+and changed experiment reviewed. No repeat unchanged candidate, sudo, agent
+reboot/sleep/unload. Continue HOST diagnosis and producer/reference integration.
+AV1 remains disabled/unqualified. Prior supported sleep/decode passes retained.
+
+AV1 VISIBILITY HOST CORPUS PASS / CHANGED NATIVE EXPERIMENT (2026-10-02):
+Actual CBS visibility normalization only hidden INTER, zero-refresh show-existing
+commands omitted; hidden KEY/timed decoder models refused. Five software samples
+(original/libaom/rav1e/SVT/10bit)684 displayed projected byteexact from690 decoded
+frames, all690 compressed tile groups unchanged. Host failures for raw-container
+identification retained; explicit IVF packet framing corrects harness. No VAAPI
+support claim. Evidence av1-visible-reference-host.ug562ias/corpus-r3/result.json.
+Fresh frozen av1-visible-native.4f13b3c1.0oensoo1 checks sameboot activation/three
+actual loaded identities/selectedSHA/sleep counter/source+harness+native hashes,
+shared lease and wholeboot clean. Readonly preflight PASS. One changed normalized
+99-frame libaom native experiment next; bounded45s cleanup/kernel monitoring,
+full99coded byte parity plus96original display projection, no retry on failure.
+No new module install/sudo/reboot/sleep/removal. AV1 VAAPI remains disabled.
+
+Host AV1 visibility/reference experiment ACTIVE: use actual CBS parsed headers
+to request hidden INTER pictures as visible decoded outputs, omit show-existing
+alias commands only with zero refresh, and verify original display projection
+byteexact in software before any hardware or VA integration. Reject hidden KEY
+and timed decoder models initially; retain original headers/index and tile bytes.
+This experiment changes visibility and is not unchanged-bitstream transport.
+
+Observer settling fix completed: tools/qualify-iris-av1-completion-trace.py now
+waits bounded15s read-only after successful process cleanup, checks journal every
+poll and refuses identity/fault errors immediately. Seven focused host tests and
+py_compile PASS; no new hardware run. Independent subsequent-idle-witness.json
+binds exact sameboot/build/selectedSHA/ref0/suspendedusage0/auto/clean journal.
+Original failed packet untouched. Continue AV1 header/reference implementation.
+
+AV1 LIVE TRACE ACTUAL RESULTS (2026-10-02): client-open normal removal refusal
+PASS on current4f13b3c1. Live BPF attached and stopped cleanly; worker96 displayed
+frames ordered byteexact PASS,197 raw completions including42 NOSHOW, all42 raw
+sizes0 and timestamps nonzero. Complete kernel observer/process-tree exit0/no
+linger PASS. Overall packet remains FAIL: immediate final idle check preceded
+runtime autosuspend. Independent subsequent idle suspended/usage0/auto/ref0;
+no new kernel fault. Preserve result.json and all old failures; never rerun this
+packet. Fix host observer settling with bounded read-only wait and fault/identity
+checks, then continue actual-header/hidden-reference AV1 integration. Raw hidden
+payload absent means ERROR-bit clearing cannot supply hidden decoded pixels.
+AV1 VAAPI/Chromium still unqualified; active-playback sleep/streaming removal
+remain unqualified. No new sudo/reboot/removal requested.
+
+AV1 FASTER LIVE TRACE PREPARED (2026-10-02): user prioritizes completing AV1.
+Frozen av1-live-trace.4f13b3c1.l_9qb4rh/run-next-reviewed.py ready. Exact installed
+module SHA and DWARF-derived inst.codec/session/HFI/frame-info offsets bound;
+manual read-only BPF kprobe/kretprobe snapshot at actual OUTPUT function, no BTF
+module needed, no device addresses logged, no module/boot/PM writes. Trace startup
+must attach before decoder opens; runtime verifier/attachment UNPROVEN as root.
+Unprivileged codegen failed solely tracefs permission, preserved, no attachment.
+Four focused classifier tests PASS corruption/overflow/rejected/incomplete/nohidden
+and per-codec complete verified-control pairs. Prior strict control4vs2 failure
+remains failed; exact old offline reanalysis proves2contexts each valid pair, new
+classifier rejects omitted/unverified/duplicate pairs, not arbitrary count relax.
+Readonly identity/idle/ref0/clean/shared-lease preflight PASS. Copies frozen native
+producer/reference fixture, requires full96 displayed ordered byte parity, complete
+global clean kernel observer/45s process-tree timeout/no linger. Kernel checks
+while decode runs; any error stops first experiment. Raw NOSHOW size/timestamp
+only observation, never hidden-pixel validity or AV1 VAAPI/Chromium support.
+Operator wrapper first completes pending client-open removal refusal once if not
+attempted, refuses existing failed/incomplete evidence; then conditional traced
+AV1 experiment. No forced removal/reload/install/reboot/sleep. Agent no sudo,
+trace attachment or decoder opens. Necessary new combined operator command:
+sudo python3 /home/mq/.cache/libva-v4l2-qualification/resume-20261002/av1-live-trace.4f13b3c1.l_9qb4rh/run-next-reviewed.py
+Do not repeat request unchanged or retry failure. Canonical diagnostic source
+ tools/qualify-iris-av1-completion-trace.py. AV1 transport/hidden lifetimes remain
+incomplete; inspect actual evidence next, then implement evidence-supported fix.
+
+HOST AV1 OBSERVATIONAL TRACE PREPARED (2026-10-02): isolated candidate
+av1-raw-completion-trace-host.26bikaen W=1 build PASS against exact installed kernel
+headers. Compiler Ubuntu15.3.0-3 vs installed15.3.0-4/pahole absent warnings and
+BTF skip retained; no runtime compatibility claim. Repo diagnostic patch
+kernel/diagnostics/iris-av1-raw-completion-trace.patch adds AV1-only dev_dbg after
+buffer identity/queued validation and before firmware metadata copy/flag mapping.
+Records session/index/raw size/offset/timestamp/HFI flags/picture/no-output/
+corrupt/overflow, no device addresses. Dynamic debug default disabled. Removing
+only trace block restores exact prior source; NOSHOW ERROR/payload/ownership and
+all PM behavior unchanged. Not in production patch stack, not installed, no
+hardware opens or protected/module writes. Binary/source identities preserved.
+Future evidence can distinguish raw firmware completion from VB2 metadata
+clearing; nonzero size alone never proves valid hidden pixels. Existing module
+results never qualify this diagnostic candidate. Do not deploy/start hardware or
+repeat privileged requests while existing operator removal-refusal remains pending.
+AV1 producer transport and hidden surface lifetime remain incomplete.
+
+HOST AV1 ORIGINAL REFERENCE INDEX COMPLETE (2026-10-02):
+Existing CBS original-OBU probe now records resolved refresh masks, frame type and
+show-existing slot index. tools/inspect-av1-reference-index.py follows original
+header reference aliases, not VA surface/DMA ownership. Fresh isolated -Wall
+-Wextra -Werror build and five actual software ordered pixel roundtrips PASS
+684 displayed frames including 10bit; original/aom/rav1e/SVT/10bit show-existing
+aliases149/39/45/45/39 all refer to previously hidden frame headers in this corpus.
+Evidence av1-original-reference-host.r_ti3dbd/reference-summary.json; frozen sources
+and all inputs retained. An evidence script named inspect.py shadowed Python
+stdlib and failed; traceback/source retained, renamed evidence script fixes import.
+No kernel/module/VA capability changes, no hardware opens. This is host reference
+metadata audit only, not complete AV1 conformance, VA transport or hidden pixels.
+Original producer transport source anchors also retained in
+av1-va-transport-source-audit.b5w2x0im/audit.json. Current FFmpeg start_frame sees
+original frame bytes and retains sequence bytes, but decode_slice supplies tile
+payload; Rust keeps only selected ranges. Paired bounded prefix/tile-offset
+transport and real hidden surface lifetime remain required. Operator removal
+refusal still pending; do not repeat the already presented command.
+
+POSTWAKE FULL/SCOPED PASS / CLIENT REMOVAL REFUSAL PREPARED (2026-10-02):
+exec34519 exited0. Sameboot4f13b3c1 genuine idle deep sleep preceding then full
+production.SmVk4F strict headless matrix/parity/churn/EOS/seeks PASS. Real-use
+run.jaca_p3g PASS4K3000byteexact65.13s46.0617FPS483252KiB actual FFmpeg RSS;
+Chromium755/25.0004s30.1995FPS779hardware completions/seek/cleanexit. RuntimePM
+before/after PASS; null600frames cleanexit/complete clean window PASS; final3
+loaded IDs unchanged and sleep_success remains1. All runners exited. This proves
+one idle deep wake followed by required decoding, not active-playback suspend.
+Next frozen active-removal-refusal.4f13b3c1.gy64n0o4 ready;2focused hostclassifier
+tests PASS (busy pin success, permission/wrongID/noPin/exit0 fail). Readonly
+preflight PASS idle/ref0/3loadedIDs/selectedSHA/currentclean. Operator-only worker
+opens idle client, requires positive module ref, plain rmmod once must refuse
+specifically busy with same loaded module/pin retained. No forced removal/reload/
+reboot/sleep/retry; bounded process-tree/global kernel observer; closes ownfd then
+verifies idle ref0. Scope open idle client, active streaming remains unqualified.
+Necessary operator sudo python3 /home/mq/.cache/libva-v4l2-qualification/resume-20261002/active-removal-refusal.4f13b3c1.gy64n0o4/run-reviewed.py
+Agent did not open decoder or attempt removal for this packet. Wait quietly pending.
+AV1 VAAPI producer/hidden-reference ownership/Chromium remains incomplete; native
+AV1 passes alone never enable advertised support. Preserve all older failures.
+
+SAMEBOOT DEEP SLEEP PASS / POSTWAKE GATES ACTIVE (2026-10-02): operator
+idle-sleep-postdecode.4f13b3c1.ecvqq5_f genuine deep witness PASS boot4f13b3c1,
+sleep_success0->1, PMnone, complete clean kernel window; actual3patched identities
+unchanged. Fresh frozen postwake-qrtr.4f13b3c1.4v5a85g1 binds preserved before/after/sleepresult, exact
+v15 driver/source/harness and current-boot activation. Preflight idle/clean/lease/
+selectedSHA/loaded builds PASS. verify-loaded also refuses additional sleep cycles.
+run-all.sh ACTIVE exec34519 full strict then conditional4K/Chromium/runtimePM/null
+regression; before-gate PM PASS. Inspect without competing; no repeated tests.
+No operator action needed while running. No agent sleep/reboot/unload/privileged
+writes. Previous failed boots/evidence retained; AV1 VAAPI and active-client
+removal-refusal still incomplete. Do not call expanded production complete.
+
+FRESH PATCHED BOOT ALL SCOPED GATES PASS (2026-10-02): exec57728 exited0.
+qrtr-installed-boot.4f13b3c1.fo17v1gt production.uDTPWA full strict correctness/
+lifecycle PASS; real-use run._2skxs22 PASS4K3180byteexact70.25s45.2669FPS491320KiB
+actual FFmpeg RSS (whole observer tree553012KiB separately). Chromium757frames/
+25.0003s30.2796FPS780hardware completions/seek/cleanexit PASS. Before/after runtime
+PM PASS;600frame null regression cleanexit/complete clean kernel window PASS.
+Final three loaded identities PASS; no runners remain or competing hardware.
+Sameboot postwake decoding still pending because operator chose normal restart
+between prior deep witness23b4 and these freshboot4f13b3c1 results.
+Fresh observer idle-sleep-postdecode.4f13b3c1.ecvqq5_f prepared read-only after
+sameboot strict/scoped prerequisites and idle/clean state; no sleep transition.
+Necessary operator command systemctl suspend once, wake normally DO NOT RESTART,
+then python3 /home/mq/.cache/libva-v4l2-qualification/resume-20261002/idle-sleep-postdecode.4f13b3c1.ecvqq5_f/observe-reviewed.py verify
+After PASS run required fresh full strict/scoped decode gates under lease on this
+sameboot and preserve before/after sleep evidence. No repeat on failure/hang.
+This required cycle follows prior PASS, not retrying unchanged failed experiment.
+AV1 VAAPI and active-client removal-refusal still incomplete. No completion claim.
+
+FRESH PATCHED BOOT FULL GATE PASS (2026-10-02): qrtr-installed-boot.4f13b3c1.fo17v1gt/
+production.uDTPWA strict full headless gate PASS pixel parity/matrix/churn/EOS/seek
+clean kernel windows and final frozen driver identity. Run-all exec57728 remains
+ACTIVE scoped4K/Chromium/runtimePM/null regression; before-real-use PM PASS.
+Do not start competing tests. These are fresh boot4f13b3c1, not postwake on23b4.
+Actual deep sleep PASS preserved; user normal restart confirmed. Need genuine
+sameboot postwake decode qualification after runner completion. No extra sudo or
+restart requested; no new agent sleep/module operations.
+
+DEEP SLEEP PASS / FRESH RESTART GATES ACTIVE (2026-10-02): actual idle deep
+sleep witness PASS on23b4aa5c, sleep_success3->4, PMnone, clean completed kernel
+window and three actual patched module identities checked. User chose normal
+restart afterward; independent journal orderly shutdown confirms, now boot
+4f13b3c1-dddf-4b86-9667-b104b7fad629. Cannot label fresh boot tests post-wake on oldboot.
+Current cold3loaded identities and selected exact pair PASS; journal clean,
+Irisref0/suspendedusage0/auto. Fresh frozen qrtr-installed-boot.4f13b3c1.fo17v1gt
+copies prior exact v15 source/harness/driver, fresh current-boot activation evidence.
+run-all.sh ACTIVE exec57728 full strict gate then conditional scoped4K/Chromium/
+runtimePM/null regression, stops first failure. Before-gate runtime PM PASS.
+Inspect runner/logs without competing hardware or repeated tests. No new sleep/
+module/reboot by agent. Next genuine sameboot post-wake decode still pending;
+AV1 VAAPI and active-client removal-refusal still incomplete. Old failures kept.
+
+PATCHED QRTR STAGED PM PASS / IDLE SLEEP OBSERVER PREPARED (2026-10-02):
+Currentboot23b4aa5c pm-qrtr-fixed.23b4aa5c.pffv4qkb actual freezer5.504s/devices6.554s/
+platform8.058s PASS, exit0/no linger/complete clean global kernel windows; all
+controls restorednone/0/0, Iris ref0/suspendedusage0/auto. Three actual loaded IDs
+verified before/after wrapper. Previously failed Wi-Fi platform symptom absent in
+changed candidate run, not proof of earlier true deep hang cause. Idle sleep
+observer frozen idle-sleep-qrtr-fixed.23b4aa5c.avk4woal,7witness hosttests PASS; agent prepared before journal
+cursor/sleep_success snapshot only, no sleep or privileged/module operation.
+Operator next save work then select Sleep manually, let it sleep then wake normally;
+verify command python3 /home/mq/.cache/libva-v4l2-qualification/resume-20261002/idle-sleep-qrtr-fixed.23b4aa5c.avk4woal/observe-reviewed.py verify
+Wrapper verifies actual3loaded identities/selected QRTR hashes and sameboot staged
+PM pass; observer requires genuine PMnone, increasing sleep_success, completed
+entry/exit/no fault and idle Iris. User authorization for operator-led tests persists.
+Do not repeat if failure/restart/hang; preserve evidence and inspect journal. After
+successful actual sleep witness full required fresh postwake decode gates remain.
+AV1 VAAPI and active-client removal-refusal remain incomplete. Stay quiet pending.
+
+QRTR COLD BOOT VERIFIED / PATH BUG FIXED (2026-10-02): user verifier failed
+selection comparison because /lib symlink resolves /usr/lib on actual path only.
+Original verifier and failure JSON preserved; resolve both sides, mismatch still
+rejected. Corrected verifier PASS boot23b4aa5c-c050-4c60-bee9-e6d7bdfdd52f actual
+QRTRa3742ff58316450e2f4cbc77f799d29f567277d4/MHI2a9b093bf2b5cfcddd4a3b31f5b3ad8cb3757de4/Iris231cb9f3a0141c3ddfa7b8df87df0889eff2f5f2.
+Exact selected pair SHA PASS; independent kernel journal no matching fault/WARN.
+Fresh operator-only staged packet pm-qrtr-fixed.23b4aa5c.pffv4qkb; readonly preflight PASS idle/ref0/
+suspendedusage0/auto and PMnone/0/0. Frozen wrapper binds current activation,
+three loaded build IDs and selected QRTR pair before/after each stage; shared
+lease/strict observer/restoration in tools; freezer then devices then platform,
+stops first failure, exclusive attempt witness prevents unchanged retry. No real
+platform machine sleep, module ops/reboot/decoder opens by agent. Necessary
+operator command sudo python3 /home/mq/.cache/libva-v4l2-qualification/resume-20261002/pm-qrtr-fixed.23b4aa5c.pffv4qkb/run-reviewed.py
+Save work/screen may dark briefly. Wait quietly while pending. Genuine system
+sleep/postwake, active-client removal-refusal and AV1 VAAPI still unqualified.
+
+QRTR PACKAGE LOCATION CORRECTED (2026-10-02): user requested repository ownership,
+not Chromium Snap storage. Upstream patch now kernel/0006-qrtr-resend-hello-on-mhi-resume.patch.
+Both failed r1 and installed r2 deployment bundles moved to qualification workspace
+resume-20261002/deployment/qrtr-resume-r{1,2}; old Snap paths are compatibility
+symlinks only, no duplicated payloads. R2 resolves BUNDLE to canonical location;
+INSTALL.txt current commands updated, pre-relocation identities preserved separately.
+Installed boot files/root rollback backups untouched; no reinstallation needed.
+Next after operator normal restart use canonical r2 verify-cold-boot.py.
+QRTR patch is an upstream platform dependency, separate from Iris patch stack;
+never apply automatically to Iris-only source. No hardware/PM operations.
+
+QRTR R2 OPERATOR INSTALL SUCCESS (2026-10-02): user reports
+prior_rollback_verification=pass paired_boot_files=installed live_modules=unchanged.
+Independent readonly selection+SHA checks confirm exact qrtr/qrtr-mhi overrides
+and corrected hook. Current boot8f19b5c6 still original QRTR builds0f5c6c68820ae6e5cda0a4299b8413d4c3c750c1/
+4c0b03365c6835ac0adbca717157a24bb3e903f4; Iris v15 unchanged. No decoder/sleep/module
+operations by agent. Operator normal restart then r2 verify-cold-boot.py required.
+Do not request further sudo/install retries while waiting. No sleep before actual
+changed identity checks and fresh reviewed diagnostic packet. Failed r1 retained.
+
+QRTR R1 INSTALL FAILED / R2 CORRECTED (2026-10-02): operator r1 install rejected
+unexpected qrtr in initramfs; automatic rollback paths ran, original selection
+restored/override absent/hook absent. Root backup state/exact initrd+metadata
+restoration must be verified by r2 privileged preflight before changes. Do not
+rerun r1. Actual distro auto_add_modules =net/qrtr copies original subtree before
+hooks; real staged directory+explicit module copy reproduced original+candidate
+duplicates. Initial rehearsal missed this directory-copy path. Failed r1 bundle
+and root backup preserved. R2 hook calls apply_add_modules, checks exact both
+candidate image hashes, removes only original qrtr/qrtr-mhi variants from DESTDIR,
+never host distro modules. Final image still strictly rejects any wrong copy.
+Rehearsal-r2 actual generated depmod selection/exact pair/hash/wrong-copy refusal
+PASS;9transaction/rollback/prior restoration tests PASS; readonly preflight PASS
+with root rollback verification deferred. Corrected bundle:
+/home/mq/snap/chromium/common/libva-v4l2-production/qrtr-resume-r2/INSTALL.txt.
+Necessary corrected operator install step presented; only after success normal
+operator restart and r2 verify-cold-boot.py. Never live unload QRTR/Wi-Fi; no sleep
+retry before new reviewed packet with actual changed loaded identities. No r2
+privileged writes, reboot, sleep or decoder opens by agent. Currentboot8f19b5c6.
+
+QRTR REVERSIBLE BOOT PACKAGE READY (2026-10-02): bundle
+/home/mq/snap/chromium/common/libva-v4l2-production/qrtr-resume-r1/INSTALL.txt.
+Paired qrtr/qrtr-mhi overrides and version-gated explicit initramfs hook; retains
+Iris v15 and distro modules; snapshots baseline initramfs/module metadata;
+completed failure automatic restore, unfinished writer refuses competing rollback.
+6mocked transaction tests PASS, readonly preflight PASS, staged actual depmod/
+dracut-install copied exact pair+Iris PASS. Cold verifier prepared checks all3
+actual loaded build IDs and selections after new operator boot. No privileged
+writes/module operations/sleep/reboot. Operator install command presented once,
+then only on successful installation operator normal restart/cold verifier.
+Do not repeat unchanged requests while pending; no sleep until changed identities
+and a NEW reviewed diagnostic packet. Existing failed PM evidence stays failed.
+
+QRTR UPSTREAM CANDIDATE HOST VERIFIED (2026-10-02): exact upstream patch applied
+without edits to authenticated distro QRTR source in qrtr-resume-review/candidate.
+Exact running kernel headers W=1 modules PASS; actual-function UBSan host model
+4resume/error paths +10000handshake resets PASS (not concurrency/hardware proof).
+ABI imports PASS qrtr127/qrtr-mhi24; added qrtr_endpoint_hello resolved against
+candidate qrtr export. SHA qrtr0981df0407fe42db0064a9d47a97f7836d23042cd25365914552a9bfc38f8485;
+qrtr-mhi4fe0acdbf99364f87bcf0a67e21dcf7045473016e0a8ff978e081a8a9ba39715.
+Review/identities/build/model evidence saved; no deployment or live module change.
+Next prepare paired reversible future-boot deployment; never live unload QRTR/Wi-Fi.
+Only changed candidate after operator installation/boot can receive controlled PM
+retest. Do not retry existing platform packet or claim system sleep qualified.
+
+LATEST PLATFORM FAILURE / QRTR REVIEW (2026-10-02): operator platform diagnostic
+FAIL on b86c3104: ath12k_wifi7 WCN7850 restart timeout -110, two mac80211 WARNs;
+Iris suspend/resume callbacks returned0. Runner exited0/no lingering, controls
+restored none/0/0; strict global kernel observer correctly failed. Failed evidence
+and SHA manifest preserved in pm-platform-packet.b86c3104.zlgf9wpy. No further
+hardware or PM tests on this warned boot; no unchanged retry. Host independently
+restarted to 8f19b5c6-686e-4201-ac31-3d75443ddf72; persistent v15 cold identity PASS,
+no new decode qualification. Agent performed no reboot/sleep/module operation.
+Exact authenticated distro archive extracted QRTR source: handshake-at-register
+present, resume handshake absent. Upstream fix6a5719cc3ef2e4d9857cc4ae18e6db09d59a8cc9
+net: qrtr: resend HELLO on MHI resume matches exact WCN7850/ath12k_wifi7 symptom.
+Prepare isolated credited upstream backport and exact-header build before any
+operator deployment/test. This does not prove the cause of earlier deep hang.
+AV1 VAAPI/Chromium remains gated, real sleep and active-client removal-refusal
+remain incomplete. Old results remain bound to their original boots.
+
+LATEST PLATFORM PM PREPARATION (2026-10-02): operator-only platform dry-run
+packet pm-platform-packet.b86c3104.zlgf9wpy prepared. Exact 7.3 distro suspend.c
+SHA71c4a16ad3db8cac349b7d8b52cdfddae26a8918216f18ec54a68c1761077576 extracted
+from cached package archiveSHA2519439d088772d8dfe298d5c1c4bcff7c2744abef41183c93e0bd1e97614813
+matching .dsc. Actual suspend_enter host model6cases PASS: TEST_PLATFORM bypasses
+CPU offlining/syscore/platform machine sleep,5callback error rollback paths covered;
+not hardware/concurrency proof. Initial host compile missingerrno failed evidence
+platform-boundary-host preserved; corrected platform-boundary-host-r2 PASS.
+Operator runner adds platform stage only, requires preceding PASS devices sameboot/
+build/restorednone, refuses unavailable stages, explicitly witnesses restoration
+of debug/print along with pm_test.8focused witness/restoration/prerequisite tests
+and174tooling tests PASS51.966s; py_compile/diffcheck PASS. Frozen wrapper verifies
+all packet identities before action; shared hardware lease/exactloaded/idle/clean
+kernel gates remain. Read-only --check PASS sameb86c3104/build/ref0/suspendedusage0
+andnone/0/0; NO transition or privileged write run. Necessary operator step:
+sudo python3 /home/mq/.cache/libva-v4l2-qualification/resume-20261002/pm-platform-packet.b86c3104.zlgf9wpy/run-reviewed-platform.py
+Save work; screen may dark briefly. No module/reboot/CPU offline/actual deep sleep.
+Stop and inspect failure; do not retry. Inspect pending evidence quietly, no repeated
+operator request. Devices/freezer actual PASS remain diagnostic-only; real sleep/
+postwake and active-client removal-refusal still incomplete. AV1 native diverse
+passes retained; VA hidden-reference ownership/Chromium integration remain gated.
+
+LATEST AV1 EXPLICIT DECODE-ORDER DIAGNOSTIC (2026-10-02): fresh isolated FFmpeg
+source/build av1-order-diagnostic-source/build; standard display-delay0/enable1
+S_CTRL+G_CTRL verified before streaming, AV1-only opt-in, capture trace only;
+receive-core discard model PASS. Installed VA/kernel unchanged. Single bounded
+av1-decode-order.b86c3104.8lk29q48 hardware experiment:96displayed full ordered
+pixel hashes exact/exit0/no linger/kernelclean. Strict runner result FAIL preserved:
+checker assumed exactly2control messages, FFmpeg probe and real decode initialized
+2distinct contexts=>4messages. Offline capture-review.json proves both contexts
+set/read exactcontrol10029965=0/10029966=1. No hardware retry or failed-result rewrite.
+139capture completions:96nonempty,42empty ERROR alltimestamp0,1emptyEOS. Explicit
+mode does not make hidden reference surfaces available through current kernel.
+Raw HFI payload/hidden pixel validity NOT observed; do not clear error flags on
+assumption. Need further verified hidden-reference transport/firmware semantics
+before VAAPI/Chromium AV1 support. Original source patch and identities frozen.
+All runners exited/refcnt0. Device-stage operator PM PASS6.6598s and temporary
+pm_test/debug/print restorednone/0/0; genuine system sleep still unqualified.
+Diverse native AV1 aom/rav1e/SVT96 each PASS after device PM, clean windows.
+Next: continue paired producer/hidden-reference ownership work and staged operator
+PM diagnostics; no repeated deep sleep or unchanged hardware failure.
+
+LATEST AV1 DIVERSE HARDWARE PASS (2026-10-02): after operator device-stage PM
+PASS, serial exact prepared native cases aom-720p/rav1e-720p/svt-720p all PASS96
+ordered full pixel hashes each, exit0/no lingering/complete clean kernel windows.
+Evidence av1-diverse-prepared.b86c3104.4qj9mp36/{aom,rav1e,svt}-720p. Current same
+boot b86c3104/exact persistent build/refcnt0. Installed VA/module unchanged;
+AV1 profile gated. Native display output proof does NOT establish VA hidden-surface
+ownership or Chromium support, nor genuine system sleep. Next isolated diagnostic:
+request existing explicit decode-order controls in native AV1 and record capture
+completion payload/flags/timestamps, with strict unchanged display parity and
+no retry. Host build/identity precedes any bounded hardware run.
+
+LATEST OPERATOR DEVICE PM PASS (2026-10-02): pm-devices-packet.b86c3104.7krx481j
+result PASS devices dry run,6.6598s exit0/no lingering/timed_out=false. Same boot
+b86c3104/build231cb9f3, refcnt0/runtime suspended/usage0/auto and pm_test none
+restored. This does NOT qualify platform sleep/post-wake. AV1 guarded independent
+encoder hardware corpus now eligible; run prepared cases serially, stop first
+failure, frozen identities/current reload/actual build/shared lease/clean kernel
+required. Installed driver/module unchanged, AV1 profile still gated.
+
+HOST AV1 HIDDEN COMPLETION AUDIT (2026-10-02): actual unchanged installed-source
+HFI flag mapping + output handler + VB2 completion extracted into sanitized C host
+model.8normal/NOSHOW/corrupt/overflow cases PASS. Even NOSHOW without corruption
+and nonzero incoming payload loses both payload and timestamp, advances no capture
+sequence, completes ERROR. Original source hashes match post-reload frozen kernel.
+Tool tools/verify-iris-av1-noshow.py; evidence av1-noshow-completion-host with full
+actual functions/identities. No candidate fix, no firmware valid-hidden-pixel proof.
+This concretely blocks publishing hidden VA reference surfaces from original AV1
+headers; native software-display DISCARD fix cannot supply those surfaces. Need
+verified firmware decode-order hidden completion semantics before changing error
+classification; actual corrupt/overflow errors must stay strict. No kernel/VA change
+or hardware opens. Device PM operator result still pending; no repeated request.
+
+HOST AV1 ORIGINAL TILE SPANS (2026-10-02): Extended actual CBS original-byte
+probe to require tile-group pointers/sizes strictly within original OBU spans and
+record OBU-relative offsets; verifier rejects missing/out-of-bounds tile spans.
+Fresh av1-original-tile-host.ggbm0h1q PASS5software roundtrips: original MP4300,
+aom/rav1e/SVT96each and 10bit aom96; all ordered full pixel hashes exact.
+Original tile groups300/99/96/96/99, hidden/showexisting retained. Strict C build,
+py_compile and diff-check PASS. Sources, exact linked libraries and manifest frozen.
+This validates producer offset feasibility only: VA transport, hidden-surface
+publication and Chromium AV1 remain unfinished/gated. Installed binaries unchanged.
+Device-stage PM result still absent on same b86c3104/refcnt0; no hardware opens,
+no repeated operator request. Continue host integration while pending.
+
+HOST AV1 DEPTH CONTINUATION (2026-10-02): Original OBU verifier now preserves
+source 10/12-bit comparison formats and refuses unknown formats instead of always
+converting to 8-bit NV12. 12-bit acceptance is NOT tested/qualified. New host-only
+libaom Main10 fixture av1-original-depth-host.d70ni99w PASS96 ordered full 10-bit
+pixel hashes, original hidden42/showexisting39 preserved, parsed high_bitdepth=1.
+Same verifier 8-bit libaom96 regression PASS unchanged NV12 hashes. py_compile PASS.
+Frozen source/probe/fixture/results/trace manifest retained. No hardware decoder
+opens or VA/module changes. This is host transport feasibility only, not AV1
+hardware/Chromium support. Device-stage PM operator result still pending; no
+unchanged request/retry. Continue actual producer/VA hidden ownership integration
+and guarded hardware corpus after successful operator PM diagnostic.
+
+HOST AV1 PRODUCER CONTINUATION (2026-10-02): Exact CBS original OBU retention
+probe implemented producers/av1-cbs-original-obu-probe.c and reproducible verifier
+tools/verify-av1-original-obus-host.py. No hardware decoder open/find_stream_info/VA
+call. Requires entire packet unit coverage/contiguity and bounded original spans.
+Host software roundtrip av1-original-obu-host-r2 PASS original MP4300 + libaom/
+rav1e/SVT96each, pixel hashes and order exact, hidden/show-existing retained.
+MP4 absent temporal-delimiter raw OBU demux attempts FAILED and preserved at
+av1-original-obu-host; corrected host adapter uses IVF framing with original packet
+units+original sequence extradata and original PTS, no sequence/frame synthesis.
+Timing NOT qualified. This proves compression-header preservation feasibility,
+NOT final VA transport/hidden-surface ownership or Chromium integration. Installed
+VA/module unchanged, AV1 profile gated. Four host successes do not qualify hardware.
+No new hardware corpus opens while operator device PM result pending. Existing
+necessary operator command remains presented, do not repeat it unchanged.
+
+Expanded AV1/system-sleep/controlled-live-removal scope INCOMPLETE. Firefox deferred.
+Boot b86c3104-05ca-4e40-a913-9226ea801cfb runs exact persistent build
+231cb9f3a0141c3ddfa7b8df87df0889eff2f5f2; installed VA/module unchanged.
+Idle operator module removal/reload and fresh post-reload full strict matrix,
+churn/EOS/seeks/4K/Chromium/runtime-PM/null-output all PASS, all windows clean.
+real-use run.u738ry1i:3120byteexact70.98s43.956FPS467568KiBRSS. Active-client
+normal-removal refusal still pending; no force-removal support.
+Operator freezer dry run PASS5.4915s/cleanexit/clean kernel/settings restored.
+Device-stage operator packet pm-devices-packet.b86c3104.7krx481j is ready;
+necessary command already presented; do NOT repeat unchanged sudo request.
+No result yet. No agent sleep/unload/reboot. Prior ec980588 deep sleep FAIL/no
+recorded resume/forced shutdown; cause unproven, no unchanged deep retry.
+AV1 native fullstream300/300 pixel parity IN ORDER PASS with receive-core
+DISCARD correction in av1-discard-core.b86c3104.7ky_w9qp, clean kernel/teardown.
+Original299-frame and first-empty-recycle/internal-error failures preserved.
+Actual-function host discard model PASS through10000empties/error propagation.
+Native test alone is NOT Chromium/VAAPI production support; profile remains gated.
+New HOST-ONLY diverse corpus av1-corpus-host.cgwv9g1s generated libaom/rav1e/SVT
+8-bit720p96displayed frames each. Traced hidden42/45/45 and showexisting39/45/45,
+varied refresh flags. No grain/superres/10bit/sequence-change coverage yet.
+Frozen candidates/references av1-diverse-prepared.b86c3104.4qj9mp36; identities
+and pending-PM guards PASS. No hardware corpus run; waits successful device-PM
+result on same boot, then verify loaded identity/kernel/shared lease before each
+case; stop at first failure. Inspect operator/test runners without competing.
+FFmpeg parsed original sequence bytes are retained in seq_data_ref, current OBU
+bytes are passed to start_frame; vaapi_av1 ignores originals. Need actual producer
+and driver transport/hidden-surface ownership integration plus lifecycle/diverse
+hardware proof before enabling AV1. No unused driver API or reserved-ABI abuse.
+Host tests never qualify production. Stop hardware on any new kernel/firmware
+fault; never open on three known faulted boots. No4K60/battery/zero-copy/kernel
+physical-memory claims. Preserve all user changes/failures. All runners exited,
+refcnt0; stay quiet while operator pending unless meaningful new progress.
+
+## Completed recently
+SCOPED INSTALLED PRODUCTION QUALIFICATION COMPLETE (2026-10-02).
+Boot ec980588-64dd-447d-a29a-00e44e786ae8 automatically loaded persistent
+candidate build231cb9f3a0141c3ddfa7b8df87df0889eff2f5f2, module SHAa604eda3...230aa,
+VA unchanged v15 SHAa1cbbb6b...50ff. Read-only cold identity PASS.
+Fresh installed-routing.ec980588.fdr663c_/production.69Uych full strict gate
+PASS matrix/graphics/resolution/long-codecs/churn/EOS/seeks, clean kernel.
+real-use/run.mpwcqztq scoped PASS:4K3180byteexact77.47s41.048FPS491152KiB
+(<512MiB), Chromium playback/seek/cleanexit PASS. Ordinary runtime PM before/
+after PASS active then suspended usage0/auto. Null-output regression PASS600
+frames/exit0/no lingering children/complete clean kernel window.
+Actual installed launch-chromium.py persistent profile smoke r2 PASS759frames
+25.0005s30.359FPS781hardwarecompletions/seek/cleanexit/clean kernel. All runners
+exited, refcnt0, hardware lease free. Release evidence saved bundle/v15/
+installed-qualification.json. Kernel/device/VA identities verified; no more
+privileged actions needed. Root installer state remains its original successful
+installed_pending_cold_boot transaction label; independent user-readable cold
+verification/qualification records establish actual completion, no root state edit.
+Early boot renumbered Iris decoder video16->video0; launcher now resolves unique
+sysfs qcom-iris-decoder with hash-checked selector and exports V4L2_VA_DEVICE.
+Headless clients must set same selector-derived override as documented. Original
+wrong-node vainfo gate failure installed-boot.ec980588.z_e5zt05 retained clean;
+launcher initial smoke blocked missing execute permission retained; chmod fixed
+and fresh r2 real smoke PASS. Driver and kernel binaries unchanged.
+Supported scope ONLY opt-in Chromium and headless H264/HEVC/VP9. Firefox,
+AV1, system sleep and live module removal remain unsupported/unqualified.
+No4K60/battery/end-to-endzero-copy/separately-measured-kernel-memory claim.
+Backup/rollback remains documented; original distro module/GRUB/default profiles
+preserved. Qualification heartbeat stopped after scoped completion.
+
+Historical installed/preparation statuses below are superseded by the above.
+
+Installer R2 operator completed. Independent read-only checks confirm persistent
+module selection is updates/libva-v4l2-production/qcom-iris.ko with exact SHA
+ a604eda3918b0f8f8d3422d8a5dd53268792a93b59bb5ef9c9bcd9cf228230aa,
+and candidate path is present in current initramfs; explicit hook exists.
+Current boot5d252b15 still runs original buildd32b38c1...da8a6b. No live unload
+or decoder open. Operator normal restart and read-only verify-cold-boot.py next;
+installed-boot hardware qualification remains pending. No further sudo requested.
+
+- Installer r1 operator FAIL: candidate missing from initramfs because generic
+  image builder excludes media drivers; omitted explicit Iris hook. Root restore
+  returned selection to original; override absent, original initrd SHA7ff09fa2...
+  eaae5141. Full root backup/state unreadable unprivileged. R2 verifies prior
+  rolled_back state plus exact backup/current image+metadata before mutation,
+  retains r1 backup, uses fresh backup v15-a1cbbb6b-r2. Adds version-gated
+  manual_add_modules Iris hook; rollback removes owned hook.6host tests PASS,
+  real staged depmod/dracut-install candidate/dependency copy PASS exact SHA
+  (initramfs-r2-rehearsal._yb4c8ft). No r2 privileged writes: sudo-n refused
+  interactive authentication. Necessary terminal retry presented; no restart
+  until corrected installer succeeds. No decoder opens/live module changes.
+
+
+- Scoped persistent installation bundle PREPARED at
+  /home/mq/snap/chromium/common/libva-v4l2-production/v15/INSTALL.txt.
+  No privileged install or boot writes yet. Boot changed to5d252b15-eafd-43a6-
+  8d71-85303f9673de; actual original buildd32b38c1...da8a6b loaded/refcnt0.
+  No decoder opens on this new boot. Candidate v15 successes remain bound to
+  prior8558e0e1. Installer preflight PASS;4transaction fixture tests PASS
+  (failed-initrd rollback, unfinished-writer refusal, success/rollback,
+  corrupt-backup refusal). Boot override preserves original module; backs up
+  initrd/metadata/original, verifies candidate inside new initrd. Never live
+  loads/unloads/reboots. Opt-in Chromium launcher uses separate profile and
+  refuses unexpected loaded module. Operator install/normal restart then
+  read-only cold identity verification required before persistent qualification.
+
+
+- V13 ACTUAL scoped runtime PASS: boot8558e0e1, loadedbuild231cb9f3...2f5f2,
+  cold-boot.Zl7IlH activation PASS. Gate production.NKVdIq full strict PASS;
+  run.txbs4s6m real-use PASS scope=chromium-headless.4K3540byteexact69.88s,
+  50.658FPS/479708KiBRSS PASS; Chromium30.318FPS/seek/cleanexit PASS.
+  Runtime PM witnesses qualification.htORNl PASS: suspended before, active
+  then suspended after; active102952->225840ms/suspended73148->78045ms,
+  usage0/auto, same boot/build. All kernel windows clean. Operator exited.
+  Runtime PM fix observed working; system sleep/live unload and persistent
+  deployment remain unqualified. Do not rerun cold activation while live.
+  User asks why4K below60FPS: compare identical600frame CPU-download with/
+  without framemd5; diagnostic only, no4K60playback claim. Evidence
+  4k-hash-cost._scxn3nv. Hash arm600frames13.35s44.94FPS; no-hash null
+  output arm FAILED with10s vaSyncSurface timeout at212frames and IO errors,
+  experiment observer terminated45s. Processes exited/refcnt0, independent
+  journal no kernel/firmware fault; no completed observer qualification window.
+  Cannot isolate hashing cost or claim60FPS. Investigate host lifecycle/drain
+  before further diagnostic hardware; preserve all failures and strict gates.
+
+- V13 kernel preparation COMPLETED and superseded by actual runtime results
+  above: patch0005 in recovery-v13/packet.20vamb24. Original suspend deadlock
+  reproduced;28source-model scenarios/10000cycles,152tooling,W=1build,
+  153importCRCs and same-path reproducibility PASS. Module SHAa604eda3...230aa,
+  buildID231cb9f3...2f5f2; VA SHA8d85fbfc...4cd69. No operator runner active;
+  no additional activation or reboot requested. Persistent installation remains
+  pending. Full details: docs/production-kernel-pm-fix-20261002.txt.
+- ACTIVE v15 natural-GOP grace candidate: actual-submit-frame host model
+  with delayed20ms completion reproduces v14 premature STOP at11.176ms,
+  fifo1/STOPfailure1. Candidate100ms elapsed grace waits20.641ms until fifo0,
+  sends no STOP. Evidence keyframe-grace-model.eoy2kvrg baseline FAIL/candidate
+  PASS; injected pump completion model, not hardware/firmware proof.
+  Only natural-keyframe grace changed; ownership and compatibility seek drain
+  unchanged.228Rust/strictClippy/frozen identity PASS. Fresh v15 packet
+  recovery-v15/packet.8mtqzw6u VAa1cbbb6b...50ff reuses exact live v13 kernel,
+  current-boot activation/build checked. Full strict gate PASS production.jn0UWB,
+  all required matrix/churn/EOS/seeks/clean windows, exec83144 exited0.
+  V15 scoped real-use PASS run.x3kheaho:4K3180byteexact86.93s36.581FPS490544KiB;
+  Chromium757frames25.0004s30.2795FPS781completions/seek/cleanexit.
+  Before/after PM PASS sameboot/build active then suspended usage0/auto.
+  Null-output regression7qeohvdy PASS600frames/7.664s, exit0/no lingering,
+  complete kernel window clean; module refcnt0. Exec83394 exited0.
+  Natural-GOP grace candidate resolves this reproduced regression; no general
+  firmware-cause/4K60/battery claim. Persistent deployment and system-sleep/
+  live-unload qualification still pending; prepare reversible scoped install.
+- ACTIVE userspace pacing fix, not hardware qualified: actual submit_frame
+  host reproducer on permanently writable /dev/null exhausts2500polls in
+  2.477656ms (output-pacing-host.k9jgjefw/actual-function.log). Ordinary
+  OUTPUT waits now share an elapsed5sdeadline and yield1ms on no progress;
+  queue limits/allocations and drain semantics unchanged.228Rust tests,
+  232integrated host tests,strictClippy/release/frozen identity PASS. Actual
+  candidate submit_frame reproducer waits5.000077s instead of2.477656ms.
+  Frozen v14 recovery-v14/packet.sgawj23n VA60d19057...f3081 reuses unchanged
+  live v13 kernel and successful same-boot activation. Full strict gate now
+  PASS production.e7ss6l: required matrix,session churn,EOS/drain,seeks and
+  complete clean kernel windows; final identity PASS. Exec session17492 exited0.
+  Scoped real-use PASS run.jnj6owfo:4K3060byteexact69.5s44.0288FPS486832KiB;
+  Chromium759frames/25.0004s30.3595FPS780completions/seek/cleanexit;
+  all complete kernel windows clean. Before/after runtime PM PASS sameboot/build,
+  after active then suspended usage0/auto. Exec38158 exited0.
+  Bounded null-output regression FAIL exec44866 exited1: same212frames,
+  OUTPUT pacing stall after natural keyframe STOP/START, inner timeout124.
+  Completed observer window clean, but child FFmpeg remained after timeout;
+  private PID69657 required explicit TERM cleanup; then exited, refcnt0 verified.
+  observer completion alone does not prove teardown.
+  Evidence v14-null-output-regression.45yi30c_/result.json and no-hash.log.
+  The elapsed wait fix does NOT resolve the post-START stall. Do not rerun this
+  unchanged failure or deploy persistently. Investigate host drain/resume and
+  firmware/kernel buffer lifetime next; no new kernel fault or restart needed.
+- Host-only null-output failure analysis: hash arm has0compatibility STOP/START;
+  failed arm has2STOP/1START/2pacing stalls. First STOP at natural keyframe
+  seq210; LAST dequeued before START. Five OUTPUT submissions then3OUTPUT and
+  3CAPTURE completions precede seq215 pacing stall (out2/4,cap6/20,fifo2).
+  Investigate GOP drain/resume and poll-call pacing bounds; cause UNPROVEN.
+  Machine-readable evidence:4k-hash-cost._scxn3nv/drain-sequence-analysis.json.
+  No allocation/driver change or hardware open made for this host analysis.
+
+- User scope decision (2026-10-02): defer Firefox for this release. Supported
+  qualification scope is Chromium and headless H.264/HEVC/VP9 decoding; AV1
+  remains unadvertised. Firefox is unsupported/deferred, with its failed
+  evidence preserved. Do not relabel the original full real-use FAIL as PASS.
+  Continue kernel PM/lifecycle assessment and reversible deployment preparation;
+  retain all correctness, memory, performance and kernel safety requirements.
+
+- Current root owner (2026-10-02): v12 runtime investigation on fresh
+  boot b234b7a2-eb8f-4b27-a7fe-4d3a1d7552ab, production UNQUALIFIED.
+  Frozen identity and activation/current loaded build PASS. Operator owns the
+  hardware lease during its completed run. Gate production.9ogeIz, wrapper
+  evidence qualification.XCnWZU. Full headless gate now PASS, clean kernels.
+  Real-use run.b9pg99be sustained4K3180byteexact69.61s/45.68FPS/478680KiBRSS
+  PASS60s/30FPS/512MiB. Chromium PASS30.27FPS/cleanexit. Firefox cleanexit
+  but FAILdrops9/742=1.21%; identical diagnostic repeat11/744=1.48%, all11
+  before5s. No kernel faults. Full real-use stays FAILED. Software-decode
+  private control also11/745drops,allbefore5s,IsHardwareAccelerated=false
+  and0driver messages. Shared Firefox startup issue suspected, not proven.
+  Software timeline diagnostic6/761 drops, all by0.702s, visible page and
+  sampled animation gaps17ms; no driver messages. Evidence
+  firefox-startup-timeline.70j0g6wh/findings.txt. Variable startup drops remain
+  unexplained; diagnostic success cannot replace failed hardware qualification.
+  All runners now exited; kernel windows clean. Firefox investigation deferred
+  by the user; continue kernel lifecycle and deployment requirements.
+  Boot311d78af remains forbidden after v9 emitted5SESSION-FATAL in VA sample30;
+  c5ace5e4 and4492e975 also excluded (full IDs in cold runner).
+- Historical pre-v13 preparation: boot8558e0e1 initially had Iris absent.
+  Superseded by the matching successful v13 activation/runtime results above.
+- Scoped kernel PM review: host concurrency model reproduced a lock cycle
+  using actual iris_pm_suspend/iris_hfi_pm_suspend functions from the matching
+  candidate source. Suspend holds core->lock; power-off waits in disable_irq;
+  a queued IRQ handler needs that lock. Evidence
+  resume-20261002/scoped-pm-review.ne8c5e23/review.txt. This is a modeled race,
+  not a new hardware fault. Removal patch0003 does not address this PM path.
+  Prepare an IRQ/PM synchronization fix and host race tests before considering
+  persistent kernel deployment; do not simply drop IRQ synchronization or
+  release the mutex around hardware teardown without handling races.
+- v12 packet: resume-20261002/recovery-v12/packet.wlhanl45. VA SHA256
+  4a7a39bff1e146143390f5b10ca94246fa345a004e7568c8dd502243640d2d26.
+  Changes: lazy CAPTURE mappings; Arc<Vec<u8>> immutable snapshot aliases;
+  CPU pool queries firmware minimum only AFTER initial SOURCE_CHANGE event,
+  targets max(20, minimum+6). Invalid/failed controls fail setup. Predecode
+  exports and recovery preserve CAP32; independently passed OUT4 retained.
+  Export pressure appends4 via CREATE_BUFS while preserving six working slots,
+  existing mappings/reservations/export accounting. No shrinking live exports.
+  Runtime evidence: full headless and sustained 4K gates PASS; process RSS
+  fell from v8 803260KiB to 478680KiB. Reserved kernel memory unmeasured.
+  Scoped production remains UNQUALIFIED pending kernel PM/lifecycle and
+  persistent deployment. Firefox is explicitly deferred, not passed.
+- Initial DMA snapshots and stable export publication copies remain necessary:
+  firmware selects working targets and late readers can retain old frames.
+  Arc aliases share pixels and survive owner replacement/drop; writable images
+  remain independent. Lazy mappings reduce process accounting, not kernel
+  reservation; pool reduction may reduce allocation if hardware proves it safe.
+- Host:226Rust,230integratedstress,149tooling,strictClippy/fmt/release PASS.
+  Native Linux headers confirm G_CTRL/CREATE_BUFS ABI. Mapping-tail failure
+  preserves queued state, pointer identity and held exports. Frozen source,
+  driver and kernel artifact identities PASS. Host preparation performed no
+  hardware opens; subsequent v12 hardware results are recorded above.
+- Same qualify-cold-order-reviewed.sh now points to v12; original v11 wrappers
+  saved. Current faulted-boot rejection actually PASS before sudo. Full next
+  step and rollback in docs/production-next-cold-20261002.txt. Cold restart and
+  operator activation now complete; matching boot/build independently verified.
+- Historical actual v7/v8 strict full gates PASS; v8 Chromium PASS. v8 4K300
+  byteexact44.64FPS/803260KiBRSS FAIL512MiB. Firefox correct seek/hardware but
+  timeout124: sessionstore proves extra Mozilla first-run privacy tab. Private
+  firstRunURL suppressed; user closed old test window. Browser thresholds strict.
+  v9 CAP8/growth failed and source reverted; immutable failed evidence preserved.
+  Historical gates do not qualify v12. Its own pixel/lifecycle/kernel/4K gates
+  now PASS; Firefox remains FAILED. Acquire the hardware lease for further probes.
+- Reviewed temporary kernel SHA10e15278...f3af1/buildID372e5204...9b883 unchanged.
+  Installed original module SHA9836e09e...dc4c unchanged. No live unload, forced
+  removal, persistent install, boot edit or agent reboot. Cold rollback via
+  ordinary reboot WITHOUT blacklist restores original (known defects retained).
+- Heartbeat finish-libva-production-qualification ACTIVE every10minutes, updated
+  to v12; quiet until meaningful progress or required operator action. Inspect
+  an active operator runner without competing hardware. Disable only on genuine
+  completion. Sole ownership confirmed; preserve all existing user changes.
+
+## Historical recovery notes (superseded by the current task above)
+
+- HARDWARE STOP: initial packet.hxix0_32/production.oeTqVg passed CPU1/30/300,
+  full GL300 and resolution780, then FAILED rc141 before long decode; outer
+  window reports both Iris index32 UBSAN reads. Original results preserved.
+- User-started activation17:25 deadlocked removing the original module.
+  On the old boot Python38033/modprobe38044 and IRQ712 were blocked/live;
+  Iris was Unloading/refcnt-1. Candidate NEVER inserted. User reboot recovered
+  that state; do not repeat live activation/rollback or forced removal.
+  Hung-task stacks prove disable_irq/core-lock cycle. GDM's17:27:32 Mesa abort
+  is separately recorded; causality remains unproven.
+- Prepared bounds+removal candidate (0001+0003, excluding PSC0002): build/model
+  PASS, all152imported CRCs PASS. SHA256 b333a5b6...a29bc, build ID
+  de5d3d265214e6c64edddf31a4040983abc46288, srcversion8057268C3554915BE16E951.
+  Removal source model reproduces original deadlock and patched4scenarios PASS.
+  General PM power-off lock ordering remains unresolved; no runtime proof.
+- Host fixes: per-session kernel/transition fail-fast, ffprobe producer drain,
+  boot/module/fixture provenance, generated distinct-ID seek fixture, activation
+  phase journal and bounded cleanup with unfinished-PID evidence/no rollback race.
+  Latest tooling147/147PASS (24activation regressions), source models PASS.
+  Logs under ~/.cache/libva-v4l2-qualification/resume-20261001/; latest tests
+  recovery-v4-host-tests.log. Shell syntax and git diff --check PASS.
+- Latest immutable packet: resume-20261001/recovery-v4/packet.cuishazj.
+  Identity PASS; same Rust driver SHA5f79f6...eab98. Reviewed module artifacts
+  copied into kernel-artifacts/ with SHA manifest. Current hardware gate in progress; qualification not yet established.
+  Prior recovery-v3/final-v2/final packets predate guards/journal and remain historical.
+- Cold wrapper: resume-20261001/activate-cold-reviewed.sh. Faulted-boot rejection
+  PASS before sudo. User asked to save work/reboot once with
+  modprobe.blacklist=qcom_iris, then run wrapper. It requires absent Iris and
+  interactive sudo. Guide: docs/production-cold-boot-20261001.txt.
+  Activation now PASS with exact identity, boot and unchanged installed module
+  verified. Frozen strict gate running; only clean pass permits real-use runner.
+  Do not treat source/ABI checks as hardware qualification. Remaining runtime
+  matrix/lifecycle/sustained4K/browser and persistent deployment pending.
+  AV1 remains disabled pending authoritative producer metadata/full parity.
+  Full report: docs/production-resumption-20261001.txt.
+
+## Previous handoffs (historical)
+
+- Production resumption (root, 2026-10-01 17:00 local): user requested all
+  pending work through completion. Current decoder/DRM nodes available, lease
+  free, no qualification/decode processes observed. Freeze current source with
+  stage-production-qualification.py; run strict gate on immutable identity.
+  Preserve old failures, ownership guards, required parity and performance
+  budgets. Coordinate with any external editors before shared Rust changes.
+  No system installation, module activation or reboot authorized by this run.
+
+- CPU capture fallback audit finished (test_4k child, 2026-10-01): repaired
+  external6-slot candidate now passes CPU1/30/300 per root; owner continues
+  GL/resolution gate. Isolated31+1 fallback built/host219/Clippy/fmt pass but
+  NEVER hardware executed, no shared Rust changes. Preserve unrun artifacts
+  ~/.cache/libva-v4l2-qualification/cpu-export-window-candidate; patch/provenance
+  and actual failure/pass chronology in docs/pending-lane-performance.txt.
+  No fallback test while current owner lease/gate is active; latest replenishment
+  repair supersedes the hypothesis that6slots necessarily require enlargement.
+
+- Seek/EOS integration update to review root (2026-10-01): submit.rs now
+  replenishes the full bounded CPU working pool on every streaming submission,
+  instead of only requeueing the recycled target's old slot. This addresses
+  the queue-policy interaction; no capture.rs edits in this lane. H264 now
+  preserves slice PPS IDs and recognizes IDR25/45/65, rejecting05. Host checks
+  pass. packet.dojf_84g failed HOST checks only: it captured a transient syntax
+  error in test_4k_thread_scopes.py (already corrected by its owner) and an old
+  diagnostic assertion in test_decode_quality.py (updated here to assert the
+  new exact fail-fast status9/expected0 result). No hardware opened for that
+  packet. eufa1nd_/xrSLy6 still failed CPU30 clean: diagnostic cpu30-debug.e8sxkg
+  traced CAPTURE starvation during pre-IDR drain/replay, whose top-up was still
+  stable-capture-only. Extended both to streaming CPU queues; retain ownership
+  and replay failure guards. Rust219/fmt and strict Clippy pass. Current gate:
+  igmkrc1v CPU1/30/300 pass; GL CPU reference times out, clean kernel. CPU
+  polling now replenishes working CAPTURE while a sync/download blocks its
+  submitter; it latches a QBUF failure rather than publishing success. Current:
+  packet.9_hlndl8 SHA5f79f6e4e7e430f162658746f3f349520af3b50f0af2ed44d8a344340f1eab98.
+  Supplied distinct-ID low fixture; required counts and stronger controller
+  unchanged. Software-only seek trace proves original colliding SPS/PPS IDs
+  cause37 syntax errors versus0 with distinct IDs at the same3seek targets.
+  No default fixture change until hardware proves the new ID support. Preserve
+  strong seek/kernel validators; do not start another lane while gate owns lease.
+
+- Integration regression handoff (review root, 2026-10-01): inspected external
+  packet.377t6a0p / production.ZIYIfL: new dc9739...ca63 candidate passes
+  sample1 but FAILS required sample30 with status251; all kernel counters0.
+  Root export agent now auditing bounded legacy CAPTURE policy against the
+  previously clean b2e7ce candidate. External owner retains submit/H264 fixes;
+  no competing edits there. Do not claim final build qualified. Earlier root
+  baseline small-stream STOP was followed by external 15:27-15:28 clean full
+  matrix/Bframes150/churn/EOS on b2e7ce; it is baseline-specific evidence.
+  Root does not repeat crashing baseline fixture. New source needs full gate.
+
+- 4K memory source audit HOST FIX COMPLETE, hardware measurement PENDING
+  (performance child, 2026-10-01): changed only
+  `tools/verify-4k-decode.sh`, a focused argv regression under `tools/tests`,
+  and performance report updates. Existing logs show17 published surfaces in
+  the1-frame leg; output-only `-threads:v1` does not bound input decoder
+  threading. Independent input/output limits now covered by a before-failing,
+  after-passing host argv regression across all4codecs/1,30,full legs;
+  preserve512MiB budget. Allocation/lifetime model and bounded smaps follow-up
+  recorded in `docs/pending-lane-performance.txt`; no inferred RSS/leak claim.
+  No capture/export/codec/recovery edits and no hardware opens after STOP.
+
+- Firefox export ownership host fix complete; hardware qualification PENDING
+  (test_4k child, 2026-10-01): only `rust/src/v4l2/capture.rs` changed.
+  Keep CPU working queue bounded before late exports, restore valid snapshots
+  when their old slot is a foreign reservation, and reuse existing reservations
+  idempotently. Three new regressions fail before/pass after; Rust212, host
+  stress216, strict Clippy and fmt pass. No codec/submit/recovery/replay edits,
+  no hardware opens after STOP. CPU/GL/churn/Firefox qualification of the changed
+  queue policy still required; details `docs/pending-lane-performance.txt`.
+
+- HARDWARE STOP handoff (review root, 2026-10-01 15:26 local (UTC+7)): VA small
+  B-frame probe on baseline fc082 produced0 output and five session-fatal
+  0x4000003 messages, exit251. Root STOPPED further hardware opens. Evidence
+  ~/.cache/libva-v4l2-qualification/smallstream-va-20261001-root-1/driver-small.log.
+  Preceding native/VA720p checkpoints passed clean; native-small independently
+  produced one zero frame with no kernel fault. Do not automatically retry
+  this fixture or open another decoder after this fault. External seek owner
+  must account for this shared-device state before any further hardware test.
+
+- Six-lane root hardware evidence (2026-10-01): exact baseline fc082 binary
+  one-frame native and VA both pass byte parity with clean kernel windows
+  (`~/.cache/libva-v4l2-qualification/eos-20261001-root-1`). Native small
+  B-frame fixture fails: one all-zero output instead of150, command0 and
+  all seven kernel counters0; 720p native/VA baselines pass. Separate VA
+  small-stream diagnostic now scheduled. Performance run.O6rYy2 completed:
+  4K1/30/300 byte parity passes, 512MiB budget fails, sustained skipped;
+  Chromium video not ready, Firefox timeout124. These are baseline-only
+  results, not qualification of external owner's new seek/restart changes.
+  Matching kernel review artifact compiled; no module installed or loaded.
+
+- Seek peer-audit handoff (root's six-agent lane1, 2026-10-01): read-only
+  findings for external Seek/EOS owner; no competing Rust edits. In
+  `codec/h264.rs::finish_picture`, exact Annex-B header0x65 recognition misses
+  reference-IDR0x25/0x45. Add finish_picture regressions for all3nonzero ref-idc
+  headers (and non-IDR0x41/invalid0x05), use NAL type/ref-idc masking; preserve
+  true random-access requirements. `mpv_seek_drive.py` accepts constant finite
+  time-pos1.25 after every accepted seek: add stuck-position/stuck-seeking
+  regressions, require bounded seek completion plus real hardware playback
+  progress without assuming exact keyframe landing. Details and root-only
+  frozen candidate executor: `docs/pending-lane-seek.txt` and
+  `/tmp/run-frozen-seek-20261001.sh`. Current52V4L2/12IPC tests pass;
+  historical fc082seek failure remains failure, fresh candidate outcome pending.
+
+- Six-agent pending-work sweep (review root, 2026-10-01, explicitly requested):
+  reactivated six scoped workers in waves: gl=seek peer review (external active
+  thread retains Rust edit ownership), qualification=one-frame EOS,
+  recovery=small B-frame streams, test_4k=4K/browser performance,
+  kernel=matching source/boot qualification preparation, test_production=final
+  immutable gate. Older child namespaces retain masked devices; root now has
+  direct hardware/full access and centrally executes their bounded scripts.
+  All probes use the shared lease and disk-backed outputs; stop first kernel
+  fault. Do not duplicate the active Seek/EOS fix owner's Rust edits. Child
+  reports go in docs/pending-lane-*.txt; root updates this handoff. No kernel
+  installation or reboot in this sweep.
+
+- Seek/EOS fix (root, 2026-10-01, user authorized): claiming H.264 codec
+  random-access/timestamp handling and V4L2 recovery as evidence requires.
+  Preserve concurrent edits, fail-closed ownership guards and required parity
+  matrix. Hardware directly accessible; serialize every probe. New frozen
+  frozen source /tmp/libva-seek-small-source-20261001 now includes bounded
+  pending-surface reuse, unique completion cookies, pre-IDR drain, explicit
+  errors for drain-discarded owners and CAPTURE-cycle DRC for CPU sessions.
+  One-frame isolated VA parity passes against complete software output.
+  Fx2fKe passed CPU/GL but failed resolution 63/780 after repeated STOP/START,
+  kernel/sanity clean. Added bounded completion wait before pre-IDR STOP;
+  Rust209/fmt/strict Clippy pass. New disk-backed immutable candidate:
+  /home/mq/.cache/libva-v4l2-qualification/seek-eos/packet.z5bonbls
+  SHA256 b2e7ce849994a5b44deb10962a2c577697d6ae6f790e5df1d2d41370f810ba0c.
+  b2e7ce gate passed CPU/GL/resolution780/long3600/codecs, both strict small
+  edges, churn7/7 and EOS, all kernel counters zero. This later new-binary
+  evidence accounts for the baseline small-stream STOP handoff above; the
+  failing old-binary small probe was not retried. Short IPC path fixed the
+  disk-backed seek setup; 24 seeks pass, mixed seek still fails with frontend
+  parser corruption before driver calls. New PPS-ID preservation and masked
+  IDR recognition added; concurrent CPU queue bound also required submit-side
+  full working-pool replenishment. New immutable packet.dojf_84g SHA5cb030...77e
+  is running the complete gate with a supplied distinct-ID960x640 fixture,
+  unchanged resolution/seek counts and strengthened peer-owned seek verifier.
+  Other hardware lanes must wait for the common lease.
+  Previous V5QP6a attempt stopped at hardware_in_use (no hardware tests),
+  fresh attempt launched after lease recheck. Details:
+  docs/production-seek-eos-fixes-20261001.txt. Mixed seek still unqualified.
+
+- Production continuation BLOCKERS (root, 2026-10-01): hardware now accessible;
+  direct exact-binary runs completed. e1tXqa passes CPU1/30/300, strict GL300,
+  resolution780, long3600, HEVC/Main10/VP9 with clean kernel; production FAILS
+  native one-frame EOS (zero frames). Independent jezSwc churn7/7 and EOS pass.
+  Seek startup race fixed/tested; corrected seek PIvRqk and debug svZYKG FAIL:
+  empty CAPTURE with pending owners, recovery fifo mismatch, then hwdec-current
+  unavailable. Clean kernels/sanity, no complete seek storm; mixed seek unrun.
+  Preserve fail-closed guard. Next: timestamp/reference reset and recovery of
+  consumed OUTPUT dependencies; future Rust changes need new binary/full gates.
+  All runs used fc08226...a6e10; lease free. Report:
+  `docs/production-host-continuation-20261001.txt`. Earlier absent-device notes
+  describe previous environments and no longer block direct execution here.
+
+- Post-GL qualification delegation (root, 2026-10-01): user requested agents
+  run production, 4K and browser/kernel tests. Production/4K children completed;
+  root handled browser/kernel after agent thread cap blocked another worker.
+  All preserve exact GL-passing binary fc08226...a6e10 from 5HPJnr and source
+  /tmp/libva-gl-last-source-z88fqfmg. Source driver edits remain with external
+  hardware owner; this lane changed reports/temporary runners only. Results
+  are recorded under Completed recently. Hardware tests cannot run in root's
+  sandbox; use prepared exact-binary host runners when the shared lease is free.
+
+- Host GL follow-up (this session, 2026-10-01): strict GL now PASSES
+  300/300 ordered frames with a clean kernel window on fixed source
+  `/tmp/libva-gl-last-source-z88fqfmg`; user-run evidence
+  `/tmp/libva-host-gl-check.5HPJnr`. START now waits for userspace dequeue
+  of STOP's LAST buffer, avoiding vb2's late-LAST stopped-state race.
+  Buffer flags confirm LAST (0x104001) precedes START. Host checks on this
+  snapshot: 204 Rust tests, fmt, strict Clippy, release build pass.
+  Full matrix/churn/EOS/seek remain pending on this same source.
+  Details: `docs/production-host-gl-followup-20261001.txt`.
+
+- Production-readiness hardware qualification (2026-10-01, this session):
+  source fixes and host checks complete; see `docs/production-fixes-20261001.txt`.
+  BLOCKED here: decoder/DRM nodes are absent. Required matrix/churn and production
+  gate were attempted and failed hardware access, not code checks. New GL
+  completion/cache changes need strict full-stream and lifecycle hardware runs;
+  keep kernel boot, small-stream, 4K/browser and experimental AV1 blockers open.
+
+- Top-down review handoff to the active **Continue libav support** agent
+  (user-requested, 2026-10-01): this review session is no longer running
+  code changes or hardware probes; do not assume an active parallel GL owner.
+  Direct thread delivery was blocked by the tool approval requirement.
+  Please incorporate `docs/production-review.txt` and the historical evidence
+  in `/tmp/libva-v4l2-production-review-results/`. The review's final CPU-copy
+  run matched all 300 native H.264 frames with a clean kernel window. Earlier
+  GL coverage missed one reference frame; a later run emitted eight unmatched
+  frames, and `gl-diagnostic.log` showed GStreamer recycling pending surfaces
+  (`vaBeginPicture: surface is in use`). Those results predate your newer
+  integration fixes and must not be treated as current-revision validation.
+  Late exports now copy dequeue-time snapshots instead of firmware-owned
+  queued mappings. Preserve the strict release/verifier checks while resolving
+  completion synchronization and pool reuse. Your newer SOURCE_CHANGE ERROR
+  marker handling and provisional Main10 negotiation notes are acknowledged;
+  this session will not overwrite them. Remaining GL/kernel/browser/AV1 work
+  needs an explicit owner; this session relinquishes its top-down lane.
 
 - Bottom-up next task (codex, 2026-10-01): AV1 authoritative refresh/sequence
   metadata remains necessary for full-stream parity. Strict GL missing-frame
@@ -143,6 +1146,131 @@ short and update it whenever a task starts, finishes, or gets blocked.
   session.
 
 ## Completed recently
+
+- Production kernel observation fixed (review root, 2026-10-01): gate uses
+  shared complete seven-counter validator before advancing each probe; partial
+  or malformed summaries cannot pass. New isolated2tests cover clean fullgate
+  and four failure cases, proving nextprobe does not start. Independent exact
+  distro-source regressions rerun: metadata4096 and PSC256 both pass. Kernel
+  review packet preserved on disk at ~/.cache/libva-v4l2-qualification/kernel/
+  review-20261001. No module activated; full new-build hardware gate pending.
+
+- Seek verifier closure (gl child, 2026-10-01): acknowledged seeks now need a
+  fresh seek/playback-restart event pair, seeking=false and two forward playback
+  advances with vaapi-copy active. Shared4s per-seek/RPC deadline; keyframe
+  landing offsets allowed.22IPC/shell tests and101full Python tests pass;
+  three regressions fail actual historical controller. Files:mpv_seek_drive.py
+  and test_seek_ipc.py; report docs/pending-lane-seek.txt. No hardware opens
+  after the firmware fatal; fresh candidate/hardware seek remains pending.
+
+- EOS fail-fast verification fixed (review root, 2026-10-01): every wrapped
+  leg now requires command success and complete clean seven-counter evidence
+  before another decoder opens. Partial natural/post-cut output and invalid
+  mpv cut stop immediately. New isolated integration regression exercises
+  clean path, all seven faults at all three phases, missing summaries, command
+  failures and partial output. Both sanity decodes now require clean kernel
+  evidence too, including stop-before-next-open for initial faults. Passed5 regression tests (33 scenarios),
+  existing14 verification tests and bash syntax. Hardware remains pending.
+
+- Storage failure diagnosed and GL retested (review root, 2026-10-01): eDLZvx
+  failed because GStreamer filesink hit Disk quota exceeded, truncating gl.raw;
+  CPU1/30/300 and kernel window had passed. Generated exact-production runner
+  now defaults results and Cargo target to ~/.cache/libva-v4l2-qualification
+  on disk (override V4L2_VA_QUALIFICATION_ROOT); source/binary pins preserved.
+  Direct leased rerun of fc08226...a6e10: strict GL300/300 ordered match,
+  missing=0 tolerated=0, exit0, all seven kernel counters zero. Evidence:
+  ~/.cache/libva-v4l2-qualification/gl-storage-retest-20261001.log and matching
+  dump directory. Shell syntax and whitespace pass. Original failed artifacts
+  retained. This is a storage/GL fix only; active EOS/seek lane remains open.
+
+- Direct hardware continuation completed (root, 2026-10-01): exact production
+  e1tXqa, lifecycle jezSwc, corrected seek PIvRqk/debug svZYKG; results above.
+  Fixed bounded mpv startup handling without masking post-seek hardware loss;
+  `python3 -m unittest discover -s tools/tests -q` passes 79/79; seek12/12;
+  `git diff --check` passes. Driver source/binary unchanged. Production remains
+  FAILED; no user-run handoff needed for currently accessible hardware.
+
+- Stalled-run harness diagnosis/fix (root, 2026-10-01): preserved OQuT34
+  artifacts; independently confirmed saved CPU parity and full GL raw equality;
+  stopped only verified stale process groups and released hardware lease.
+  Added diagnostic FFmpeg -nostdin, prepared hash-verified same-binary host
+  runner with null stdin. Validation: bash -n; 75 tooling tests pass via
+  `python3 -m unittest discover -s tools/tests -q`. Hardware rerun requested;
+  kernel/lifecycle/production qualification stays pending above.
+
+- Exact GL-passing revision qualification attempted (root + delegated tests,
+  2026-10-01): frozen source hash/prebuilt identity verified. Production host
+  gates pass fmt, strict Clippy, 75 tooling tests and 208 Rust/stress tests;
+  actual gate stops at hardware_in_use. Independent discovery confirms absent
+  decoder/DRM nodes here; no matrix/churn/EOS/seek hardware stages ran. 4K
+  fixtures/hashes for four codecs verified; runner stops missing_render_device.
+  Browser strict attempt stops hardware_busy; pinned runner stops missing
+  hardware. Display env/sockets exist, but no browser launched. Actual Iris
+  function sanitizer regression passes; patched kernel boot remains unproven.
+  Prepared same-binary executable packages:
+  /tmp/libva-exact-production-20261001/run-production-exact.sh
+  /tmp/libva-4k-pinned-qualification-20261001/run-four-codecs.sh
+  /tmp/libva-exact-browser-kernel-20261001/run-browser-exact.sh
+  No rebuild or system install. Integration tightened 4K runner to stop at
+  first failed codec and pinned snap-browser staging to the same tested binary.
+  Reports: docs/qualification-run-{production,4k,browser-kernel}.txt. Real
+  hardware execution remains with physical-host owner; no release pass claimed.
+
+- Six-subagent sweep integrated (root, user-requested 2026-10-01): all six
+  lanes completed achievable host work; reports in docs/production-lane-*.txt,
+  aggregate docs/production-completion-20261001.txt. Qualification fingerprints
+  source/fixtures/binary; GL checks entire streams and individual reservations;
+  kernel probes reject partial/corrupt output; complete GOP history is bounded
+  at 1,024 units/32 MiB; 4K/browser checks require real performance/seek/frame
+  evidence; malformed AV1 metadata rejected, production profile still hidden.
+  Cross-review fixed keyframe hidden-owner clearing before guard, bounded old
+  owner completion before START, preserved peer replay pacing/stable top-ups.
+  Frozen source /tmp/libva-six-agent-20261001/source: Rust 204/204; injected
+  stress suite 208/208; Python 75/75; fmt, strict Clippy, shell syntax, release
+  build and whitespace pass. Production gate host stages/provenance pass then
+  explicitly missing_hardware; final matrix/churn stop at absent DRM device.
+  Current external hardware evidence supplied by user: CPU1/30/300 pass,
+  strict GL18/300 fails, clean kernel (A1KZRr logs above); that binary predates
+  final corrections. Root claims no hardware pass. Actual Linux tree candidate
+  patch applicability and expanded UBSAN pass, but tree/build do not match
+  running deployment kernel. All root child edits are finished; external
+  hardware owner can continue, freezing/testing source before each run.
+
+- Production source fixes (2026-10-01): race-free export-fd EOF regression;
+  exported-surface completion before EndPicture returns; bounded importer-fence
+  wait plus dma-buf cache maintenance for stable CPU copies; propagation of
+  failed/undersized copies; per-display capability tables without optimistic
+  fallback; custom H.264 scaling lists and truncated-IQ rejection. Hardened GL
+  exact count/order, independent EOS reference, seek acknowledgments/status,
+  experimental-AV1 rejection and serialized production hardware checks.
+  Validation: Rust 189/189 with 16 threads, host stress 4/4 and copied suite
+  193/193, Python 37/37, fmt/strict clippy/shell/whitespace/release build pass.
+  Kernel candidate sanitizer regression: 4096 inputs pass, not installed.
+  `verify-rust-driver.sh` and `verify-session-churn.sh` attempted, fail missing
+  device; `verify-production.sh` passes host stages then missing_hardware.
+  Evidence: `/tmp/libva-prod-final-20261001`; report above. Production release
+  remains blocked pending real-hardware and deployment-browser qualification.
+
+- Additional production input/image audit (top-down review agent, 2026-10-01):
+  completed host-only changes in `buffer.rs`, `codec/mod.rs`, `image.rs`,
+  `image/layout.rs`, and `image/tests.rs`. Preserve original buffer allocation
+  when changing valid element count, allowing shrink/reset/grow to capacity;
+  reject inactive or truncated decode buffers before reading parameters.
+  Check buffer-table capacity before allocating/copying and report allocation
+  failure through VA status. Allocate/copy complete odd-height chroma rows
+  and odd-width UV pairs in NV12/P010. Validate every source/destination bound
+  before modifying image pixels; reject truncated snapshots in Get/DeriveImage.
+  Reject odd crop origins because this raw-copy path cannot resample chroma.
+  Seven new regressions fail against saved pre-fix implementations and pass
+  after fixes (isolated replay: 178 passed, seven expected failures).
+  Validation: `cargo test --locked --manifest-path rust/Cargo.toml --quiet`
+  passed 185 tests at the initial snapshot; subsequent isolated
+  `tools/verify-host-stress.sh /tmp/libva-v4l2-input-audit/stress-after` passed
+  four stress tests and all 193 tests with 16 test threads, including concurrent
+  agents' newer tests. `cargo clippy --locked --manifest-path rust/Cargo.toml
+  --all-targets -- -D warnings` and `git diff --check` pass. Evidence resides
+  in `/tmp/libva-v4l2-input-audit/`. No hardware runs in this audit; GL, kernel,
+  queue, and browser qualification remain with their active owners above.
 
 - Reference-chain recovery guard (codex, 2026-10-01): truncated history can
   lose its keyframe; published-only filtering can omit hidden dependencies;
@@ -1344,3 +2472,19 @@ short and update it whenever a task starts, finishes, or gets blocked.
    command sequence of a failing small session vs a passing 720p session. Treat
    small-stream decode failures as retryable in clients. Do NOT automate retries:
    repeated aborted sessions poison the firmware for ~90 s (see blockers).
+
+## Quality stress audit (2026-10-01)
+
+- Added host-only isolated runner `tools/verify-host-stress.sh` and
+  `tools/host-stress.rs`; report: `QUALITY-STRESS-20261001.txt`. No production
+  source changes from this audit. Existing work continued concurrently, so
+  hardware results apply to `/tmp/libva-quality-20261001` source snapshot.
+- Passed 4,000 buffer cycles with eight shared-driver callers, 10,000 malformed
+  codec sequences, table exhaustion/recovery, two simultaneous byte-exact
+  120-frame H.264 sessions plus post-stress sanity, and session churn 7/7.
+- Full hardware verifier failed Main10: P010 S_FMT returned NV12, context init
+  failed and FFmpeg fell back to software. Other covered codec/lifecycle gates
+  passed. Host runner intentionally fails a new regression for HEVC tile counts
+  exceeding VA arrays; 162 other tests passed in its copied current tree.
+- One snapshot suite run exposed the export-fd test's stale numeric-fd race;
+  see report and `/tmp/libva-quality-20261001/unit-tests.log`.

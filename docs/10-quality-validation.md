@@ -1,5 +1,19 @@
 # Quality acceptance and 4K validation
 
+## Current qualification state — 2026-10-01
+
+The active cold-loaded Iris candidate has verified build identity. The latest
+strict hardware run passed H.264 1/30/300 parity, GL 300/300, resolution churn,
+long playback, HEVC/Main10/VP9 parity, one-frame and B-frame edge probes, churn,
+EOS, and 24 ordinary seeks with clean observed kernel windows. It failed mixed
+seeks on the supplied transport stream; that stream also produced parser and
+reference errors in a software control. An indexed Matroska remux passed all 12
+hardware mixed seeks without relaxing the checks. A fresh strict gate is running;
+production qualification is not complete. Sustained 4K and deployment-browser
+performance checks are still pending. See the [resumption report](production-resumption-20261001.txt)
+for the full chronology. Sections below preserve earlier test evidence and
+should be read as tied to their recorded source, binary, kernel, and fixtures.
+
 Known decode errors, missing frames, software fallback, and incorrect pixels
 remain release blockers even when a shorter baseline passes. An unsupported
 stream must fail explicitly rather than produce corrupted output. AV1 remains
@@ -58,7 +72,9 @@ test processes must share that lock. Host-only work can continue independently.
 
 This correctness gate does not establish sustained 4K60 throughput, browser
 import performance, HDR/color-metadata handling, or long-playback reliability.
-Those requirements remain separate pending work.
+Those requirements remain separate qualification gates. The latest current
+status is summarized at the top of this chapter; older measurements below are
+historical and are not qualification of the active candidate.
 
 ## Additional verified lifecycle coverage
 
@@ -76,11 +92,14 @@ Counts must fit the supplied arrays, and explicit tile widths/heights must leave
 space for a nonempty final tile in the coded picture. The isolated host stress
 runner now passes all four stress checks and its parallel test suite.
 
-## Small H.264 firmware trace
+## Small H.264 firmware trace (historical diagnosis)
 
-The PPS fix does not close the 320x240 B-frame blocker. A bounded retest still
-reports Iris session-fatal `0x4000003`. Noninteractive sudo authentication is
-unavailable in this environment, so dynamic-debug evidence remains pending.
+Earlier retests of the 320x240 B-frame case reported Iris session-fatal
+`0x4000003`. The latest strict recovery-v4 hardware run passed the supplied
+B-frame fixture with clean observed kernel counters. This does not establish
+general small-stream reliability or close firmware diagnosis; retain the
+separate controlled small-stream qualification and dynamic-debug evidence as
+open until the active release run and its follow-ups complete.
 The prepared trace command is:
 
 ```sh
@@ -146,15 +165,18 @@ threading can retain a backlog of downloaded frames. The 4K verifier now uses
 one checksum-encoder thread for both reference and driver output so future
 measurements have bounded encoder buffering. The old timing/RSS figures above
 used automatic output threading; do not compare them directly to new figures.
-Fresh 4K throughput/RSS qualification still requires the kernel bounds fix.
+Fresh 4K throughput/RSS qualification remains open. The bounds-and-removal
+candidate was later cold-loaded with its identity verified, but the 4K
+performance gate has not yet been run against the active candidate.
 
-After the image changes, 166 Rust tests and strict clippy pass. H.264 1/30/full
-pixels pass and HEVC/Main10/VP9/experimental AV1 30-frame parity passes 4/4.
-The main matrix still fails strict GL (one missing frame), and its native
+In this earlier snapshot, 166 Rust tests and strict clippy passed. H.264
+1/30/full pixels passed and HEVC/Main10/VP9/experimental AV1 30-frame parity
+passed 4/4. The matrix then failed strict GL (one missing frame), and its native
 single-frame reference also triggered Iris system-fatal `0x5000003` with a
 vb2 warning before its fallback succeeded. The wrapper correctly fails that
-whole window. This is additional evidence that firmware reliability remains
-mandatory work; later successful codec runs do not erase the earlier crash.
+whole window. Later recovery-v4 results passed GL 300/300 with clean observed
+kernel windows; the older failure remains part of that snapshot's history,
+not the latest recorded result.
 
 ## Reference-chain recovery guard
 
