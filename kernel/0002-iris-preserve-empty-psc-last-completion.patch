@@ -1,0 +1,29 @@
+media: iris: do not flag empty picture-sequence-change markers as errors
+
+Both firmware LAST and PSC_LAST map to V4L2_BUF_FLAG_LAST. An empty
+PSC_LAST is a picture-sequence-change boundary rather than decoded pixels,
+but the empty-buffer check currently exempts only drain LAST. In streaming
+state that adds ERROR to an otherwise clean PSC_LAST completion. The ERROR
+path then returns from iris_vb2_buffer_done before the normal LAST/stopped
+bookkeeping.
+
+Exempt PSC_LAST from this synthetic empty-payload error as well. Preserve
+ERROR from NOSHOW, data corruption and overflow; do not change the error
+completion path or sub-state transitions. This candidate corrects a source
+contract asymmetry. It is not a proved fix for the observed small-stream
+failure: raw firmware flags and frame-info errors from that run are absent.
+
+Not installed or loaded; requires runtime qualification on the deployed kernel.
+
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
+@@ -391,7 +391,8 @@
+ 	buf->flags = iris_hfi_gen2_get_driver_buffer_flags(inst, hfi_buffer->flags);
+ 
+ 	if (!buf->data_size && inst->state == IRIS_INST_STREAMING &&
+-	    !(hfi_buffer->flags & HFI_BUF_FW_FLAG_LAST)) {
++	    !(hfi_buffer->flags & (HFI_BUF_FW_FLAG_LAST |
++				   HFI_BUF_FW_FLAG_PSC_LAST))) {
+ 		buf->flags |= V4L2_BUF_FLAG_ERROR;
+ 	}
+ 

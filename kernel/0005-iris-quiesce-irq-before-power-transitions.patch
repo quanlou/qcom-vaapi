@@ -1,0 +1,130 @@
+media: iris: quiesce IRQ outside core lock for power transitions
+
+Runtime suspend masks the IRQ and defers when a threaded handler is active.
+Resume masks the IRQ through initialization and error rollback; an active
+thread on entry violates the successful-suspend invariant and fails closed.
+This avoids waiting for a handler that can require the core mutex or runtime
+PM itself. Core init/deinit drain the IRQ before acquiring the
+core mutex. Balance these temporary masks after dropping the mutex, before
+waiting for firmware initialization. Keep the persistent power-off IRQ mask,
+and establish it before clocks/domains are removed. No hardware qualification
+is claimed by this source patch.
+
+---
+diff --git a/drivers/media/platform/qcom/iris/iris_core.c b/drivers/media/platform/qcom/iris/iris_core.c
+--- a/drivers/media/platform/qcom/iris/iris_core.c
++++ b/drivers/media/platform/qcom/iris/iris_core.c
+@@ -16,6 +16,8 @@
+ 
+ 	ret = pm_runtime_resume_and_get(core->dev);
+ 
++	/* Drain response work before taking the lock it needs. */
++	disable_irq(core->irq);
+ 	mutex_lock(&core->lock);
+ 	if (core->state != IRIS_CORE_DEINIT) {
+ 		iris_fw_unload(core);
+@@ -27,6 +29,7 @@
+ 		core->state = IRIS_CORE_DEINIT;
+ 	}
+ 	mutex_unlock(&core->lock);
++	enable_irq(core->irq);
+ 
+ 	if (!ret)
+ 		pm_runtime_put_sync(core->dev);
+@@ -53,6 +56,8 @@
+ {
+ 	int ret;
+ 
++	/* Drain response work before taking the lock it needs. */
++	disable_irq(core->irq);
+ 	mutex_lock(&core->lock);
+ 	if (core->state == IRIS_CORE_INIT) {
+ 		ret = 0;
+@@ -91,6 +96,7 @@
+ 		goto error_unload_fw;
+ 
+ 	mutex_unlock(&core->lock);
++	enable_irq(core->irq);
+ 
+ 	return iris_wait_for_system_response(core);
+ 
+@@ -104,6 +110,7 @@
+ 	core->state = IRIS_CORE_DEINIT;
+ exit:
+ 	mutex_unlock(&core->lock);
++	enable_irq(core->irq);
+ 
+ 	return ret;
+ }
+diff --git a/drivers/media/platform/qcom/iris/iris_probe.c b/drivers/media/platform/qcom/iris/iris_probe.c
+--- a/drivers/media/platform/qcom/iris/iris_probe.c
++++ b/drivers/media/platform/qcom/iris/iris_probe.c
+@@ -326,6 +326,15 @@
+ 
+ 	core = dev_get_drvdata(dev);
+ 
++	/* Never wait for a threaded handler from its runtime-PM callback.
++	 * A running handler may itself be waiting for runtime PM.
++	 */
++	if (!disable_hardirq(core->irq)) {
++		pm_runtime_mark_last_busy(core->dev);
++		enable_irq(core->irq);
++		return -EBUSY;
++	}
++
+ 	mutex_lock(&core->lock);
+ 	if (core->state != IRIS_CORE_INIT)
+ 		goto exit;
+@@ -334,6 +343,7 @@
+ 
+ exit:
+ 	mutex_unlock(&core->lock);
++	enable_irq(core->irq);
+ 
+ 	return ret;
+ }
+@@ -344,6 +354,15 @@
+ 	int ret = 0;
+ 
+ 	core = dev_get_drvdata(dev);
++
++	/* Successful suspend leaves no IRQ thread and keeps the IRQ masked.
++	 * Fail closed if that invariant is broken; never wait for a thread
++	 * that may itself be requesting runtime resume.
++	 */
++	if (!disable_hardirq(core->irq)) {
++		enable_irq(core->irq);
++		return -EBUSY;
++	}
+ 
+ 	mutex_lock(&core->lock);
+ 	if (core->state != IRIS_CORE_INIT)
+@@ -354,6 +373,7 @@
+ 
+ exit:
+ 	mutex_unlock(&core->lock);
++	enable_irq(core->irq);
+ 
+ 	return ret;
+ }
+diff --git a/drivers/media/platform/qcom/iris/iris_vpu_common.c b/drivers/media/platform/qcom/iris/iris_vpu_common.c
+--- a/drivers/media/platform/qcom/iris/iris_vpu_common.c
++++ b/drivers/media/platform/qcom/iris/iris_vpu_common.c
+@@ -231,13 +231,14 @@
+ 
+ void iris_vpu_power_off(struct iris_core *core)
+ {
++	/* Callers have quiesced the IRQ before taking core->lock. */
++	if (!iris_vpu_watchdog(core, core->intr_status))
++		disable_irq(core->irq);
++
+ 	iris_opp_set_rate(core->dev, 0);
+ 	core->iris_platform_data->vpu_ops->power_off_hw(core);
+ 	core->iris_platform_data->vpu_ops->power_off_controller(core);
+ 	iris_unset_icc_bw(core);
+-
+-	if (!iris_vpu_watchdog(core, core->intr_status))
+-		disable_irq(core->irq);
+ }
+ 
+ int iris_vpu_power_on_controller(struct iris_core *core)

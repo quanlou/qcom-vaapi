@@ -1,0 +1,148 @@
+media: iris: expose explicit Gen2 decode-order output
+
+Qualcomm published HFI_PROP_DECODE_ORDER_OUTPUT 0x0300015b with U32
+on the input port. DISPLAY_DELAY_ENABLE=1 and DISPLAY_DELAY=0 select
+decode order. Expose that pair only on the SM8550 Gen2 firmware table
+used by X1E. Defaults send no new firmware property. Runtime control
+changes remain rejected while OUTPUT streams. Propagate property errors
+from stream setup rather than reporting success on a rejected command.
+
+This candidate is unqualified on X1E firmware. It must retain the bounds
+and removal fixes and be cold activated; never hot unload on a faulted boot.
+
+Protocol sources:
+https://patchew.org/linux/1702899149-21321-1-git-send-email-quic._5Fdikshita%40quicinc.com/1702899149-21321-14-git-send-email-quic._5Fdikshita%40quicinc.com/
+https://patchew.org/linux/1702899149-21321-1-git-send-email-quic._5Fdikshita%40quicinc.com/1702899149-21321-17-git-send-email-quic._5Fdikshita%40quicinc.com/
+
+--- a/drivers/media/platform/qcom/iris/iris_platform_common.h
++++ b/drivers/media/platform/qcom/iris/iris_platform_common.h
+@@ -123,6 +123,8 @@
+ 	STAGE,
+ 	PIPE,
+ 	POC,
++	DISPLAY_DELAY_ENABLE,
++	DISPLAY_DELAY,
+ 	CODED_FRAMES,
+ 	BIT_DEPTH,
+ 	RAP_FRAME,
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_defines.h
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_defines.h
+@@ -129,6 +129,8 @@
+ #define HFI_PROP_FLIP				0x0300014c
+ #define HFI_PROP_SIGNAL_COLOR_INFO		0x03000155
+ #define HFI_PROP_PICTURE_TYPE			0x03000162
++#define HFI_PROP_DECODE_ORDER_OUTPUT		0x0300015b
++
+ #define HFI_PROP_DEC_DEFAULT_HEADER		0x03000168
+ #define HFI_PROP_DEC_START_FROM_RAP_FRAME	0x03000169
+ #define HFI_PROP_NO_OUTPUT			0x0300016a
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2.c
+@@ -838,6 +838,26 @@
+ };
+ 
+ static const struct platform_inst_fw_cap inst_fw_cap_sm8550_dec[] = {
++	{
++		.cap_id = DISPLAY_DELAY_ENABLE,
++		.min = 0,
++		.max = 1,
++		.step_or_mask = 1,
++		.value = 0,
++		.hfi_id = HFI_PROP_DECODE_ORDER_OUTPUT,
++		.flags = CAP_FLAG_INPUT_PORT,
++		.set = iris_set_decode_order,
++	},
++	{
++		.cap_id = DISPLAY_DELAY,
++		.min = 0,
++		.max = 1,
++		.step_or_mask = 1,
++		.value = 0,
++		.hfi_id = HFI_PROP_DECODE_ORDER_OUTPUT,
++		.flags = CAP_FLAG_INPUT_PORT,
++		.set = iris_set_decode_order,
++	},
+ 	{
+ 		.cap_id = PROFILE_H264,
+ 		.min = V4L2_MPEG_VIDEO_H264_PROFILE_BASELINE,
+--- a/drivers/media/platform/qcom/iris/iris_ctrls.h
++++ b/drivers/media/platform/qcom/iris/iris_ctrls.h
+@@ -16,6 +16,7 @@
+ int iris_set_u32_enum(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
+ int iris_set_stage(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
+ int iris_set_pipe(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
++int iris_set_decode_order(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
+ int iris_set_u32(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
+ int iris_set_profile(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
+ int iris_set_level(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id);
+--- a/drivers/media/platform/qcom/iris/iris_ctrls.c
++++ b/drivers/media/platform/qcom/iris/iris_ctrls.c
+@@ -154,6 +154,10 @@
+ 		return LAYER4_BITRATE_HEVC;
+ 	case V4L2_CID_MPEG_VIDEO_HEVC_HIER_CODING_L5_BR:
+ 		return LAYER5_BITRATE_HEVC;
++	case V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY_ENABLE:
++		return DISPLAY_DELAY_ENABLE;
++	case V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY:
++		return DISPLAY_DELAY;
+ 	case V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME:
+ 		return REQUEST_SYNC_FRAME;
+ 	default:
+@@ -299,6 +303,10 @@
+ 		return V4L2_CID_MPEG_VIDEO_HEVC_HIER_CODING_L4_BR;
+ 	case LAYER5_BITRATE_HEVC:
+ 		return V4L2_CID_MPEG_VIDEO_HEVC_HIER_CODING_L5_BR;
++	case DISPLAY_DELAY_ENABLE:
++		return V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY_ENABLE;
++	case DISPLAY_DELAY:
++		return V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY;
+ 	case REQUEST_SYNC_FRAME:
+ 		return V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME;
+ 	default:
+@@ -496,6 +504,27 @@
+ 					     iris_get_port_info(inst, cap_id),
+ 					     HFI_PAYLOAD_U32_ENUM,
+ 					     &hfi_value, sizeof(u32));
++}
++
++int iris_set_decode_order(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id)
++{
++	const struct iris_hfi_session_ops *hfi_ops = inst->hfi_session_ops;
++	struct platform_inst_fw_cap *enable = &inst->fw_caps[DISPLAY_DELAY_ENABLE];
++	struct platform_inst_fw_cap *delay = &inst->fw_caps[DISPLAY_DELAY];
++	u32 order;
++
++	if (cap_id != DISPLAY_DELAY_ENABLE && cap_id != DISPLAY_DELAY)
++		return -EINVAL;
++
++	/* Preserve firmware defaults until a client explicitly requests a mode. */
++	if (!((enable->flags | delay->flags) & CAP_FLAG_CLIENT_SET))
++		return 0;
++
++	/* Qualcomm's Gen2 protocol uses 1 for decode-order output. */
++	order = enable->value && !delay->value;
++	return hfi_ops->session_set_property(inst, HFI_PROP_DECODE_ORDER_OUTPUT,
++					     HFI_HOST_FLAGS_NONE, HFI_PORT_BITSTREAM,
++					     HFI_PAYLOAD_U32, &order, sizeof(order));
+ }
+ 
+ int iris_set_u32(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id)
+@@ -1534,8 +1563,16 @@
+ 		if (!iris_valid_cap_id(cap->cap_id))
+ 			continue;
+ 
+-		if (cap->cap_id && cap->set)
+-			cap->set(inst, i);
++		/* The decode-order request belongs to OUTPUT stream setup only. */
++		if ((i == DISPLAY_DELAY_ENABLE || i == DISPLAY_DELAY) &&
++		    !V4L2_TYPE_IS_OUTPUT(plane))
++			continue;
++
++		if (cap->cap_id && cap->set) {
++			ret = cap->set(inst, i);
++			if (ret)
++				return ret;
++		}
+ 	}
+ 
+ 	return 0;

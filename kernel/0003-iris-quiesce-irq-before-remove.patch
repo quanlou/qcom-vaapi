@@ -1,0 +1,48 @@
+media: iris: quiesce threaded IRQ before core removal
+
+On linux-qcom-x1e 7.3.0-15.15, removing an initialized Iris device can
+deadlock. iris_core_deinit() holds core->lock and calls iris_vpu_power_off(),
+whose disable_irq() waits for the threaded IRQ handler. The handler can
+be waiting for core->lock in iris_hfi_queue_msg_read(). Hung-task traces
+on the deployment host confirm both sides of this cycle.
+
+Hold a runtime-PM reference while synchronizing the IRQ outside core->lock.
+Then cancel the system-error work that a finishing response handler could
+have scheduled, before deinitializing the core. The nested disable_irq()
+in power-off now sees a quiesced IRQ; synchronization is preserved rather
+than replaced with a non-waiting disable. Balance the extra PM reference
+before destroying the core lock.
+
+This candidate targets device removal. It does not claim to fix the
+corresponding lock-order risk in other power-off call paths. Requires
+runtime qualification; not installed or loaded.
+
+--- a/drivers/media/platform/qcom/iris/iris_probe.c
++++ b/drivers/media/platform/qcom/iris/iris_probe.c
+@@ -195,17 +195,26 @@
+ static void iris_remove(struct platform_device *pdev)
+ {
+ 	struct iris_core *core;
++	int ret;
+ 
+ 	core = platform_get_drvdata(pdev);
+ 	if (!core)
+ 		return;
+ 
++	/* The threaded handler takes core->lock; wait before teardown does. */
++	ret = pm_runtime_resume_and_get(core->dev);
++	disable_irq(core->irq);
++	cancel_delayed_work_sync(&core->sys_error_handler);
++
+ 	iris_core_deinit(core);
+ 
+ 	video_unregister_device(core->vdev_dec);
+ 	video_unregister_device(core->vdev_enc);
+ 
+ 	v4l2_device_unregister(&core->v4l2_dev);
++
++	if (ret >= 0)
++		pm_runtime_put_sync(core->dev);
+ 
+ 	mutex_destroy(&core->lock);
+ }

@@ -1,0 +1,22 @@
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
+@@ -381,6 +381,19 @@
+ 	if (!(buf->attr & BUF_ATTR_QUEUED))
+ 		return -EINVAL;
+ 
++	/* Observe firmware completion before VB2 discards NOSHOW payload metadata. */
++	if (inst->codec == V4L2_PIX_FMT_AV1) {
++		struct iris_hfi_frame_info *info =
++			&to_iris_inst_hfi_gen2(inst)->hfi_frame_info;
++
++		dev_dbg(inst->core->dev,
++			"av1_raw_completion session=%u index=%u size=%u offset=%u timestamp=%llu flags=%#x picture=%#x no_output=%u corrupt=%u overflow=%u\n",
++			inst->session_id, hfi_buffer->index, hfi_buffer->data_size,
++			hfi_buffer->data_offset, hfi_buffer->timestamp,
++			hfi_buffer->flags, info->picture_type, info->no_output,
++			info->data_corrupt, info->overflow);
++	}
++
+ 	buf->data_offset = hfi_buffer->data_offset;
+ 	buf->data_size = hfi_buffer->data_size;
+ 	buf->timestamp = hfi_buffer->timestamp;
