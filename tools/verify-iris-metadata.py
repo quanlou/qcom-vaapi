@@ -46,17 +46,42 @@ int main(void)
 {
     struct iris_inst inst = {0};
     struct vb2_v4l2_buffer input = {0}, output = {0};
+    const u32 mask = V4L2_BUF_FLAG_TIMECODE | V4L2_BUF_FLAG_TSTAMP_SRC_MASK;
+    const u32 unrelated = 0x80000000;
     for (u32 n = 0; n < 4096; n++) {
         input.vb2_buf.timestamp = (u64)(n + 1) * 1000;
-        input.flags = V4L2_BUF_FLAG_TIMECODE;
+        input.flags = unrelated | ((n & 1) ? mask : 0);
         input.timecode = n;
         iris_set_ts_metadata(&inst, &input);
+        output.flags = unrelated | mask;
         iris_get_ts_metadata(&inst, input.vb2_buf.timestamp, &output);
         assert(output.timecode == n);
-        assert(output.flags == V4L2_BUF_FLAG_TIMECODE);
+        assert(output.flags == (unrelated | (input.flags & mask)));
         /* Missing timestamps reproduce the real capture fallback at wrap. */
         iris_get_ts_metadata(&inst, UINT64_MAX, &output);
         assert(inst.metadata_idx < ARRAY_SIZE(inst.tss));
+        assert(output.timecode == inst.tss[inst.metadata_idx].tc);
+        assert(output.flags == (unrelated | inst.tss[inst.metadata_idx].flags));
+        /* Capture may complete out of submission order. Check every retained
+         * timestamp in reverse order, including both sides of a ring wrap. */
+        u32 retained = n + 1 < ARRAY_SIZE(inst.tss) ? n + 1 : ARRAY_SIZE(inst.tss);
+        for (u32 age = 0; age < retained; age++) {
+            u32 expected = n - age;
+            iris_get_ts_metadata(&inst, (u64)(expected + 1) * 1000, &output);
+            assert(output.timecode == expected);
+            assert(output.flags == (unrelated | ((expected & 1) ? mask : 0)));
+        }
+    }
+    /* Preserve the existing defensive writer check for stale indices. */
+    const u32 invalid_indices[] = {32, 33, UINT32_MAX};
+    for (u32 n = 0; n < ARRAY_SIZE(invalid_indices); n++) {
+        inst.metadata_idx = invalid_indices[n];
+        input.vb2_buf.timestamp = UINT64_MAX - n - 1;
+        input.timecode = 10000 + n;
+        iris_set_ts_metadata(&inst, &input);
+        assert(inst.metadata_idx == 1);
+        iris_get_ts_metadata(&inst, input.vb2_buf.timestamp, &output);
+        assert(output.timecode == input.timecode);
     }
     return 0;
 }
@@ -93,7 +118,7 @@ def main():
             elif result.returncode != 0:
                 raise SystemExit('iris_metadata=fail reason=patched_regression\n' + result.stderr)
             else:
-                print('iris_metadata_patch=pass inputs=4096 matched_and_missing_timestamps=checked')
+                print('iris_metadata_patch=pass inputs=4096 matched_and_missing_timestamps=checked reordered_history=checked flags=checked stale_indices=checked')
 
 
 if __name__ == '__main__':
