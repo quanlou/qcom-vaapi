@@ -26,6 +26,8 @@ class EdgeReferenceTests(unittest.TestCase):
             modules.write_text('')
             helper = tools / 'hardware-session.sh'
             helper.write_text(helper.read_text().replace('/proc/modules', str(modules)))
+            with helper.open('a') as stream:
+                stream.write('\njournalctl() { printf \"Linux mock clean boot\\n\"; }\n')
             wrapper = tools / 'capture-iris-kernel-log.sh'
             wrapper.write_text('#!/bin/bash\nstatus=0\n"${@:2}" || status=$?\n'
                                "echo 'summary: session-fatal(0x4000003)=0  system-fatal(0x5000003)=0 "
@@ -161,6 +163,8 @@ class VerificationTests(unittest.TestCase):
             modules.write_text('')
             helper = tools / 'hardware-session.sh'
             helper.write_text(helper.read_text().replace('/proc/modules', str(modules)))
+            with helper.open('a') as stream:
+                stream.write('\njournalctl() { printf \"Linux mock clean boot\\n\"; }\n')
             wrapper = tools / 'capture-iris-kernel-log.sh'
             wrapper.write_text('#!/bin/bash\nstatus=0\n"${@:2}" || status=$?\n'
                                "echo 'summary: session-fatal(0x4000003)=0  system-fatal(0x5000003)=0 "

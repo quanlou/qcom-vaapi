@@ -19,6 +19,7 @@ static int copy_units(CodedBitstreamFragment *fragment, FILE *out, FILE *index,
         uintptr_t data = (uintptr_t)unit->data;
         int existing = -1, shown = -1, refresh = -1;
         int show_slot = -1, resolved_refresh = -1, frame_type = -1;
+        int order_hint = -1, primary_ref = -1, error_resilient = -1;
         size_t tile_offset = 0, tile_size = 0;
         AV1RawTileData *tile = NULL;
         if (!unit->data || !unit->data_size || unit->data_size > 16 * 1024 * 1024 ||
@@ -36,6 +37,9 @@ static int copy_units(CodedBitstreamFragment *fragment, FILE *out, FILE *index,
             existing = header->show_existing_frame;
             resolved_refresh = header->refresh_frame_flags;
             frame_type = header->frame_type;
+            order_hint = header->order_hint;
+            primary_ref = header->primary_ref_frame;
+            error_resilient = header->error_resilient_mode;
             if (existing)
                 show_slot = header->frame_to_show_map_idx;
             if (!existing) {
@@ -64,10 +68,11 @@ static int copy_units(CodedBitstreamFragment *fragment, FILE *out, FILE *index,
         if (fprintf(index, "{\"packet\":%d,\"pts\":%lld,\"type\":%u,\"bytes\":%zu,"
                     "\"show_existing\":%d,\"show_frame\":%d,\"refresh\":%d,"
                     "\"show_slot\":%d,\"resolved_refresh\":%d,\"frame_type\":%d,"
+                    "\"order_hint\":%d,\"primary_ref\":%d,\"error_resilient\":%d,"
                     "\"tile_offset\":%zu,\"tile_bytes\":%zu}\n",
                     packet, (long long)pts, unit->type, unit->data_size,
                     existing, shown, refresh, show_slot, resolved_refresh,
-                    frame_type, tile_offset, tile_size) < 0)
+                    frame_type, order_hint, primary_ref, error_resilient, tile_offset, tile_size) < 0)
             return AVERROR(EIO);
         (*unit_count)++;
     }

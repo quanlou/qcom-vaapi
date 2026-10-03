@@ -11,6 +11,7 @@
 mod bitstream;
 mod frame;
 mod synth;
+pub(crate) mod transport_prefix;
 
 pub(crate) use bitstream::{BitWriter, ObuWriter};
 pub(crate) use frame::{

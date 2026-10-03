@@ -16,9 +16,9 @@ jobs:
       - name: Defensive and concurrent stress
         run: ./tools/verify-host-stress.sh
       - name: Lints
-        run: cargo clippy --locked --manifest-path rust/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy --locked --manifest-path rust/Cargo.toml --all-targets --all-features -- -D warnings
       - name: Release build
-        run: cargo build --locked --manifest-path rust/Cargo.toml --release
+        run: cargo build --locked --manifest-path rust/Cargo.toml --release --all-features
       - name: Verification regressions
         run: python3 -m unittest discover -s tools/tests -v
       - name: Shell syntax

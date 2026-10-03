@@ -21,7 +21,6 @@ pub(crate) use abi::{
 use queue::{BufferState, V4l2Buffer, V4l2Queue};
 
 const OUT_NUM_BUFFERS: u32 = 4;
-const CAP_NUM_BUFFERS_MIN: u32 = 20;
 const CAP_NUM_BUFFERS_MAX: u32 = 128;
 /// Cap on how many "working" (non-reserved) CAPTURE slots stay in the kernel
 /// queue at once, in stable-capture mode. Chromium exports its whole 22-frame
@@ -181,10 +180,7 @@ impl V4l2Session {
         coded_fourcc: u32,
         capture_fourcc: u32,
     ) -> Result<Self, ()> {
-        let devnode = std::env::var("V4L2_VA_DEVICE")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "/dev/video16".to_string());
+        let devnode = decoder_device();
         let c_path = CString::new(devnode.as_str()).map_err(|_| ())?;
         let fd = unsafe { open(c_path.as_ptr(), O_RDWR | O_NONBLOCK | O_CLOEXEC as c_int, 0) };
         if fd < 0 {
@@ -232,6 +228,24 @@ impl V4l2Session {
             return Err(());
         }
         Ok(this)
+    }
+
+    /// Sync may drain only after all compressed input returned to userspace.
+    /// Writable polling alone does not mean firmware finished queued input.
+    pub(crate) fn sync_drain_input_idle(&self) -> bool {
+        self.out_queued() == 0
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pending_sync_test_session(fd: i32, queued_input: bool) -> Self {
+        let mut session = submit::tests::streaming_session_with_pending_fifo(fd);
+        session.fifo[0].surface = crate::state::DRV_ID_BASE_SURFACE;
+        if queued_input {
+            let mut buffer = V4l2Buffer::new();
+            buffer.state = BufferState::Queued;
+            session.out.buffers.push(buffer);
+        }
+        session
     }
 
     pub(crate) fn output_sizeimage(&self) -> u32 {
@@ -332,13 +346,8 @@ impl V4l2Session {
             }
             b.state = BufferState::Free;
         }
-        // CPU download uses only the bounded working slots; map reservation
-        // spares when copied to, independently of the allocation policy.
-        if output {
-            for idx in 0..self.out.buffers.len() {
-                self.map_buffer(true, idx)?;
-            }
-        }
+        // QUERYBUF discovers allocation metadata. Map only when CPU pixels
+        // are read or coded data is written, independently of queue depth.
         Ok(())
     }
 
@@ -376,6 +385,27 @@ fn debug_enabled() -> bool {
     std::env::var_os("V4L2_VA_DEBUG").is_some()
 }
 
+fn decoder_device() -> String {
+    if let Some(path) = std::env::var("V4L2_VA_DEVICE")
+        .ok()
+        .filter(|s| !s.is_empty())
+    {
+        return path;
+    }
+    // Video node numbers change with module load order. Match the decoder's
+    // sysfs name so capability discovery and session setup select the same node.
+    if let Ok(entries) = std::fs::read_dir("/sys/class/video4linux") {
+        for entry in entries.flatten() {
+            if std::fs::read_to_string(entry.path().join("name"))
+                .is_ok_and(|name| name.trim() == "qcom-iris-decoder")
+            {
+                return format!("/dev/{}", entry.file_name().to_string_lossy());
+            }
+        }
+    }
+    "/dev/video16".to_string()
+}
+
 /// Read-only coded-format discovery for capability gating.
 ///
 /// Opens the decoder node exactly like `open_and_setup` resolves it and walks
@@ -384,10 +414,7 @@ fn debug_enabled() -> bool {
 /// is safe to run while other clients decode. An empty result means the node
 /// could not be opened or exposed nothing; callers advertise no profiles.
 fn enumerate_queue_fourccs(queue_type: u32, label: &str) -> Vec<u32> {
-    let devnode = std::env::var("V4L2_VA_DEVICE")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "/dev/video16".to_string());
+    let devnode = decoder_device();
     let Ok(c_path) = CString::new(devnode.as_str()) else {
         return Vec::new();
     };
@@ -637,5 +664,209 @@ mod tests {
         // another test can legally open a new file that reuses the same numeric
         // descriptor before `fcntl(fd)` runs. The mmap counters above cover the
         // resource ownership this test is meant to prove.
+    }
+
+    struct MockIoctlGuard;
+
+    impl Drop for MockIoctlGuard {
+        fn drop(&mut self) {
+            abi::TEST_IOCTL.with(|hook| hook.set(None));
+        }
+    }
+
+    fn use_queue_mock() -> MockIoctlGuard {
+        abi::TEST_IOCTL.with(|hook| {
+            assert!(hook.replace(Some(mock_queue_ioctl)).is_none());
+        });
+        MockIoctlGuard
+    }
+
+    fn mock_queue_ioctl(
+        _fd: c_int,
+        request: std::ffi::c_ulong,
+        arg: *mut c_void,
+    ) -> Result<(), ()> {
+        if request == VIDIOC_QUERYBUF {
+            let buf = unsafe { &mut *arg.cast::<v4l2_buffer>() };
+            assert!(buf.length >= 1);
+            let plane = unsafe { &mut *buf.m.planes };
+            let base = if buf.type_ == v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE as u32 {
+                0
+            } else {
+                4
+            };
+            plane.length = 4096;
+            plane.m.mem_offset = (base + buf.index) * 4096;
+            buf.length = 1;
+        } else if request == VIDIOC_QBUF {
+            let buf = unsafe { &mut *arg.cast::<v4l2_buffer>() };
+            assert_eq!(buf.memory, v4l2_memory::V4L2_MEMORY_MMAP as u32);
+            assert_eq!(buf.length, 1);
+            let plane = unsafe { &mut *buf.m.planes };
+            assert_eq!(plane.length, 4096);
+            let base = if buf.type_ == v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE as u32 {
+                0
+            } else {
+                4
+            };
+            assert_eq!(unsafe { plane.m.mem_offset }, (base + buf.index) * 4096);
+        } else {
+            assert!(request == VIDIOC_REQBUFS || request == VIDIOC_STREAMOFF);
+        }
+        Ok(())
+    }
+
+    fn metadata_only_session() -> (V4l2Session, std::fs::File) {
+        use std::os::fd::IntoRawFd;
+        let path = std::env::temp_dir().join(format!(
+            "libva-lazy-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        std::fs::remove_file(path).unwrap();
+        file.set_len(10 * 4096).unwrap();
+        let reader = file.try_clone().unwrap();
+        let mut session = session_with_mapped_planes(file.into_raw_fd());
+        V4l2Session::release_queue_fd(session.fd, &mut session.out);
+        V4l2Session::release_queue_fd(session.fd, &mut session.cap);
+        for pool in &mut session.legacy {
+            for buffer in &mut pool.buffers {
+                for plane in 0..buffer.num_planes {
+                    release_mapping(buffer.addr[plane], buffer.len[plane]);
+                    buffer.addr[plane] = ptr::null_mut();
+                }
+            }
+        }
+        session.legacy.clear();
+        session.out.buffers = (0..4).map(|_| V4l2Buffer::new()).collect();
+        session.cap.buffers = (0..6).map(|_| V4l2Buffer::new()).collect();
+        session.cap.fmt.fmt.pix_mp = v4l2_pix_format_mplane {
+            width: 64,
+            height: 32,
+            plane_fmt: [v4l2_plane_pix_format {
+                sizeimage: 4096,
+                bytesperline: 64,
+                ..zeroed()
+            }; 8],
+            ..zeroed()
+        };
+        session.mmap_queue(true).unwrap();
+        session.mmap_queue(false).unwrap();
+        (session, reader)
+    }
+
+    #[test]
+    fn lazy_capture_queue_preserves_plane_metadata_and_maps_only_read_slot() {
+        use std::os::unix::fs::FileExt;
+        let _mock = use_queue_mock();
+        let (mut session, reader) = metadata_only_session();
+        assert!(
+            session
+                .out
+                .buffers
+                .iter()
+                .chain(&session.cap.buffers)
+                .all(|b| b.addr[0].is_null())
+        );
+        reader.write_all_at(&[0xa2; 4096], 6 * 4096).unwrap();
+        for idx in 0..6 {
+            session.qbuf_capture(idx).unwrap();
+        }
+        assert!(
+            session
+                .cap
+                .buffers
+                .iter()
+                .all(|b| b.addr[0].is_null() && b.state == BufferState::Queued)
+        );
+        // Model the driver's completed DQBUF: only this index is CPU-owned.
+        session.cap.buffers[2].state = BufferState::Free;
+        let (snapshot, stride, height) = session.capture_copy(2).unwrap();
+        assert_eq!((stride, height), (64, 32));
+        assert_eq!(snapshot, vec![0xa2; 4096]);
+        for (idx, buffer) in session.cap.buffers.iter().enumerate() {
+            assert_eq!(!buffer.addr[0].is_null(), idx == 2);
+            assert_eq!(buffer.len[0], 4096);
+            assert_eq!(
+                unsafe { buffer.planes[0].m.mem_offset },
+                (idx as u32 + 4) * 4096
+            );
+        }
+        assert!(session.out.buffers.iter().all(|b| b.addr[0].is_null()));
+        let before = UNMAPPED_PLANES.with(std::cell::Cell::get);
+        drop(session);
+        assert_eq!(UNMAPPED_PLANES.with(std::cell::Cell::get) - before, 1);
+    }
+
+    #[test]
+    fn lazy_output_maps_selected_free_slots_before_write_and_keeps_queue_depth() {
+        use std::os::unix::fs::FileExt;
+        let _mock = use_queue_mock();
+        let (mut session, reader) = metadata_only_session();
+        session.out.buffers[0].state = BufferState::Queued;
+        assert_eq!(
+            session.qbuf_output_bytes(&[0x11, 0x22, 0x33], false, 7, None, true, false),
+            Ok(1)
+        );
+        let mut written = [0; 3];
+        reader.read_exact_at(&mut written, 4096).unwrap();
+        assert_eq!(written, [0x11, 0x22, 0x33]);
+        assert_eq!(
+            session.qbuf_output_bytes(&[0x44], false, 8, None, true, false),
+            Ok(2)
+        );
+        assert_eq!(session.out.buffers.len(), 4);
+        assert_eq!(
+            session.out_order.iter().copied().collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        for (idx, buffer) in session.out.buffers.iter().enumerate() {
+            assert_eq!(!buffer.addr[0].is_null(), idx == 1 || idx == 2);
+        }
+        assert!(session.cap.buffers.iter().all(|b| b.addr[0].is_null()));
+        let before = UNMAPPED_PLANES.with(std::cell::Cell::get);
+        drop(session);
+        assert_eq!(UNMAPPED_PLANES.with(std::cell::Cell::get) - before, 2);
+    }
+
+    #[test]
+    fn lazy_mapping_failure_preserves_queue_allocations_and_existing_mappings() {
+        let _mock = use_queue_mock();
+        let (mut session, _) = metadata_only_session();
+        session.map_buffer(true, 0).unwrap();
+        let existing = session.out.buffers[0].addr[0];
+        session.out.buffers[0].state = BufferState::Queued;
+        // A non-page-aligned offset makes mmap fail without any device access.
+        session.out.buffers[1].planes[0].m.mem_offset = 1;
+        assert!(
+            session
+                .qbuf_output_bytes(&[1], false, 0, None, true, false)
+                .is_err()
+        );
+        assert!(session.out.buffers[1].addr[0].is_null());
+        assert!(session.out.buffers[1].state == BufferState::Free);
+        assert_eq!(session.out.buffers[1].len[0], 4096);
+        assert_eq!(session.out.buffers[0].addr[0], existing);
+        assert!(session.out_order.is_empty());
+        session.cap.buffers[2].planes[0].m.mem_offset = 1;
+        session.cap.buffers[2].reserved_for = Some(123);
+        session.cap.buffers[2].export_refs = 3;
+        session.cap.buffers[2].state = BufferState::Reserved;
+        assert!(session.capture_copy(2).is_none());
+        assert!(session.cap.buffers[2].addr[0].is_null());
+        assert_eq!(session.cap.buffers[2].reserved_for, Some(123));
+        assert_eq!(session.cap.buffers[2].export_refs, 3);
+        let before = UNMAPPED_PLANES.with(std::cell::Cell::get);
+        drop(session);
+        assert_eq!(UNMAPPED_PLANES.with(std::cell::Cell::get) - before, 1);
     }
 }

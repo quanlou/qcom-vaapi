@@ -10,10 +10,8 @@ use std::ffi::{c_int, c_void};
 use std::os::fd::{BorrowedFd, OwnedFd};
 
 use crate::bindings::*;
-use crate::state::{
-    DRV_ID_BASE_CONTEXT, DRV_MAX_SURFACE_EXPORTS, DriverState, Surface, SurfaceState,
-    context_index, surface_index,
-};
+use crate::state::{DRV_MAX_SURFACE_EXPORTS, DriverState, Surface, SurfaceState, surface_index};
+use crate::surface_backing::SurfaceBacking;
 use crate::sync::sync_surface;
 use crate::va_drm::{DrmPrimeDescriptor, DrmPrimeLayout, VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2};
 use crate::{err, ok, state_from_ctx, va_debug_enabled};
@@ -29,6 +27,7 @@ pub(crate) enum SurfaceExportError {
     InvalidContext,
     TooManyExports,
     OperationFailed,
+    AllocationBudget,
 }
 
 fn export_status(error: SurfaceExportError) -> VAStatus {
@@ -38,6 +37,7 @@ fn export_status(error: SurfaceExportError) -> VAStatus {
         SurfaceExportError::InvalidContext => err(VA_STATUS_ERROR_INVALID_CONTEXT),
         SurfaceExportError::TooManyExports => err(VA_STATUS_ERROR_MAX_NUM_EXCEEDED),
         SurfaceExportError::OperationFailed => err(VA_STATUS_ERROR_OPERATION_FAILED),
+        SurfaceExportError::AllocationBudget => err(VA_STATUS_ERROR_MAX_NUM_EXCEEDED),
     }
 }
 
@@ -133,157 +133,143 @@ fn close_export_fd(fd: c_int) {
     }
 }
 
+// One GiB bounds all standalone PRIME storage owned by a display, independent
+// of the existing per-session CAPTURE and two-context budgets.
+const MAX_EXPORT_BACKING_BYTES: usize = 1024 * 1024 * 1024;
+
 pub(crate) fn export_ready_surface(
     guard: &mut DriverState,
     surface_id: VASurfaceID,
     layout: DrmPrimeLayout,
 ) -> Result<DrmPrimeDescriptor, SurfaceExportError> {
-    let Some(surf_idx) = surface_index(surface_id) else {
-        return Err(SurfaceExportError::InvalidSurface);
-    };
-    let Some((surface_state, owner, mut existing_cap_idx)) = guard.surfaces[surf_idx]
-        .as_ref()
-        .map(|surf| (surf.state, surf.owner, surf.cap_idx))
-    else {
-        return Err(SurfaceExportError::InvalidSurface);
-    };
-    if !matches!(surface_state, SurfaceState::Empty | SurfaceState::Ready) {
+    use std::os::fd::AsRawFd;
+    let drm_fd = guard.drm_fd.as_ref().map(AsRawFd::as_raw_fd);
+    export_ready_surface_with_allocator(
+        guard,
+        surface_id,
+        layout,
+        MAX_EXPORT_BACKING_BYTES,
+        |width, height, format| SurfaceBacking::allocate_with_drm(width, height, format, drm_fd),
+    )
+}
+
+fn export_ready_surface_with_allocator(
+    guard: &mut DriverState,
+    surface_id: VASurfaceID,
+    layout: DrmPrimeLayout,
+    allocation_budget: usize,
+    allocate: impl FnOnce(
+        u32,
+        u32,
+        crate::pixel_format::DecodedFormat,
+    ) -> std::io::Result<SurfaceBacking>,
+) -> Result<DrmPrimeDescriptor, SurfaceExportError> {
+    export_ready_surface_with_operations(
+        guard,
+        surface_id,
+        layout,
+        allocation_budget,
+        allocate,
+        duplicate_export_fd,
+    )
+}
+
+fn export_ready_surface_with_operations(
+    guard: &mut DriverState,
+    surface_id: VASurfaceID,
+    layout: DrmPrimeLayout,
+    allocation_budget: usize,
+    allocate: impl FnOnce(
+        u32,
+        u32,
+        crate::pixel_format::DecodedFormat,
+    ) -> std::io::Result<SurfaceBacking>,
+    duplicate: impl FnOnce(c_int) -> Result<OwnedFd, ()>,
+) -> Result<DrmPrimeDescriptor, SurfaceExportError> {
+    let failed = || SurfaceExportError::OperationFailed;
+    let surf_idx = surface_index(surface_id).ok_or(SurfaceExportError::InvalidSurface)?;
+    let surface = guard
+        .surfaces
+        .get(surf_idx)
+        .and_then(Option::as_ref)
+        .ok_or(SurfaceExportError::InvalidSurface)?;
+    if !matches!(surface.state, SurfaceState::Empty | SurfaceState::Ready) {
         return Err(SurfaceExportError::Decoding);
     }
-    if guard.surfaces[surf_idx]
-        .as_ref()
-        .is_some_and(|surf| surf.export_fds.len() >= DRV_MAX_SURFACE_EXPORTS)
-    {
+    if surface.export_fds.len() >= DRV_MAX_SURFACE_EXPORTS {
         return Err(SurfaceExportError::TooManyExports);
     }
-    let ctx_idx = if let Some(ctx_idx) = context_index(owner)
-        && guard.contexts.get(ctx_idx).is_some_and(Option::is_some)
-    {
-        ctx_idx
-    } else if surface_state == SurfaceState::Empty {
-        // GStreamer creates its VA surface pool without render targets, then
-        // exports those surfaces before the first BeginPicture associates one
-        // with the sole decoder context. Bind that pre-decode export here so
-        // the reserved CAPTURE allocation is the one later queued for decode.
-        let mut live_contexts = guard
-            .contexts
+    let mut new_backing = None;
+    if surface.backing.is_none() {
+        let width = u32::try_from(surface.width).map_err(|_| failed())?;
+        let height = u32::try_from(surface.height).map_err(|_| failed())?;
+        let format = surface.format;
+        let required =
+            SurfaceBacking::allocation_size(width, height, format).map_err(|_| failed())?;
+        let allocated = guard
+            .surfaces
             .iter()
-            .enumerate()
-            .filter_map(|(idx, context)| context.as_ref().map(|_| idx));
-        let Some(ctx_idx) = live_contexts.next() else {
-            return Err(SurfaceExportError::InvalidContext);
-        };
-        if live_contexts.next().is_some() {
-            return Err(SurfaceExportError::InvalidContext);
+            .flatten()
+            .filter_map(|surface| surface.backing.as_ref())
+            .try_fold(0usize, |total, backing| total.checked_add(backing.size()))
+            .ok_or(SurfaceExportError::AllocationBudget)?;
+        if allocated
+            .checked_add(required)
+            .is_none_or(|total| total > allocation_budget)
+        {
+            return Err(SurfaceExportError::AllocationBudget);
         }
-        if let Some(surface) = guard.surfaces[surf_idx].as_mut() {
-            surface.owner = DRV_ID_BASE_CONTEXT + ctx_idx as u32;
-        }
-        ctx_idx
-    } else {
-        return Err(SurfaceExportError::InvalidContext);
-    };
-    let stable_reservation = guard.contexts[ctx_idx]
-        .as_ref()
-        .and_then(|context| context.v4l2.as_ref())
-        .is_some_and(|v4l2| {
-            existing_cap_idx.is_some() && v4l2.reserved_capture_for(surface_id) == existing_cap_idx
-        });
-    if surface_state == SurfaceState::Ready && !stable_reservation {
-        // Stable mode is session-wide; older published frames may still
-        // point to working slots after another surface enables it. Verify
-        // this surface owns its reservation before exporting.
-        // The working slot may already have been recycled by firmware.
-        // Stabilize from the saved pixels, never from a queued mapping.
-        let Some(published) = existing_cap_idx else {
-            return Err(SurfaceExportError::OperationFailed);
-        };
-        let DriverState {
-            surfaces, contexts, ..
-        } = guard;
-        let snapshot = surfaces[surf_idx]
-            .as_ref()
-            .and_then(|surface| surface.frame.as_ref());
-        let Some(snapshot) = snapshot else {
-            return Err(SurfaceExportError::OperationFailed);
-        };
-        let Some(cap_idx) = contexts[ctx_idx]
-            .as_mut()
-            .and_then(|context| context.v4l2.as_mut())
-            .and_then(|v4l2| {
-                v4l2.stabilize_published_capture(published, surface_id, Some(snapshot))
-            })
-        else {
-            return Err(SurfaceExportError::OperationFailed);
-        };
-        if let Some(surf) = guard.surfaces[surf_idx].as_mut() {
-            surf.cap_idx = Some(cap_idx);
-        }
-        existing_cap_idx = Some(cap_idx);
+        new_backing = Some(allocate(width, height, format).map_err(|_| failed())?);
     }
-    let cap_idx = if let Some(cap_idx) = existing_cap_idx {
-        cap_idx
-    } else if surface_state == SurfaceState::Empty {
-        let Some(cap_idx) = guard.contexts[ctx_idx]
-            .as_mut()
-            .and_then(|context| context.v4l2.as_mut())
-            .and_then(|v4l2| v4l2.reserve_capture(surface_id))
-        else {
-            return Err(SurfaceExportError::OperationFailed);
-        };
-        if let Some(surf) = guard.surfaces[surf_idx].as_mut() {
-            surf.cap_idx = Some(cap_idx);
+    let surface = guard.surfaces[surf_idx].as_mut().unwrap();
+    let newly_allocated = new_backing.is_some();
+    let backing = new_backing.as_mut().or(surface.backing.as_mut()).unwrap();
+    if surface.state == SurfaceState::Ready && newly_allocated {
+        let frame = surface.frame.as_ref().ok_or_else(failed)?;
+        if backing.copy_frame(frame).is_err() {
+            surface.state = SurfaceState::Dead;
+            surface.frame = None;
+            return Err(failed());
         }
-        cap_idx
-    } else {
-        return Err(SurfaceExportError::Decoding);
-    };
-    let Some(capture) = guard.contexts[ctx_idx]
-        .as_mut()
-        .and_then(|c| c.v4l2.as_mut())
-        .and_then(|v| v.export_capture(cap_idx))
-    else {
-        return Err(SurfaceExportError::OperationFailed);
-    };
-
-    let owned = match duplicate_export_fd(capture.fd) {
+    }
+    // Surface-owned allocation permits export before BeginPicture even when
+    // two identical decode contexts coexist. No decoder ownership is guessed.
+    let desc = backing.descriptor(layout).map_err(|_| failed())?;
+    let tracked = match duplicate(desc.objects[0].fd) {
         Ok(fd) => fd,
         Err(()) => {
-            close_export_fd(capture.fd);
-            // Unwind the slot's export accounting: the EXPBUF fd was closed
-            // and no client dup exists, so this call leaves the slot with no
-            // outstanding exports.
-            if let Some(v4l2) = guard.contexts[ctx_idx]
-                .as_mut()
-                .and_then(|c| c.v4l2.as_mut())
-            {
-                v4l2.retire_slot_exports(cap_idx, 1);
-            }
-            return Err(SurfaceExportError::OperationFailed);
+            close_export_fd(desc.objects[0].fd);
+            return Err(failed());
         }
     };
-    let desc = DrmPrimeDescriptor::from_capture(capture, layout);
-    if let Some(surf) = guard.surfaces[surf_idx].as_mut() {
-        surf.exported = true;
-        surf.export_count = surf.export_count.saturating_add(1);
-        surf.export_fds.push(owned);
-        if std::env::var_os("V4L2_VA_DEBUG").is_some() {
-            eprintln!(
-                "msm_drv_video_rs: export surface={} cap_idx={} export_count={} tracked_fds={}",
-                surface_id,
-                cap_idx,
-                surf.export_count,
-                surf.export_fds.len()
-            );
-        }
+    if let Some(backing) = new_backing {
+        surface.backing = Some(backing);
     }
+    surface.exported = true;
+    surface.export_count = surface.export_count.saturating_add(1);
+    surface.export_fds.push(tracked);
     Ok(desc)
+}
+
+#[cfg(test)]
+pub(crate) fn export_ready_surface_for_test(
+    guard: &mut DriverState,
+    surface_id: VASurfaceID,
+    layout: DrmPrimeLayout,
+) -> Result<DrmPrimeDescriptor, SurfaceExportError> {
+    export_ready_surface_with_allocator(
+        guard,
+        surface_id,
+        layout,
+        MAX_EXPORT_BACKING_BYTES,
+        SurfaceBacking::allocate_for_test,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::fd::AsRawFd;
+    use std::os::fd::{AsRawFd, FromRawFd};
 
     use crate::state::{DRV_ID_BASE_SURFACE, DRV_MAX_SURFACES};
 
@@ -296,6 +282,7 @@ mod tests {
 
     fn surface_with(state: SurfaceState, cap_idx: Option<usize>) -> Surface {
         Surface {
+            backing: None,
             width: 64,
             height: 64,
             format: crate::pixel_format::DecodedFormat::Nv12,
@@ -392,8 +379,135 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn predecode_exports_do_not_require_or_guess_a_context() {
+        let mut guard = state_with_empty_surfaces();
+        guard.surfaces[0] = Some(surface_with(SurfaceState::Empty, None));
+        let desc = export_ready_surface_for_test(
+            &mut guard,
+            DRV_ID_BASE_SURFACE,
+            DrmPrimeLayout::Composed,
+        )
+        .unwrap();
+        assert_eq!(guard.surfaces[0].as_ref().unwrap().owner, VA_INVALID_ID);
+        assert_eq!(guard.surfaces[0].as_ref().unwrap().cap_idx, None);
+        assert_eq!((desc.width, desc.height), (64, 64));
+        assert_eq!(desc.num_layers, 1);
+        let client = unsafe { std::os::fd::OwnedFd::from_raw_fd(desc.objects[0].fd) };
+        let repeated = export_ready_surface_for_test(
+            &mut guard,
+            DRV_ID_BASE_SURFACE,
+            DrmPrimeLayout::Separate,
+        )
+        .unwrap();
+        let second = unsafe { std::os::fd::OwnedFd::from_raw_fd(repeated.objects[0].fd) };
+        use std::os::unix::fs::MetadataExt;
+        assert_eq!(
+            std::fs::File::from(client).metadata().unwrap().ino(),
+            std::fs::File::from(second).metadata().unwrap().ino()
+        );
+        assert_eq!(repeated.num_layers, 2);
+        assert_eq!(guard.surfaces[0].as_ref().unwrap().export_fds.len(), 2);
+    }
+
+    #[test]
+    fn export_allocation_budget_and_failed_allocator_do_not_claim_storage() {
+        let mut guard = state_with_empty_surfaces();
+        guard.surfaces[0] = Some(surface_with(SurfaceState::Empty, None));
+        let size =
+            SurfaceBacking::allocation_size(64, 64, crate::pixel_format::DecodedFormat::Nv12)
+                .unwrap();
+        assert!(matches!(
+            export_ready_surface_with_allocator(
+                &mut guard,
+                DRV_ID_BASE_SURFACE,
+                DrmPrimeLayout::Composed,
+                size - 1,
+                |_, _, _| panic!("budget must be checked before allocation"),
+            ),
+            Err(SurfaceExportError::AllocationBudget)
+        ));
+        assert!(guard.surfaces[0].as_ref().unwrap().backing.is_none());
+        assert!(matches!(
+            export_ready_surface_with_allocator(
+                &mut guard,
+                DRV_ID_BASE_SURFACE,
+                DrmPrimeLayout::Composed,
+                size,
+                |_, _, _| Err(std::io::Error::other("allocation failed")),
+            ),
+            Err(SurfaceExportError::OperationFailed)
+        ));
+        let surface = guard.surfaces[0].as_ref().unwrap();
+        assert!(surface.backing.is_none());
+        assert!(surface.export_fds.is_empty());
+        assert_eq!(surface.state, SurfaceState::Empty);
+        assert_eq!(surface.owner, VA_INVALID_ID);
+    }
+
+    #[test]
+    fn failed_export_duplication_does_not_commit_new_backing_or_budget() {
+        let mut guard = state_with_empty_surfaces();
+        guard.surfaces[0] = Some(surface_with(SurfaceState::Empty, None));
+        let allocated = std::cell::Cell::new(false);
+        let duplicated = std::cell::Cell::new(false);
+        assert!(matches!(
+            export_ready_surface_with_operations(
+                &mut guard,
+                DRV_ID_BASE_SURFACE,
+                DrmPrimeLayout::Composed,
+                MAX_EXPORT_BACKING_BYTES,
+                |width, height, format| {
+                    allocated.set(true);
+                    SurfaceBacking::allocate_for_test(width, height, format)
+                },
+                |_| {
+                    duplicated.set(true);
+                    Err(())
+                },
+            ),
+            Err(SurfaceExportError::OperationFailed)
+        ));
+        assert!(allocated.get());
+        assert!(duplicated.get());
+        let surface = guard.surfaces[0].as_ref().unwrap();
+        assert!(surface.backing.is_none());
+        assert!(surface.export_fds.is_empty());
+        assert!(!surface.exported);
+        assert_eq!(surface.export_count, 0);
+        assert_eq!(surface.state, SurfaceState::Empty);
+        assert_eq!(surface.owner, VA_INVALID_ID);
+    }
+
+    #[test]
+    fn failed_ready_copy_drops_new_storage_before_budget_commit() {
+        let mut guard = state_with_empty_surfaces();
+        let mut surface = surface_with(SurfaceState::Ready, None);
+        surface.frame = Some(crate::state::SurfaceFrame {
+            data: std::sync::Arc::new(vec![0; 1]),
+            stride: 1,
+            height: 64,
+            format: crate::pixel_format::DecodedFormat::Nv12,
+        });
+        guard.surfaces[0] = Some(surface);
+        assert!(matches!(
+            export_ready_surface_for_test(
+                &mut guard,
+                DRV_ID_BASE_SURFACE,
+                DrmPrimeLayout::Composed,
+            ),
+            Err(SurfaceExportError::OperationFailed)
+        ));
+        let surface = guard.surfaces[0].as_ref().unwrap();
+        assert!(surface.backing.is_none());
+        assert!(surface.export_fds.is_empty());
+        assert_eq!(surface.state, SurfaceState::Dead);
+        assert!(surface.frame.is_none());
+    }
+
     fn state_with_empty_surfaces() -> DriverState {
         DriverState {
+            drm_fd: None,
             configs: Vec::new(),
             contexts: Vec::new(),
             buffers: Vec::new(),

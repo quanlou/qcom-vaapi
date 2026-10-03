@@ -8,3 +8,6 @@
 
 # Claude local settings (keep shared config, drop machine-local)
 .claude/settings.local.json
+
+# Local qualification packets
+/tmp/

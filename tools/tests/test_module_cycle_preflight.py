@@ -42,7 +42,8 @@ class ModuleCyclePreflightTests(unittest.TestCase):
                 module.validate_idle(*values)
 
     def test_fault_between_removal_and_reload_stops_reload(self):
-        for message in ("session error received 0x4000003", "BUG: use-after-free", "task blocked for more than 120 seconds"):
+        for message in ("session error received 0x4000003", "BUG: use-after-free", "task blocked for more than 120 seconds",
+                        "arm-smmu 15000000.iommu: Unhandled context fault: fsr=0x402, iova=0xd3bfb700"):
             with self.subTest(message=message), self.assertRaises(ValueError):
                 module.require_clean_messages(message)
 

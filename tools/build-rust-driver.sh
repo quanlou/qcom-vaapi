@@ -3,7 +3,11 @@ set -eu
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 out_dir=${1:-"$repo_dir/build-rust"}
 mkdir -p "$out_dir"
-cargo build --manifest-path "$repo_dir/rust/Cargo.toml" --locked --release --target-dir "$repo_dir/rust/target"
+set --
+if [ -n "${V4L2_VA_BUILD_FEATURES:-}" ]; then
+    set -- --features "$V4L2_VA_BUILD_FEATURES"
+fi
+cargo build --manifest-path "$repo_dir/rust/Cargo.toml" --locked --release --target-dir "$repo_dir/rust/target" "$@"
 # Replace the inode atomically: truncating an already-loaded shared object can
 # crash clients still executing its mapped pages.
 staged_driver=$(mktemp "$out_dir/.msm_drv_video.so.XXXXXX")

@@ -2,13 +2,28 @@
 # Source after setting repo_root. Every hardware session needs its own window:
 # an outer observer cannot stop a later open inside the same verifier.
 require_live_iris() {
-    local iris_state
+    local iris_state kernel_messages fault_pattern
     iris_state="$(awk '$1 == "qcom_iris" {print $5}' /proc/modules)" || {
         echo "hardware_session=fail reason=module_state_unavailable"
         exit 1
     }
     if [[ -n "$iris_state" && "$iris_state" != Live ]]; then
         echo "hardware_session=fail reason=iris_module_transition state=$iris_state"
+        exit 1
+    fi
+    # Another client can fault the device while this verifier is compiling or
+    # between sessions. A clean observation window cannot erase earlier faults.
+    kernel_messages="$(journalctl -k -b --no-pager -o cat)" || {
+        echo "hardware_session=fail reason=boot_kernel_log_unavailable"
+        exit 1
+    }
+    if [[ -z "$kernel_messages" ]]; then
+        echo "hardware_session=fail reason=boot_kernel_log_empty"
+        exit 1
+    fi
+    fault_pattern='session error received|received system error|video hw is power on|Unhandled context fault|UBSAN:|KASAN:|BUG:|WARNING:|blocked for more than|watchdog:.*lockup'
+    if [[ "$kernel_messages" =~ $fault_pattern ]]; then
+        echo "hardware_session=fail reason=prior_boot_kernel_or_firmware_fault"
         exit 1
     fi
 }

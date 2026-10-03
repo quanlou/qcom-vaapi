@@ -81,6 +81,69 @@ impl V4l2Session {
             }
             return ready;
         }
+        // Iris marks both vb2 queues in error after an HFI session fatal.
+        // v4l2_m2m_poll then reports POLLERR rather than a usable completion.
+        // Startup and an empty pair of queues also report POLLERR, so require
+        // both queues to be streaming with at least one known queued buffer
+        // before treating it as terminal. A lost/invalid descriptor is always fatal.
+        let lost_fd = pfd.revents & (super::POLLHUP | super::POLLNVAL) != 0;
+        let failed_queues = pfd.revents & super::POLLERR != 0
+            && self.out.streaming
+            && self.cap.streaming
+            && (self
+                .out
+                .buffers
+                .iter()
+                .any(|b| b.state == BufferState::Queued)
+                || self
+                    .cap
+                    .buffers
+                    .iter()
+                    .any(|b| b.state == BufferState::Queued));
+        if lost_fd || failed_queues {
+            // A normal browser does not enable verbose decoder logging. Keep
+            // one bounded failure record so the next incident retains the
+            // compressed format and dimensions without any media payload.
+            if !self.abandoned {
+                eprintln!(
+                    "msm_drv_video_rs: terminal decoder poll revents=0x{:x} coded_fourcc=0x{:08x} dimensions={}x{} streaming={}/{} queued={}/{} pending={}/{}; no session rebuild",
+                    pfd.revents,
+                    self.coded_fourcc,
+                    self.out.width,
+                    self.out.height,
+                    self.out.streaming,
+                    self.cap.streaming,
+                    self.out_queued(),
+                    self.cap
+                        .buffers
+                        .iter()
+                        .filter(|b| b.state == BufferState::Queued)
+                        .count(),
+                    self.fifo.len(),
+                    self.no_output_waiting.len()
+                );
+            }
+            self.abandoned = true;
+            // Retire pending VA owners as errors, without publishing pixels
+            // or disturbing the mappings/queue state required by teardown.
+            for pending in self.fifo.drain(..) {
+                ready.push(ReadyCapture {
+                    surface: pending.surface,
+                    failed: true,
+                    cap_idx: None,
+                    frame: None,
+                });
+            }
+            for surface in self.no_output_waiting.drain(..) {
+                ready.push(ReadyCapture {
+                    surface,
+                    failed: true,
+                    cap_idx: None,
+                    frame: None,
+                });
+            }
+            return ready;
+        }
         self.dequeue_events();
         if self.aborted && !self.in_recover {
             let _ = self.recover();
@@ -214,7 +277,13 @@ impl V4l2Session {
         Some((b, pix.width, pix.height, pix.plane_fmt[0].bytesperline))
     }
 
-    pub(crate) fn capture_copy(&self, idx: usize) -> Option<(Vec<u8>, u32, u32)> {
+    pub(crate) fn capture_copy(&mut self, idx: usize) -> Option<(Vec<u8>, u32, u32)> {
+        // Legacy pools retain mappings established before their slots moved.
+        // Live slots need no CPU mapping until a completed frame is read.
+        let legacy_len = self.legacy_len();
+        if idx >= legacy_len {
+            self.map_buffer(false, idx - legacy_len).ok()?;
+        }
         let (b, width, height, stride) = self.resolve_cap(idx)?;
         let format = crate::pixel_format::DecodedFormat::from_v4l2_fourcc(self.capture_fourcc)?;
         let required = semiplanar_storage_size(width, height, stride, format)?;
@@ -235,6 +304,7 @@ impl V4l2Session {
         if from_live == to_live {
             return Ok(());
         }
+        self.map_buffer(false, from_live)?;
         self.map_buffer(false, to_live)?;
         let (src, len) = match self.cap.buffers.get(from_live) {
             Some(b) if !b.addr[0].is_null() => (b.addr[0], b.len[0]),
@@ -701,6 +771,134 @@ mod tests {
     use crate::bindings::v4l2_buf_type;
     use std::collections::VecDeque;
     use std::ffi::CString;
+
+    // A pipe with no reader produces a real libc POLLERR without a decoder
+    // device or a mock of the production pump. All queue addresses are empty;
+    // teardown ioctls on the pipe are harmless ENOTTY failures.
+    fn session_on_error_pipe() -> V4l2Session {
+        unsafe extern "C" {
+            fn pipe(fds: *mut i32) -> i32;
+        }
+        let mut fds = [-1; 2];
+        assert_eq!(unsafe { pipe(fds.as_mut_ptr()) }, 0);
+        assert_eq!(unsafe { super::super::close(fds[0]) }, 0);
+        let (mut session, _backing) = session_with_backed_capture(fds[1]);
+        for b in &mut session.cap.buffers {
+            b.addr.fill(std::ptr::null_mut());
+            b.len.fill(0);
+        }
+        session.legacy.clear();
+        session.stable_capture = true;
+        session.out.streaming = true;
+        session.cap.streaming = true;
+        session.cap.buffers[0].state = BufferState::Queued;
+        let mut output = V4l2Buffer::new();
+        output.state = BufferState::Queued;
+        session.out.buffers.push(output);
+        session.fifo.push(super::super::PendingFrame {
+            surface: 9,
+            timestamp: 7,
+            expects_output: true,
+        });
+        session.no_output_waiting.push(10);
+        session
+    }
+
+    #[test]
+    fn fatal_poll_error_fails_pending_owners_without_reopening() {
+        let mut session = session_on_error_pipe();
+        let ready = session.pump(0);
+        assert!(session.failed(), "active queue error must latch failure");
+        assert_eq!(session.recoveries, 0, "terminal errors must not reopen");
+        assert!(session.fifo.is_empty());
+        assert!(session.no_output_waiting.is_empty());
+        assert_eq!(ready.iter().map(|r| r.surface).collect::<Vec<_>>(), [9, 10]);
+        assert!(
+            ready
+                .iter()
+                .all(|r| r.failed && r.frame.is_none() && r.cap_idx.is_none())
+        );
+        assert!(
+            session.pump(0).is_empty(),
+            "failure publication must occur once"
+        );
+    }
+
+    #[test]
+    fn poll_error_before_capture_streaming_does_not_abort_startup() {
+        let mut session = session_on_error_pipe();
+        session.cap.streaming = false;
+        assert!(session.pump(0).is_empty());
+        assert!(!session.failed());
+        assert_eq!(session.fifo.len(), 1);
+    }
+
+    #[test]
+    fn poll_error_with_empty_queues_does_not_abort_idle_drain() {
+        let mut session = session_on_error_pipe();
+        session.out.buffers[0].state = BufferState::Free;
+        session.cap.buffers[0].state = BufferState::Free;
+        session.fifo.clear();
+        session.no_output_waiting.clear();
+        assert!(session.pump(0).is_empty());
+        assert!(!session.failed());
+    }
+
+    #[test]
+    fn terminal_poll_error_wins_over_an_armed_session_rebuild() {
+        let mut session = session_on_error_pipe();
+        session.aborted = true;
+        assert_eq!(session.pump(0).len(), 2);
+        assert!(session.failed());
+        assert_eq!(session.recoveries, 0);
+    }
+
+    #[test]
+    fn fatal_poll_error_is_detected_when_only_one_queue_still_has_buffers() {
+        for output_is_empty in [true, false] {
+            let mut session = session_on_error_pipe();
+            if output_is_empty {
+                session.out.buffers[0].state = BufferState::Free;
+            } else {
+                session.cap.buffers[0].state = BufferState::Free;
+            }
+            assert_eq!(session.pump(0).len(), 2);
+            assert!(session.failed());
+            assert_eq!(session.recoveries, 0);
+        }
+    }
+
+    #[test]
+    fn hung_up_poll_descriptor_fails_without_trying_session_recovery() {
+        unsafe extern "C" {
+            fn pipe(fds: *mut i32) -> i32;
+        }
+        let mut session = session_on_error_pipe();
+        let mut fds = [-1; 2];
+        assert_eq!(unsafe { pipe(fds.as_mut_ptr()) }, 0);
+        assert_eq!(unsafe { super::super::close(fds[1]) }, 0);
+        assert_eq!(unsafe { super::super::close(session.fd) }, 0);
+        session.fd = fds[0];
+        session.out.streaming = false;
+        session.cap.streaming = false;
+        assert_eq!(session.pump(0).len(), 2);
+        assert!(session.failed());
+        assert_eq!(session.recoveries, 0);
+    }
+
+    #[test]
+    fn invalid_poll_descriptor_fails_without_streaming_or_queued_work() {
+        let mut session = session_on_error_pipe();
+        assert_eq!(unsafe { super::super::close(session.fd) }, 0);
+        // Far above the process descriptor limit, so parallel tests cannot
+        // reuse this number between close and poll.
+        session.fd = 1_000_000_000;
+        session.out.streaming = false;
+        session.cap.streaming = false;
+        assert_eq!(session.pump(0).len(), 2);
+        assert!(session.failed());
+        assert_eq!(session.recoveries, 0);
+    }
 
     #[test]
     fn streaming_source_change_is_acknowledged() {

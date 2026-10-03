@@ -75,6 +75,7 @@ fn decoded_surface(format: DecodedFormat) -> (Box<DriverBox>, VADriverContext) {
         .map(|index| (index as u8).wrapping_add(17))
         .collect();
     state.lock.lock().unwrap().surfaces[0] = Some(Surface {
+        backing: None,
         width: 16,
         height: 16,
         format,

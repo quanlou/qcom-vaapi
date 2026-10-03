@@ -29,6 +29,7 @@ mkdir -p "$work_dir"
 cargo test --manifest-path "$repo_root/rust/Cargo.toml"
 "$repo_root/tools/build-rust-driver.sh" "$driver_dir"
 
+require_live_iris
 timeout -k 5s 30s env LIBVA_DRIVERS_PATH="$driver_dir" vainfo --display drm --device "$drm_device" > "$work_dir/vainfo.log" 2>&1
 
 run_native_framemd5() {

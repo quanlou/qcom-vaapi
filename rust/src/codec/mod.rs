@@ -60,6 +60,12 @@ pub(crate) enum Decoder {
 }
 
 impl Decoder {
+    pub(crate) fn transport_picture(&self) -> Option<&VADecPictureParameterBufferAV1> {
+        match self {
+            Self::Raw(decoder) => decoder.transport_picture(),
+            Self::H264(_) => None,
+        }
+    }
     pub(crate) fn new(profile: VAProfile) -> Option<Self> {
         match Codec::from_profile(profile)? {
             Codec::H264 => Some(Self::H264(Box::new(H264Decoder::new(profile)))),

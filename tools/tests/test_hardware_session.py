@@ -14,7 +14,8 @@ CLEAN = 'summary: ' + '  '.join(name + '=0' for name in COUNTERS)
 
 
 class HardwareSessionTests(unittest.TestCase):
-    def checked(self, summary, status=0, conditional=False, module_state='Live'):
+    def checked(self, summary, status=0, conditional=False, module_state='Live',
+                boot_kernel='Linux mock clean boot', journal_status=0):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             tools = root / 'tools'
@@ -25,6 +26,8 @@ class HardwareSessionTests(unittest.TestCase):
             modules.write_text('qcom_iris 237568 0 - ' + module_state + ' 0x0\n' if module_state else '')
             helper = tools / 'hardware-session.sh'
             helper.write_text(helper.read_text().replace('/proc/modules', str(modules)))
+            with helper.open('a') as stream:
+                stream.write('\njournalctl() { printf "%s\\n" "$BOOT_KERNEL"; return "$JOURNAL_STATUS"; }\n')
             wrapper = tools / 'capture-iris-kernel-log.sh'
             wrapper.write_text('#!' + sys.executable + '\nimport os,sys\n'
                                "print('hardware_command_started')\n"
@@ -38,7 +41,8 @@ class HardwareSessionTests(unittest.TestCase):
             return subprocess.run(['bash', '-c', 'set +e\nrepo_root="$1"\n'
                                    'source "$repo_root/tools/hardware-session.sh"\n' + call +
                                    '\nstatus=$?\necho next_session\nexit "$status"', '_', str(root)],
-                                  env={**os.environ, 'SUMMARY': summary, 'STATUS': str(status)},
+                                  env={**os.environ, 'SUMMARY': summary, 'STATUS': str(status),
+                                       'BOOT_KERNEL': boot_kernel, 'JOURNAL_STATUS': str(journal_status)},
                                   capture_output=True, text=True, timeout=10)
 
     def test_clean_windows_preserve_command_status(self):
@@ -73,6 +77,28 @@ class HardwareSessionTests(unittest.TestCase):
 
     def test_hosts_without_an_iris_module_can_exercise_the_mock(self):
         self.assertEqual(self.checked(CLEAN, module_state='').returncode, 0)
+
+    def test_fault_before_a_fresh_clean_window_prevents_decoder_open(self):
+        for fault in ('session error received 0x4000003',
+                      'received system error of type 0x5000002',
+                      'video hw is power on',
+                      'arm-smmu: Unhandled context fault',
+                      'UBSAN: array-index-out-of-bounds', 'WARNING: vb2'):
+            for conditional in (False, True):
+                with self.subTest(fault=fault, conditional=conditional):
+                    result = self.checked(CLEAN, boot_kernel=fault, conditional=conditional)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn('prior_boot_kernel_or_firmware_fault', result.stdout)
+                    self.assertNotIn('hardware_command_started', result.stdout)
+                    self.assertNotIn('next_session', result.stdout)
+
+    def test_missing_boot_journal_cannot_start_decoder(self):
+        for kernel, status in (('', 0), ('Linux mock clean boot', 1)):
+            result = self.checked(CLEAN, boot_kernel=kernel, journal_status=status,
+                                  conditional=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertNotIn('hardware_command_started', result.stdout)
+            self.assertNotIn('next_session', result.stdout)
 
 
 class LongFrameCountTests(unittest.TestCase):

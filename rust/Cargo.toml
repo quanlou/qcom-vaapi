@@ -1,9 +1,13 @@
 [package]
 name = "qcom-vaapi"
-version = "0.1.0"
+version = "0.1.1-rc.5"
 edition = "2024"
 description = "A Rust VA-API backend for Qualcomm Iris video decoding through Linux V4L2."
 license = "MIT"
+
+[features]
+# Explicit installation variant for experimental 8-bit AV1 with the CBS helper.
+system-av1 = []
 
 [lib]
 name = "msm_drv_video"

@@ -18,6 +18,10 @@ use crate::{err, ok, state_from_ctx};
 use std::ffi::c_int;
 use std::slice;
 
+// Permit one decoder replacement or second player while retaining a bounded
+// device-session budget. The larger handle table is not a concurrency limit.
+const MAX_ACTIVE_DECODE_CONTEXTS: usize = 2;
+
 pub(crate) unsafe extern "C" fn create_context(
     ctx: VADriverContextP,
     config_id: VAConfigID,
@@ -27,6 +31,35 @@ pub(crate) unsafe extern "C" fn create_context(
     render_targets: *mut VASurfaceID,
     num_render_targets: c_int,
     context: *mut VAContextID,
+) -> VAStatus {
+    unsafe {
+        create_context_with_setup(
+            ctx,
+            config_id,
+            picture_width,
+            picture_height,
+            render_targets,
+            num_render_targets,
+            context,
+            |width, height, coded_fourcc, capture_fourcc| {
+                V4l2Session::open_and_setup(width, height, coded_fourcc, capture_fourcc).map(Some)
+            },
+        )
+    }
+}
+
+// The session opener is injected only by host tests; production always opens
+// one separately owned V4L2 session for each accepted decode context.
+#[allow(clippy::too_many_arguments)]
+unsafe fn create_context_with_setup(
+    ctx: VADriverContextP,
+    config_id: VAConfigID,
+    picture_width: c_int,
+    picture_height: c_int,
+    render_targets: *mut VASurfaceID,
+    num_render_targets: c_int,
+    context: *mut VAContextID,
+    setup: impl FnOnce(i32, i32, u32, u32) -> Result<Option<V4l2Session>, ()>,
 ) -> VAStatus {
     if context.is_null()
         || num_render_targets < 0
@@ -55,12 +88,15 @@ pub(crate) unsafe extern "C" fn create_context(
     if cfg.entrypoint != VAEntrypoint::VAEntrypointVLD {
         return err(VA_STATUS_ERROR_UNSUPPORTED_ENTRYPOINT);
     }
-    if guard.contexts.iter().any(Option::is_some) {
+    if guard.contexts.iter().flatten().count() >= MAX_ACTIVE_DECODE_CONTEXTS {
         return err(VA_STATUS_ERROR_MAX_NUM_EXCEEDED);
     }
     if num_render_targets as usize > DRV_MAX_SURFACES {
         return err(VA_STATUS_ERROR_MAX_NUM_EXCEEDED);
     }
+    let Some(idx) = guard.contexts.iter().position(Option::is_none) else {
+        return err(VA_STATUS_ERROR_MAX_NUM_EXCEEDED);
+    };
     let render_targets = if num_render_targets > 0 {
         let targets = unsafe { slice::from_raw_parts(render_targets, num_render_targets as usize) };
         for &surface_id in targets {
@@ -70,6 +106,9 @@ pub(crate) unsafe extern "C" fn create_context(
             let Some(surface) = guard.surfaces[surface_idx].as_ref() else {
                 return err(VA_STATUS_ERROR_INVALID_SURFACE);
             };
+            if surface.owner != VA_INVALID_ID {
+                return err(VA_STATUS_ERROR_SURFACE_BUSY);
+            }
             if surface.format != cfg.format
                 || surface.width < picture_width
                 || surface.height < picture_height
@@ -87,7 +126,7 @@ pub(crate) unsafe extern "C" fn create_context(
     let Some(decoder) = Decoder::new(cfg.profile) else {
         return err(VA_STATUS_ERROR_UNSUPPORTED_PROFILE);
     };
-    let Ok(v4l2) = V4l2Session::open_and_setup(
+    let Ok(v4l2) = setup(
         picture_width,
         picture_height,
         codec.fourcc(),
@@ -95,7 +134,7 @@ pub(crate) unsafe extern "C" fn create_context(
     ) else {
         return err(VA_STATUS_ERROR_OPERATION_FAILED);
     };
-    if let Some(idx) = guard.contexts.iter().position(Option::is_none) {
+    {
         let context_id = DRV_ID_BASE_CONTEXT + idx as u32;
         for &surface_id in &render_targets {
             if let Some(surface_idx) = surface_index(surface_id)
@@ -115,12 +154,10 @@ pub(crate) unsafe extern "C" fn create_context(
             render_target: VA_INVALID_ID,
             decoder,
             out_seq: 0,
-            v4l2: Some(v4l2),
+            v4l2,
         });
         unsafe { *context = context_id };
         ok()
-    } else {
-        err(VA_STATUS_ERROR_MAX_NUM_EXCEEDED)
     }
 }
 
@@ -164,7 +201,7 @@ pub(crate) unsafe extern "C" fn destroy_context(
         .and_then(|context| context.v4l2.as_mut())
         .map(V4l2Session::drain_for_context_destroy)
         .unwrap_or_default();
-    apply_ready_captures(&mut guard, ready);
+    apply_ready_captures(&mut guard, context, ready);
 
     // A surface can outlive its decode context. Detach every owned surface
     // before dropping the V4L2 session, otherwise its cap_idx would point at
@@ -211,6 +248,413 @@ mod tests {
     };
     use std::ffi::c_void;
 
+    fn driver_for_context_test() -> (*mut DriverBox, VADriverContext) {
+        let raw = Box::into_raw(Box::new(DriverBox::new()));
+        let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
+        ctx.pDriverData = raw.cast::<c_void>();
+        unsafe { &*raw }.lock.lock().unwrap().configs[0] = Some(Config {
+            profile: VAProfile::VAProfileH264Main,
+            entrypoint: VAEntrypoint::VAEntrypointVLD,
+            attribs: Vec::new(),
+            format: crate::pixel_format::DecodedFormat::Nv12,
+        });
+        (raw, ctx)
+    }
+
+    #[test]
+    fn second_context_uses_an_independent_slot_before_prior_context_teardown() {
+        let (raw, mut ctx) = driver_for_context_test();
+        let mut first = VA_INVALID_ID;
+        let mut second = VA_INVALID_ID;
+        let setups = std::cell::Cell::new(0);
+        for output in [&mut first, &mut second] {
+            assert_eq!(
+                unsafe {
+                    create_context_with_setup(
+                        &mut ctx,
+                        DRV_ID_BASE_CONFIG,
+                        320,
+                        240,
+                        std::ptr::null_mut(),
+                        0,
+                        output,
+                        |_, _, _, _| {
+                            setups.set(setups.get() + 1);
+                            Ok(None)
+                        },
+                    )
+                },
+                ok()
+            );
+        }
+        assert_eq!(
+            (first, second),
+            (DRV_ID_BASE_CONTEXT, DRV_ID_BASE_CONTEXT + 1)
+        );
+        assert_eq!(setups.get(), 2);
+        assert_eq!(unsafe { destroy_context(&mut ctx, first) }, ok());
+        assert!(unsafe { &*raw }.lock.lock().unwrap().contexts[1].is_some());
+        assert_eq!(unsafe { destroy_context(&mut ctx, second) }, ok());
+        unsafe { drop(Box::from_raw(raw)) };
+    }
+
+    fn surface_for_context_test(owner: VAContextID) -> Surface {
+        Surface {
+            backing: None,
+            width: 320,
+            height: 240,
+            format: crate::pixel_format::DecodedFormat::Nv12,
+            state: SurfaceState::Empty,
+            cap_idx: None,
+            frame: None,
+            owner,
+            exported: false,
+            export_count: 0,
+            export_fds: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn context_budget_and_setup_failure_leave_other_owners_intact() {
+        let (raw, mut ctx) = driver_for_context_test();
+        let state = unsafe { &*raw };
+        {
+            let mut guard = state.lock.lock().unwrap();
+            for index in 0..2 {
+                guard.contexts[index] = Some(context_for_test(DRV_ID_BASE_CONFIG));
+            }
+            guard.surfaces[0] = Some(surface_for_context_test(VA_INVALID_ID));
+        }
+        let mut target = DRV_ID_BASE_SURFACE;
+        let mut output = VA_INVALID_ID;
+        assert_eq!(
+            unsafe {
+                create_context_with_setup(
+                    &mut ctx,
+                    DRV_ID_BASE_CONFIG,
+                    320,
+                    240,
+                    &mut target,
+                    1,
+                    &mut output,
+                    |_, _, _, _| panic!("budget must be checked before opening a session"),
+                )
+            },
+            err(VA_STATUS_ERROR_MAX_NUM_EXCEEDED)
+        );
+        assert_eq!(output, VA_INVALID_ID);
+        assert_eq!(
+            unsafe { destroy_context(&mut ctx, DRV_ID_BASE_CONTEXT) },
+            ok()
+        );
+        assert_eq!(
+            unsafe {
+                create_context_with_setup(
+                    &mut ctx,
+                    DRV_ID_BASE_CONFIG,
+                    320,
+                    240,
+                    &mut target,
+                    1,
+                    &mut output,
+                    |_, _, _, _| Err(()),
+                )
+            },
+            err(VA_STATUS_ERROR_OPERATION_FAILED)
+        );
+        let guard = state.lock.lock().unwrap();
+        assert_eq!(output, VA_INVALID_ID);
+        assert!(guard.contexts[0].is_none());
+        assert!(guard.contexts[1].is_some());
+        assert_eq!(guard.surfaces[0].as_ref().unwrap().owner, VA_INVALID_ID);
+        drop(guard);
+        unsafe { drop(Box::from_raw(raw)) };
+    }
+
+    #[test]
+    fn foreign_render_target_rejected_before_setup_and_teardown_keeps_other_context() {
+        let (raw, mut ctx) = driver_for_context_test();
+        let state = unsafe { &*raw };
+        {
+            let mut guard = state.lock.lock().unwrap();
+            guard.contexts[0] = Some(context_for_test(DRV_ID_BASE_CONFIG));
+            guard.surfaces[0] = Some(surface_for_context_test(DRV_ID_BASE_CONTEXT));
+        }
+        let mut target = DRV_ID_BASE_SURFACE;
+        let mut output = VA_INVALID_ID;
+        assert_eq!(
+            unsafe {
+                create_context_with_setup(
+                    &mut ctx,
+                    DRV_ID_BASE_CONFIG,
+                    320,
+                    240,
+                    &mut target,
+                    1,
+                    &mut output,
+                    |_, _, _, _| panic!("foreign surface must be rejected before setup"),
+                )
+            },
+            err(VA_STATUS_ERROR_SURFACE_BUSY)
+        );
+        assert_eq!(output, VA_INVALID_ID);
+        {
+            let mut guard = state.lock.lock().unwrap();
+            guard.contexts[1] = Some(context_for_test(DRV_ID_BASE_CONFIG));
+            guard.surfaces[1] = Some(surface_for_context_test(DRV_ID_BASE_CONTEXT + 1));
+            for index in 0..2 {
+                guard.buffers[index] = Some(Buffer {
+                    owner: DRV_ID_BASE_CONTEXT + index as u32,
+                    type_: VABufferType::VASliceDataBufferType,
+                    elem_size: 1,
+                    num_elements: 1,
+                    data: vec![index as u8],
+                    mapped: false,
+                });
+            }
+        }
+        assert_eq!(
+            unsafe { destroy_context(&mut ctx, DRV_ID_BASE_CONTEXT) },
+            ok()
+        );
+        let guard = state.lock.lock().unwrap();
+        assert!(guard.contexts[0].is_none());
+        assert!(guard.contexts[1].is_some());
+        assert!(guard.buffers[0].is_none());
+        assert!(guard.buffers[1].is_some());
+        assert_eq!(guard.surfaces[0].as_ref().unwrap().owner, VA_INVALID_ID);
+        assert_eq!(
+            guard.surfaces[1].as_ref().unwrap().owner,
+            DRV_ID_BASE_CONTEXT + 1
+        );
+        assert_eq!(
+            guard.surfaces[1].as_ref().unwrap().state,
+            SurfaceState::Empty
+        );
+        drop(guard);
+        unsafe { drop(Box::from_raw(raw)) };
+    }
+
+    #[test]
+    fn identical_chrome_contexts_export_before_begin_and_keep_backing_through_teardown() {
+        use crate::surface_export::export_ready_surface_for_test;
+        use crate::sync::{apply_ready_captures, sync_surface2};
+        use crate::va_drm::DrmPrimeLayout;
+        use std::os::fd::FromRawFd;
+        use std::os::unix::fs::FileExt;
+        let (raw, mut ctx) = driver_for_context_test();
+        let state = unsafe { &*raw };
+        let mut clients = Vec::new();
+        for index in 0..2 {
+            let mut context = VA_INVALID_ID;
+            // Exact Chromium context contract: no render-target array.
+            assert_eq!(
+                unsafe {
+                    create_context_with_setup(
+                        &mut ctx,
+                        DRV_ID_BASE_CONFIG,
+                        3840,
+                        2160,
+                        std::ptr::null_mut(),
+                        0,
+                        &mut context,
+                        |_, _, _, _| Ok(None),
+                    )
+                },
+                ok()
+            );
+            assert_eq!(context, DRV_ID_BASE_CONTEXT + index as u32);
+            let mut surface = surface_for_context_test(VA_INVALID_ID);
+            surface.width = 3840;
+            surface.height = 2160;
+            let mut guard = state.lock.lock().unwrap();
+            guard.surfaces[index] = Some(surface);
+            let desc = export_ready_surface_for_test(
+                &mut guard,
+                DRV_ID_BASE_SURFACE + index as u32,
+                DrmPrimeLayout::Composed,
+            )
+            .unwrap();
+            assert_eq!(guard.surfaces[index].as_ref().unwrap().owner, VA_INVALID_ID);
+            clients.push(unsafe { std::fs::File::from_raw_fd(desc.objects[0].fd) });
+        }
+        for (index, client) in clients.iter().enumerate() {
+            let context = DRV_ID_BASE_CONTEXT + index as u32;
+            let surface = DRV_ID_BASE_SURFACE + index as u32;
+            assert_eq!(
+                unsafe { crate::decode::begin_picture(&mut ctx, context, surface) },
+                ok()
+            );
+            {
+                let mut guard = state.lock.lock().unwrap();
+                // Model an actual decoded completion without a device open.
+                guard.contexts[index].as_mut().unwrap().frame_open = false;
+                guard.surfaces[index].as_mut().unwrap().state = SurfaceState::Pending;
+                let stride = 3840;
+                let height = 2176;
+                let value = index as u8 + 3;
+                apply_ready_captures(
+                    &mut guard,
+                    context,
+                    vec![crate::v4l2::ReadyCapture {
+                        surface,
+                        failed: false,
+                        cap_idx: Some(9),
+                        frame: Some(SurfaceFrame {
+                            data: std::sync::Arc::new(vec![value; stride * height * 3 / 2]),
+                            stride: stride as u32,
+                            height: height as u32,
+                            format: crate::pixel_format::DecodedFormat::Nv12,
+                        }),
+                    }],
+                );
+            }
+            assert_eq!(unsafe { sync_surface2(&mut ctx, surface, 0) }, ok());
+            let mut byte = [0];
+            client.read_exact_at(&mut byte, 0).unwrap();
+            assert_eq!(byte[0], index as u8 + 3);
+            assert_eq!(unsafe { destroy_context(&mut ctx, context) }, ok());
+            {
+                let guard = state.lock.lock().unwrap();
+                let surface = guard.surfaces[index].as_ref().unwrap();
+                assert_eq!(surface.owner, VA_INVALID_ID);
+                assert!(surface.backing.is_some());
+                assert!(surface.exported);
+                assert_eq!(surface.state, SurfaceState::Ready);
+            }
+            let mut surface_id = surface;
+            assert_eq!(
+                unsafe { crate::surface::destroy_surfaces(&mut ctx, &mut surface_id, 1) },
+                ok()
+            );
+            client.read_exact_at(&mut byte, 0).unwrap();
+            assert_eq!(byte[0], index as u8 + 3);
+        }
+        unsafe { drop(Box::from_raw(raw)) };
+    }
+
+    #[test]
+    #[ignore = "graphics buffer allocation only; no Iris decoder opens"]
+    fn actual_render_buffers_survive_two_contexts_without_decoder_opens() {
+        use crate::surface_export::export_ready_surface;
+        use crate::sync::{apply_ready_captures, sync_surface2};
+        use crate::va_drm::DrmPrimeLayout;
+        use std::os::fd::AsRawFd;
+        use std::os::fd::FromRawFd;
+        fn read_export_byte(client: &std::fs::File) -> u8 {
+            unsafe extern "C" {
+                fn mmap(
+                    addr: *mut c_void,
+                    len: usize,
+                    prot: c_int,
+                    flags: c_int,
+                    fd: c_int,
+                    offset: isize,
+                ) -> *mut c_void;
+                fn munmap(addr: *mut c_void, len: usize) -> c_int;
+            }
+            let addr = unsafe { mmap(std::ptr::null_mut(), 4096, 1, 1, client.as_raw_fd(), 0) };
+            assert_ne!(addr as isize, -1);
+            let value = unsafe { addr.cast::<u8>().read_volatile() };
+            assert_eq!(unsafe { munmap(addr, 4096) }, 0);
+            value
+        }
+        let (raw, mut ctx) = driver_for_context_test();
+        let state = unsafe { &*raw };
+        state.lock.lock().unwrap().drm_fd = Some(
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open("/dev/dri/renderD128")
+                .unwrap()
+                .into(),
+        );
+        let mut clients = Vec::new();
+        for index in 0..2 {
+            let mut context = VA_INVALID_ID;
+            // Exact Chromium context contract: no render-target array.
+            assert_eq!(
+                unsafe {
+                    create_context_with_setup(
+                        &mut ctx,
+                        DRV_ID_BASE_CONFIG,
+                        3840,
+                        2160,
+                        std::ptr::null_mut(),
+                        0,
+                        &mut context,
+                        |_, _, _, _| Ok(None),
+                    )
+                },
+                ok()
+            );
+            assert_eq!(context, DRV_ID_BASE_CONTEXT + index as u32);
+            let mut surface = surface_for_context_test(VA_INVALID_ID);
+            surface.width = 3840;
+            surface.height = 2160;
+            let mut guard = state.lock.lock().unwrap();
+            guard.surfaces[index] = Some(surface);
+            let desc = export_ready_surface(
+                &mut guard,
+                DRV_ID_BASE_SURFACE + index as u32,
+                DrmPrimeLayout::Composed,
+            )
+            .unwrap();
+            assert_eq!(guard.surfaces[index].as_ref().unwrap().owner, VA_INVALID_ID);
+            clients.push(unsafe { std::fs::File::from_raw_fd(desc.objects[0].fd) });
+        }
+        for (index, client) in clients.iter().enumerate() {
+            let context = DRV_ID_BASE_CONTEXT + index as u32;
+            let surface = DRV_ID_BASE_SURFACE + index as u32;
+            assert_eq!(
+                unsafe { crate::decode::begin_picture(&mut ctx, context, surface) },
+                ok()
+            );
+            {
+                let mut guard = state.lock.lock().unwrap();
+                // Model an actual decoded completion without a device open.
+                guard.contexts[index].as_mut().unwrap().frame_open = false;
+                guard.surfaces[index].as_mut().unwrap().state = SurfaceState::Pending;
+                let stride = 3840;
+                let height = 2176;
+                let value = index as u8 + 3;
+                apply_ready_captures(
+                    &mut guard,
+                    context,
+                    vec![crate::v4l2::ReadyCapture {
+                        surface,
+                        failed: false,
+                        cap_idx: Some(9),
+                        frame: Some(SurfaceFrame {
+                            data: std::sync::Arc::new(vec![value; stride * height * 3 / 2]),
+                            stride: stride as u32,
+                            height: height as u32,
+                            format: crate::pixel_format::DecodedFormat::Nv12,
+                        }),
+                    }],
+                );
+            }
+            assert_eq!(unsafe { sync_surface2(&mut ctx, surface, 0) }, ok());
+            assert_eq!(read_export_byte(client), index as u8 + 3);
+            assert_eq!(unsafe { destroy_context(&mut ctx, context) }, ok());
+            {
+                let guard = state.lock.lock().unwrap();
+                let surface = guard.surfaces[index].as_ref().unwrap();
+                assert_eq!(surface.owner, VA_INVALID_ID);
+                assert!(surface.backing.is_some());
+                assert!(surface.exported);
+                assert_eq!(surface.state, SurfaceState::Ready);
+            }
+            let mut surface_id = surface;
+            assert_eq!(
+                unsafe { crate::surface::destroy_surfaces(&mut ctx, &mut surface_id, 1) },
+                ok()
+            );
+            assert_eq!(read_export_byte(client), index as u8 + 3);
+        }
+        unsafe { drop(Box::from_raw(raw)) };
+    }
+
     fn context_for_test(config_id: VAConfigID) -> Context {
         Context {
             config_id,
@@ -237,6 +681,7 @@ mod tests {
         let surface_id = DRV_ID_BASE_SURFACE;
         state.lock.lock().unwrap().contexts[0] = Some(context_for_test(DRV_ID_BASE_CONFIG));
         state.lock.lock().unwrap().surfaces[0] = Some(Surface {
+            backing: None,
             width: 320,
             height: 240,
             format: crate::pixel_format::DecodedFormat::Nv12,
@@ -273,6 +718,7 @@ mod tests {
         let context_id = DRV_ID_BASE_CONTEXT;
         state.lock.lock().unwrap().contexts[0] = Some(context_for_test(DRV_ID_BASE_CONFIG));
         state.lock.lock().unwrap().surfaces[0] = Some(Surface {
+            backing: None,
             width: 320,
             height: 240,
             format: crate::pixel_format::DecodedFormat::Nv12,
@@ -454,6 +900,7 @@ mod tests {
         );
         assert!(state.lock.lock().unwrap().contexts[0].is_none());
 
+        state.lock.lock().unwrap().contexts[0] = Some(context_for_test(DRV_ID_BASE_CONFIG));
         state.lock.lock().unwrap().contexts[1] = Some(context_for_test(DRV_ID_BASE_CONFIG));
         assert_eq!(
             unsafe {

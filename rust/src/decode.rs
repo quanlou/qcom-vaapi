@@ -64,6 +64,14 @@ unsafe fn begin_picture_inner(
     if guard.surfaces[surf_idx].as_ref().unwrap().format != format {
         return err(VA_STATUS_ERROR_INVALID_SURFACE);
     }
+    // A READY/EMPTY surface can still own a reservation or retained export in
+    // another live session. Never transfer it merely because no frame is pending.
+    if guard.surfaces[surf_idx]
+        .as_ref()
+        .is_some_and(|surface| surface.owner != VA_INVALID_ID && surface.owner != context)
+    {
+        return err(VA_STATUS_ERROR_SURFACE_BUSY);
+    }
     pump_and_publish(&mut guard, ctx_idx, 0);
     if wait_for_pending
         && guard.surfaces[surf_idx].as_ref().is_some_and(|surface| {
@@ -246,6 +254,16 @@ pub(crate) unsafe extern "C" fn end_picture(
         .as_ref()
         .map(|context| context.render_target)
         .unwrap_or(VA_INVALID_ID);
+    let Some(open_context) = guard.contexts[ctx_idx].as_ref() else {
+        return err(VA_STATUS_ERROR_INVALID_CONTEXT);
+    };
+    if !open_context.frame_open {
+        return err(VA_STATUS_ERROR_OPERATION_FAILED);
+    }
+    if let Err(status) = validate_av1_transport_surfaces(&guard, ctx_idx, context, render_target) {
+        fail_picture(&mut guard, ctx_idx);
+        return status;
+    }
     let cap_idx = surface_index(render_target)
         .and_then(|surface_idx| guard.surfaces[surface_idx].as_ref())
         .and_then(|surface| surface.cap_idx);
@@ -333,6 +351,62 @@ pub(crate) unsafe extern "C" fn end_picture(
     ok()
 }
 
+/// Validate original VA surface identities under the same driver lock as
+/// EndPicture. The paired transport never accepts another context's references
+/// or a current picture that would overwrite a still-referenced VA surface.
+fn validate_av1_transport_surfaces(
+    state: &DriverState,
+    ctx_idx: usize,
+    context: VAContextID,
+    target: VASurfaceID,
+) -> Result<(), VAStatus> {
+    let Some(ctx) = state.contexts[ctx_idx].as_ref() else {
+        return Ok(());
+    };
+    let Some(pp) = ctx.decoder.transport_picture() else {
+        return Ok(());
+    };
+    // Without film grain, standard producers may omit the separate display
+    // picture. The reconstruction surface must still be this BeginPicture target.
+    if pp.current_frame != target
+        || (pp.current_display_picture != VA_INVALID_ID && pp.current_display_picture != target)
+    {
+        return Err(err(VA_STATUS_ERROR_INVALID_SURFACE));
+    }
+    let width = i32::from(pp.frame_width_minus1) + 1;
+    let height = i32::from(pp.frame_height_minus1) + 1;
+    let format = crate::pixel_format::DecodedFormat::from_profile(ctx.profile);
+    let current = surface_index(target)
+        .and_then(|idx| state.surfaces[idx].as_ref())
+        .ok_or_else(|| err(VA_STATUS_ERROR_INVALID_SURFACE))?;
+    if current.owner != context
+        || current.state != SurfaceState::InProgress
+        || current.format != format
+        || current.width < width
+        || current.height < height
+    {
+        return Err(err(VA_STATUS_ERROR_INVALID_SURFACE));
+    }
+    for id in pp
+        .ref_frame_map
+        .iter()
+        .copied()
+        .filter(|id| *id != VA_INVALID_ID)
+    {
+        let surface = surface_index(id)
+            .and_then(|idx| state.surfaces[idx].as_ref())
+            .ok_or_else(|| err(VA_STATUS_ERROR_INVALID_SURFACE))?;
+        if id == target
+            || surface.owner != context
+            || surface.format != format
+            || !matches!(surface.state, SurfaceState::Pending | SurfaceState::Ready)
+        {
+            return Err(err(VA_STATUS_ERROR_INVALID_SURFACE));
+        }
+    }
+    Ok(())
+}
+
 // An unsuccessful picture has no completion to publish. Close it and discard
 // stale pixels so sync/status report an error and teardown or the next picture
 // can proceed, including after a malformed codec buffer.
@@ -356,12 +430,109 @@ mod tests {
     use std::ffi::c_void;
 
     #[test]
+    fn paired_av1_reference_surfaces_reject_cross_context_dead_missing_and_current_alias() {
+        let driver = DriverBox::new();
+        let mut state = driver.lock.lock().unwrap();
+        let mut decoder = crate::codec::RawDecoder::new_cbs_transport_for_test();
+        let mut pp: VADecPictureParameterBufferAV1 = unsafe { std::mem::zeroed() };
+        pp.current_frame = DRV_ID_BASE_SURFACE;
+        pp.current_display_picture = VA_INVALID_ID;
+        pp.frame_width_minus1 = 1279;
+        pp.frame_height_minus1 = 719;
+        pp.ref_frame_map = [VA_INVALID_ID; 8];
+        pp.ref_frame_map[0] = DRV_ID_BASE_SURFACE + 1;
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                (&pp as *const VADecPictureParameterBufferAV1).cast::<u8>(),
+                std::mem::size_of_val(&pp),
+            )
+        };
+        decoder
+            .render_buffer(&crate::state::Buffer {
+                owner: DRV_ID_BASE_CONTEXT,
+                type_: VABufferType::VAPictureParameterBufferType,
+                elem_size: bytes.len() as u32,
+                num_elements: 1,
+                data: bytes.to_vec(),
+                mapped: false,
+            })
+            .unwrap();
+        state.contexts[0] = Some(crate::state::Context {
+            config_id: VA_INVALID_ID,
+            profile: VAProfile::VAProfileAV1Profile0,
+            entrypoint: VAEntrypoint::VAEntrypointVLD,
+            width: 1280,
+            height: 720,
+            render_targets: vec![DRV_ID_BASE_SURFACE],
+            frame_open: true,
+            render_target: DRV_ID_BASE_SURFACE,
+            decoder: crate::codec::Decoder::Raw(Box::new(decoder)),
+            out_seq: 0,
+            v4l2: None,
+        });
+        for index in 0..2 {
+            state.surfaces[index] = Some(Surface {
+                backing: None,
+                width: 1280,
+                height: 720,
+                format: crate::pixel_format::DecodedFormat::Nv12,
+                state: if index == 0 {
+                    SurfaceState::InProgress
+                } else {
+                    SurfaceState::Pending
+                },
+                cap_idx: None,
+                frame: None,
+                owner: DRV_ID_BASE_CONTEXT,
+                exported: false,
+                export_count: 0,
+                export_fds: Vec::new(),
+            });
+        }
+        assert_eq!(
+            validate_av1_transport_surfaces(&state, 0, DRV_ID_BASE_CONTEXT, DRV_ID_BASE_SURFACE),
+            Ok(())
+        );
+        state.surfaces[1].as_mut().unwrap().owner += 1;
+        assert!(
+            validate_av1_transport_surfaces(&state, 0, DRV_ID_BASE_CONTEXT, DRV_ID_BASE_SURFACE)
+                .is_err()
+        );
+        state.surfaces[1].as_mut().unwrap().owner = DRV_ID_BASE_CONTEXT;
+        state.surfaces[1].as_mut().unwrap().state = SurfaceState::Dead;
+        assert!(
+            validate_av1_transport_surfaces(&state, 0, DRV_ID_BASE_CONTEXT, DRV_ID_BASE_SURFACE)
+                .is_err()
+        );
+        state.surfaces[1].as_mut().unwrap().state = SurfaceState::Ready;
+        assert_eq!(
+            validate_av1_transport_surfaces(&state, 0, DRV_ID_BASE_CONTEXT, DRV_ID_BASE_SURFACE),
+            Ok(())
+        );
+        assert!(
+            validate_av1_transport_surfaces(
+                &state,
+                0,
+                DRV_ID_BASE_CONTEXT,
+                DRV_ID_BASE_SURFACE + 1
+            )
+            .is_err()
+        );
+        state.surfaces[1] = None;
+        assert!(
+            validate_av1_transport_surfaces(&state, 0, DRV_ID_BASE_CONTEXT, DRV_ID_BASE_SURFACE)
+                .is_err()
+        );
+    }
+
+    #[test]
     fn begin_picture_validates_context_before_retiring_surface() {
         let raw = Box::into_raw(Box::new(DriverBox::new()));
         let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
         ctx.pDriverData = raw as *mut c_void;
         let state = unsafe { &*raw };
         state.lock.lock().unwrap().surfaces[0] = Some(Surface {
+            backing: None,
             width: 320,
             height: 240,
             format: crate::pixel_format::DecodedFormat::Nv12,
@@ -410,6 +581,7 @@ mod tests {
                 v4l2: None,
             });
             guard.surfaces[0] = Some(Surface {
+                backing: None,
                 width: 320,
                 height: 240,
                 format: crate::pixel_format::DecodedFormat::Nv12,
@@ -474,6 +646,7 @@ mod tests {
             v4l2: None,
         });
         guard.surfaces[0] = Some(Surface {
+            backing: None,
             width: 320,
             height: 240,
             format: crate::pixel_format::DecodedFormat::Nv12,
@@ -487,6 +660,36 @@ mod tests {
         });
         drop(guard);
         state
+    }
+
+    #[test]
+    fn begin_picture_cannot_steal_foreign_ready_or_empty_capture() {
+        let state = picture_fixture();
+        let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
+        ctx.pDriverData = &state as *const DriverBox as *mut c_void;
+        for surface_state in [SurfaceState::Empty, SurfaceState::Ready] {
+            {
+                let mut guard = state.lock.lock().unwrap();
+                let surface = guard.surfaces[0].as_mut().unwrap();
+                surface.owner = DRV_ID_BASE_CONTEXT + 1;
+                surface.state = surface_state;
+                surface.cap_idx = Some(9);
+                surface.exported = true;
+                surface.export_count = 1;
+            }
+            assert_eq!(
+                unsafe { begin_picture(&mut ctx, DRV_ID_BASE_CONTEXT, DRV_ID_BASE_SURFACE) },
+                err(VA_STATUS_ERROR_SURFACE_BUSY)
+            );
+            let guard = state.lock.lock().unwrap();
+            let surface = guard.surfaces[0].as_ref().unwrap();
+            assert_eq!(surface.owner, DRV_ID_BASE_CONTEXT + 1);
+            assert_eq!(surface.state, surface_state);
+            assert_eq!(surface.cap_idx, Some(9));
+            assert!(surface.exported);
+            assert_eq!(surface.export_count, 1);
+            assert!(!guard.contexts[0].as_ref().unwrap().frame_open);
+        }
     }
 
     #[test]

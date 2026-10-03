@@ -7,7 +7,7 @@
 //! CAPTURE queue by waiting for an explicit `vaSyncSurface`.
 
 use crate::bindings::*;
-use crate::state::{DriverState, SurfaceState, context_index, surface_index};
+use crate::state::{DRV_ID_BASE_CONTEXT, DriverState, SurfaceState, context_index, surface_index};
 use crate::v4l2::ReadyCapture;
 use crate::{err, ok, state_from_ctx, va_debug_enabled};
 
@@ -17,10 +17,15 @@ use crate::{err, ok, state_from_ctx, va_debug_enabled};
 /// it is pumping. Clients that pipeline frames without syncing depend on this
 /// state being published as soon as it exists. Idempotent: surfaces already
 /// Ready simply get the latest capture slot.
-pub(crate) fn apply_ready_captures(guard: &mut DriverState, ready: Vec<ReadyCapture>) {
+pub(crate) fn apply_ready_captures(
+    guard: &mut DriverState,
+    owner: VAContextID,
+    ready: Vec<ReadyCapture>,
+) {
     for r in ready {
         if let Some(idx) = surface_index(r.surface)
             && let Some(s) = guard.surfaces[idx].as_mut()
+            && s.owner == owner
         {
             if r.failed {
                 s.frame = None;
@@ -39,6 +44,15 @@ pub(crate) fn apply_ready_captures(guard: &mut DriverState, ready: Vec<ReadyCapt
             }
             if let Some(cap_idx) = r.cap_idx {
                 s.cap_idx = Some(cap_idx);
+                if let Some(backing) = s.backing.as_mut()
+                    && r.frame
+                        .as_ref()
+                        .is_none_or(|frame| backing.copy_frame(frame).is_err())
+                {
+                    s.frame = None;
+                    s.state = SurfaceState::Dead;
+                    continue;
+                }
                 s.frame = r.frame;
             }
             // A PRIME export is a handle to the CAPTURE allocation, not a
@@ -59,7 +73,7 @@ pub(crate) fn pump_and_publish(guard: &mut DriverState, ctx_idx: usize, timeout_
         .and_then(|c| c.as_mut())
         .and_then(|c| c.v4l2.as_mut().map(|v| v.pump(timeout_ms)))
         .unwrap_or_default();
-    apply_ready_captures(guard, ready);
+    apply_ready_captures(guard, DRV_ID_BASE_CONTEXT + ctx_idx as u32, ready);
 }
 
 pub(crate) unsafe extern "C" fn sync_surface(
@@ -126,7 +140,12 @@ pub(crate) unsafe extern "C" fn sync_surface2(
             if ready.is_empty()
                 && timeout_ns != 0
                 && !compatibility_drain_started
-                && start.elapsed() >= std::time::Duration::from_millis(20)
+                // STOP resets the firmware reference chain. Allow the same
+                // natural decode grace as keyframe submission and never STOP
+                // queued input or mutate a session after this call's deadline.
+                && start.elapsed() >= std::time::Duration::from_millis(100)
+                && deadline.is_none_or(|end| std::time::Instant::now() < end)
+                && v4l2.sync_drain_input_idle()
             {
                 compatibility_drain_started = v4l2.maybe_start_sync_drain();
                 if compatibility_drain_started {
@@ -142,12 +161,21 @@ pub(crate) unsafe extern "C" fn sync_surface2(
             .as_ref()
             .is_some_and(|v| v.eos() && v.pending_count() == 0);
         let v4l2_failed = c.v4l2.as_ref().is_some_and(|v| v.failed());
-        apply_ready_captures(&mut guard, ready);
+        apply_ready_captures(&mut guard, owner, ready);
         if guard.surfaces[surf_idx]
             .as_ref()
             .is_some_and(|s| s.state == SurfaceState::Ready)
         {
             return ok();
+        }
+        if guard.surfaces[surf_idx]
+            .as_ref()
+            .is_some_and(|surface| surface.state == SurfaceState::Dead)
+        {
+            // PRIME copy/cache synchronization can fail even when the decode
+            // session itself remains healthy. Report that publication failure
+            // now rather than waiting for the generic surface timeout.
+            return err(VA_STATUS_ERROR_DECODING_ERROR);
         }
         if v4l2_eos {
             if let Some(s) = guard.surfaces[surf_idx].as_mut()
@@ -209,6 +237,7 @@ mod tests {
 
     fn surface_with(state: SurfaceState, cap_idx: Option<usize>) -> Surface {
         Surface {
+            backing: None,
             width: 64,
             height: 64,
             format: crate::pixel_format::DecodedFormat::Nv12,
@@ -222,6 +251,205 @@ mod tests {
         }
     }
 
+    fn pending_sync_driver(queued_input: bool) -> Box<DriverBox> {
+        use std::os::fd::IntoRawFd;
+        let driver = Box::new(DriverBox::new());
+        let mut guard = driver.lock.lock().unwrap();
+        let mut surface = surface_with(SurfaceState::Pending, None);
+        surface.owner = DRV_ID_BASE_CONTEXT;
+        guard.surfaces[0] = Some(surface);
+        let fd = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/null")
+            .unwrap()
+            .into_raw_fd();
+        guard.contexts[0] = Some(crate::state::Context {
+            config_id: VA_INVALID_ID,
+            profile: VAProfile::VAProfileH264Main,
+            entrypoint: VAEntrypoint::VAEntrypointVLD,
+            width: 64,
+            height: 64,
+            render_targets: vec![DRV_ID_BASE_SURFACE],
+            frame_open: false,
+            render_target: VA_INVALID_ID,
+            decoder: crate::codec::Decoder::new(VAProfile::VAProfileH264Main).unwrap(),
+            out_seq: 0,
+            v4l2: Some(crate::v4l2::V4l2Session::pending_sync_test_session(
+                fd,
+                queued_input,
+            )),
+        });
+        drop(guard);
+        driver
+    }
+
+    #[test]
+    fn sync_short_timeout_preserves_pending_decode_without_stop() {
+        let driver = pending_sync_driver(false);
+        let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
+        ctx.pDriverData = &*driver as *const DriverBox as *mut c_void;
+        // The old20ms STOP loop rejected ENOTTY eight times and abandoned
+        // this healthy pending owner before its caller's60ms deadline.
+        assert_eq!(
+            unsafe { sync_surface2(&mut ctx, DRV_ID_BASE_SURFACE, 60_000_000) },
+            err(VA_STATUS_ERROR_TIMEDOUT)
+        );
+        let guard = driver.lock.lock().unwrap();
+        assert_eq!(
+            guard.surfaces[0].as_ref().unwrap().state,
+            SurfaceState::Pending
+        );
+        assert!(
+            !guard.contexts[0]
+                .as_ref()
+                .unwrap()
+                .v4l2
+                .as_ref()
+                .unwrap()
+                .failed()
+        );
+    }
+
+    #[test]
+    fn sync_does_not_stop_input_still_owned_by_firmware() {
+        let driver = pending_sync_driver(true);
+        let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
+        ctx.pDriverData = &*driver as *const DriverBox as *mut c_void;
+        // Cross the natural grace with a real writable fd and queued input.
+        // POLLOUT alone cannot authorize flushing a still-decoding picture.
+        assert_eq!(
+            unsafe { sync_surface2(&mut ctx, DRV_ID_BASE_SURFACE, 130_000_000) },
+            err(VA_STATUS_ERROR_TIMEDOUT)
+        );
+        let guard = driver.lock.lock().unwrap();
+        assert!(
+            !guard.contexts[0]
+                .as_ref()
+                .unwrap()
+                .v4l2
+                .as_ref()
+                .unwrap()
+                .failed()
+        );
+        assert_eq!(
+            guard.surfaces[0].as_ref().unwrap().state,
+            SurfaceState::Pending
+        );
+    }
+
+    #[test]
+    fn foreign_context_completions_do_not_change_surface_backing_or_failure_state() {
+        let mut guard = state_with_empty_surfaces();
+        let mut surface = surface_with(SurfaceState::Pending, Some(9));
+        surface.owner = DRV_ID_BASE_CONTEXT + 1;
+        surface.frame = Some(crate::state::SurfaceFrame {
+            data: std::sync::Arc::new(vec![7; 4]),
+            stride: 2,
+            height: 2,
+            format: crate::pixel_format::DecodedFormat::Nv12,
+        });
+        guard.surfaces[0] = Some(surface);
+        for failed in [false, true] {
+            apply_ready_captures(
+                &mut guard,
+                DRV_ID_BASE_CONTEXT,
+                vec![ReadyCapture {
+                    surface: DRV_ID_BASE_SURFACE,
+                    failed,
+                    cap_idx: Some(3),
+                    frame: None,
+                }],
+            );
+            let surface = guard.surfaces[0].as_ref().unwrap();
+            assert_eq!(surface.owner, DRV_ID_BASE_CONTEXT + 1);
+            assert_eq!(surface.state, SurfaceState::Pending);
+            assert_eq!(surface.cap_idx, Some(9));
+            assert_eq!(surface.frame.as_ref().unwrap().data.as_slice(), &[7; 4]);
+        }
+        apply_ready_captures(
+            &mut guard,
+            DRV_ID_BASE_CONTEXT + 1,
+            vec![ReadyCapture {
+                surface: DRV_ID_BASE_SURFACE,
+                failed: false,
+                cap_idx: Some(9),
+                frame: None,
+            }],
+        );
+        assert_eq!(
+            guard.surfaces[0].as_ref().unwrap().state,
+            SurfaceState::Ready
+        );
+    }
+
+    #[test]
+    fn prime_copy_sync_failure_marks_surface_dead_and_sync_returns_prompt_error() {
+        for mode in 0..3 {
+            let mut guard = state_with_empty_surfaces();
+            let mut surface = surface_with(SurfaceState::Pending, None);
+            surface.owner = DRV_ID_BASE_CONTEXT;
+            let mut backing = crate::surface_backing::SurfaceBacking::allocate_for_test(
+                64,
+                64,
+                crate::pixel_format::DecodedFormat::Nv12,
+            )
+            .unwrap();
+            match mode {
+                0 => backing.set_sync_for_test(|_, _| Err(std::io::Error::other("START failed"))),
+                1 => backing.set_sync_for_test(|_, flags| {
+                    if flags & 4 != 0 {
+                        Err(std::io::Error::other("END failed"))
+                    } else {
+                        Ok(())
+                    }
+                }),
+                _ => backing.set_wait_for_test(|_| Err(std::io::ErrorKind::TimedOut.into())),
+            }
+            surface.backing = Some(backing);
+            surface.exported = true;
+            guard.surfaces[0] = Some(surface);
+            apply_ready_captures(
+                &mut guard,
+                DRV_ID_BASE_CONTEXT,
+                vec![ReadyCapture {
+                    surface: DRV_ID_BASE_SURFACE,
+                    failed: false,
+                    cap_idx: Some(9),
+                    frame: Some(crate::state::SurfaceFrame {
+                        data: std::sync::Arc::new(vec![2; 64 * 64 * 3 / 2]),
+                        stride: 64,
+                        height: 64,
+                        format: crate::pixel_format::DecodedFormat::Nv12,
+                    }),
+                }],
+            );
+            let surface = guard.surfaces[0].as_ref().unwrap();
+            assert_eq!(surface.state, SurfaceState::Dead);
+            assert!(surface.frame.is_none());
+            assert_eq!(surface.owner, DRV_ID_BASE_CONTEXT);
+            assert_eq!(surface.cap_idx, Some(9));
+            assert!(
+                surface
+                    .backing
+                    .as_ref()
+                    .unwrap()
+                    .descriptor(crate::va_drm::DrmPrimeLayout::Composed)
+                    .is_err()
+            );
+            let driver = DriverBox::new();
+            *driver.lock.lock().unwrap() = guard;
+            let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
+            ctx.pDriverData = &driver as *const DriverBox as *mut c_void;
+            let start = std::time::Instant::now();
+            assert_eq!(
+                unsafe { sync_surface2(&mut ctx, DRV_ID_BASE_SURFACE, 10_000_000_000) },
+                err(VA_STATUS_ERROR_DECODING_ERROR)
+            );
+            assert!(start.elapsed() < std::time::Duration::from_secs(1));
+        }
+    }
+
     #[test]
     fn publish_marks_pending_surface_ready_with_capture() {
         let mut guard = state_with_empty_surfaces();
@@ -230,6 +458,7 @@ mod tests {
 
         apply_ready_captures(
             &mut guard,
+            VA_INVALID_ID,
             vec![ReadyCapture {
                 failed: false,
                 surface: surf_id,
@@ -256,6 +485,7 @@ mod tests {
         });
         apply_ready_captures(
             &mut guard,
+            VA_INVALID_ID,
             vec![ReadyCapture {
                 surface: DRV_ID_BASE_SURFACE + 7,
                 failed: true,
@@ -276,6 +506,7 @@ mod tests {
 
         apply_ready_captures(
             &mut guard,
+            VA_INVALID_ID,
             vec![
                 ReadyCapture {
                     failed: false,
@@ -304,6 +535,7 @@ mod tests {
 
         apply_ready_captures(
             &mut guard,
+            VA_INVALID_ID,
             vec![ReadyCapture {
                 failed: false,
                 surface: DRV_ID_BASE_SURFACE,
@@ -321,6 +553,7 @@ mod tests {
         let mut guard = state_with_empty_surfaces();
         let file = std::fs::File::open("/dev/null").unwrap();
         guard.surfaces[0] = Some(Surface {
+            backing: None,
             width: 64,
             height: 64,
             format: crate::pixel_format::DecodedFormat::Nv12,
@@ -335,6 +568,7 @@ mod tests {
 
         apply_ready_captures(
             &mut guard,
+            VA_INVALID_ID,
             vec![ReadyCapture {
                 failed: false,
                 surface: DRV_ID_BASE_SURFACE,
@@ -355,6 +589,7 @@ mod tests {
 
         apply_ready_captures(
             &mut guard,
+            VA_INVALID_ID,
             vec![ReadyCapture {
                 failed: false,
                 surface: DRV_ID_BASE_SURFACE + 5,
@@ -408,6 +643,7 @@ mod tests {
 
     fn state_with_empty_surfaces() -> DriverState {
         DriverState {
+            drm_fd: None,
             configs: Vec::new(),
             contexts: Vec::new(),
             buffers: Vec::new(),

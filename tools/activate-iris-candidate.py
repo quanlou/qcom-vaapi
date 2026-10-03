@@ -16,6 +16,15 @@ import tempfile
 
 MODULE = Path('/sys/module/qcom_iris')
 LOCK = Path('/tmp/libva-v4l2-hardware.lock')
+FAULTED_BOOT_IDS = {
+    '94b61175-f76f-4a44-b6b2-9e65697698eb',
+    'c5ace5e4-12f0-4e9f-a222-639256685bf8',
+    '4492e975-80dc-4be5-97cd-6de4431d6b5e',
+    '311d78af-9cfb-44c3-ac47-30ea92056ad5',
+    'b86c3104-05ca-4e40-a913-9226ea801cfb',
+    '4f13b3c1-dddf-4b86-9667-b104b7fad629',
+    '19bb9f80-c534-4c08-8011-43eebc92d448',
+}
 # These binaries share the teardown path that deadlocked on 2026-10-01.
 # A subprocess timeout cannot recover a module-removal syscall in D state.
 UNSAFE_UNLOAD_BUILD_IDS = {
@@ -240,7 +249,8 @@ def main():
         journal = EvidenceJournal(args.evidence, candidate=str(candidate), candidate_sha256=args.sha256,
                                   action='rollback' if args.rollback else 'activate' if args.activate else 'check_only')
         journal.update('preflight_started')
-        if Path('/proc/sys/kernel/random/boot_id').read_text().strip() in args.exclude_boot_id:
+        if Path('/proc/sys/kernel/random/boot_id').read_text().strip() in (
+                FAULTED_BOOT_IDS | set(args.exclude_boot_id)):
             raise ValueError('faulted_boot_requires_restart')
         with open_lease() as lease, tempfile.TemporaryDirectory(prefix='iris-activation-') as tmp:
             fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)

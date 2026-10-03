@@ -1,0 +1,108 @@
+name: Publish release
+
+on:
+  push:
+    tags:
+      - 'v*-rc.*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Read pinned release manifest
+        id: manifest
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const tag = context.ref.replace('refs/tags/', '');
+            const manifest = JSON.parse(fs.readFileSync(`packaging/releases/${tag}.json`, 'utf8'));
+            if (manifest.tag !== tag || !/^[0-9a-f]{40}$/.test(manifest.asset_commit)) {
+              throw new Error('Invalid release manifest');
+            }
+            for (const [name, hash] of Object.entries(manifest.assets)) {
+              if (!/^[a-zA-Z0-9._~+-]+$/.test(name) || !/^[0-9a-f]{64}$/.test(hash)) {
+                throw new Error('Invalid release asset');
+              }
+            }
+            if (!/^[a-zA-Z0-9._+-]+\.tar\.xz$/.test(manifest.source_archive)) {
+              throw new Error('Invalid source archive name');
+            }
+            core.setOutput('asset_commit', manifest.asset_commit);
+            core.setOutput('source_archive', manifest.source_archive);
+      - name: Fetch exact reviewed assets
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.manifest.outputs.asset_commit }}
+          path: release-assets
+      - name: Check assets and archive tagged source
+        env:
+          SOURCE_ARCHIVE: ${{ steps.manifest.outputs.source_archive }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          tag = os.environ['GITHUB_REF_NAME']
+          manifest = json.loads(Path(f'packaging/releases/{tag}.json').read_text())
+          for name, expected in manifest['assets'].items():
+              actual = hashlib.sha256((Path('release-assets') / name).read_bytes()).hexdigest()
+              if actual != expected:
+                  raise SystemExit(f'Asset checksum mismatch: {name}')
+          PY
+          git archive --format=tar HEAD | xz > "release-assets/$SOURCE_ARCHIVE"
+          cd release-assets
+          sha256sum *.deb *.tar.xz qualification.json > SHA256SUMS
+      - name: Publish prerelease and upload assets
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const tag = context.ref.replace('refs/tags/', '');
+            const manifest = JSON.parse(fs.readFileSync(`packaging/releases/${tag}.json`, 'utf8'));
+            const params = {owner: context.repo.owner, repo: context.repo.repo};
+            let release;
+            try {
+              release = (await github.rest.repos.getReleaseByTag({...params, tag})).data;
+              if (release.target_commitish !== context.sha && release.target_commitish !== 'main') {
+                throw new Error('Existing release targets another commit');
+              }
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              release = (await github.rest.repos.createRelease({
+                ...params, tag_name: tag, target_commitish: context.sha,
+                name: `qcom-vaapi ${manifest.version} — experimental AV1`,
+                body: fs.readFileSync(manifest.notes, 'utf8'),
+                draft: true, prerelease: true, make_latest: 'false'
+              })).data;
+            }
+            const names = [...Object.keys(manifest.assets), manifest.source_archive, 'SHA256SUMS'];
+            const existing = (await github.rest.repos.listReleaseAssets({...params, release_id: release.id})).data;
+            const crypto = require('crypto');
+            for (const name of names) {
+              const data = fs.readFileSync(`release-assets/${name}`);
+              const hash = crypto.createHash('sha256').update(data).digest('hex');
+              const previous = existing.find(asset => asset.name === name);
+              if (previous) {
+                if (previous.digest !== `sha256:${hash}`) {
+                  throw new Error(`Existing asset differs; refusing replacement: ${name}`);
+                }
+                continue;
+              }
+              await github.rest.repos.uploadReleaseAsset({
+                ...params, release_id: release.id, name, data,
+                headers: {'content-type': 'application/octet-stream', 'content-length': data.length}
+              });
+            }
+            await github.rest.repos.updateRelease({...params, release_id: release.id, draft: false,
+              prerelease: true, make_latest: 'false'});
+            core.summary.addLink('Published release', release.html_url).write();

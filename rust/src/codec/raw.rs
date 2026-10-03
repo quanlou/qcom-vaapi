@@ -7,6 +7,10 @@
 //! advertisement.
 
 mod av1;
+mod complete;
+mod transport;
+#[cfg(test)]
+mod transport_tests;
 
 use super::{Codec, EncodedFrame};
 use crate::bindings::*;
@@ -34,9 +38,20 @@ pub(crate) struct RawDecoder {
     av1_refs: ReferenceState,
     ranges: Vec<DataRange>,
     chunks: Vec<Vec<u8>>,
+    av1_transport: Option<transport::Transport>,
 }
 
 impl RawDecoder {
+    #[cfg(test)]
+    pub(crate) fn new_cbs_transport_for_test() -> Self {
+        let mut decoder = Self::new(Codec::Av1);
+        decoder.av1_transport = Some(transport::Transport::new());
+        decoder
+    }
+    pub(crate) fn transport_picture(&self) -> Option<&VADecPictureParameterBufferAV1> {
+        self.av1_transport.as_ref()?;
+        self.av1_picture.as_ref()
+    }
     pub(crate) fn new(codec: Codec) -> Self {
         Self {
             codec,
@@ -47,6 +62,10 @@ impl RawDecoder {
             av1_refs: ReferenceState::new(),
             ranges: Vec::new(),
             chunks: Vec::new(),
+            av1_transport: (codec == Codec::Av1
+                && std::env::var("V4L2_VA_AV1_CBS_TRANSPORT")
+                    .map_or(cfg!(feature = "system-av1"), |value| value == "1"))
+            .then(transport::Transport::new),
         }
     }
 
@@ -57,6 +76,9 @@ impl RawDecoder {
         self.av1_picture = None;
         self.ranges.clear();
         self.chunks.clear();
+        if let Some(transport) = &mut self.av1_transport {
+            transport.data = None;
+        }
     }
 
     pub(crate) fn render_buffer(&mut self, buffer: &Buffer) -> Result<(), VAStatus> {
@@ -74,6 +96,13 @@ impl RawDecoder {
     }
 
     pub(crate) fn finish_picture(&mut self, sequence: u64) -> Result<EncodedFrame, VAStatus> {
+        if let Some(transport) = &mut self.av1_transport {
+            let picture = self
+                .av1_picture
+                .as_ref()
+                .ok_or_else(|| err(VA_STATUS_ERROR_INVALID_PARAMETER))?;
+            return transport.finish(picture, &self.ranges, &mut self.av1_refs, sequence);
+        }
         if !self.picture_seen || self.ranges.is_empty() || self.chunks.len() != self.ranges.len() {
             return Err(err(VA_STATUS_ERROR_INVALID_PARAMETER));
         }
@@ -411,6 +440,16 @@ impl RawDecoder {
             .checked_mul(buffer.num_elements as usize)
             .filter(|total| *total <= buffer.data.len())
             .ok_or_else(|| err(VA_STATUS_ERROR_INVALID_PARAMETER))?;
+        if let Some(transport) = &mut self.av1_transport {
+            // VA clients may submit the complete data before tile parameters
+            // (Chromium does). Collect once; finish validates every tile bound
+            // and ownership before committing or submitting to V4L2.
+            if transport.data.is_some() || total == 0 || total > 64 * 1024 * 1024 {
+                return Err(err(VA_STATUS_ERROR_INVALID_PARAMETER));
+            }
+            transport.data = Some(buffer.data[..total].to_vec());
+            return Ok(());
+        }
         let first = self.chunks.len();
         if first >= self.ranges.len() {
             return Err(err(VA_STATUS_ERROR_INVALID_PARAMETER));

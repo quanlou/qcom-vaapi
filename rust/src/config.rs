@@ -52,7 +52,7 @@ fn advertised_profiles_from(
     if output_fourccs.contains(&V4L2_PIX_FMT_VP9) {
         profiles.push(VAProfile::VAProfileVP9Profile0);
     }
-    // AV1 keyframes match, but inter-frame parity remains unresolved.
+    // Experimental complete-buffer AV1 is available in the explicit system build.
     if experimental_av1 && output_fourccs.contains(&V4L2_PIX_FMT_AV1) {
         profiles.push(VAProfile::VAProfileAV1Profile0);
     }
@@ -66,7 +66,8 @@ pub(crate) fn advertised_profiles() -> Vec<VAProfile> {
     advertised_profiles_from(
         &crate::v4l2::enumerate_output_fourccs(),
         &crate::v4l2::enumerate_capture_fourccs(),
-        std::env::var("V4L2_VA_EXPERIMENTAL_AV1").is_ok_and(|value| value == "1"),
+        std::env::var("V4L2_VA_EXPERIMENTAL_AV1")
+            .map_or(cfg!(feature = "system-av1"), |value| value == "1"),
     )
 }
 

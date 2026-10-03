@@ -17,6 +17,9 @@ pub(super) const MAP_SHARED: c_int = 0x01;
 pub(super) const POLLIN: i16 = 0x001;
 pub(super) const POLLPRI: i16 = 0x002;
 pub(super) const POLLOUT: i16 = 0x004;
+pub(super) const POLLERR: i16 = 0x008;
+pub(super) const POLLHUP: i16 = 0x010;
+pub(super) const POLLNVAL: i16 = 0x020;
 pub(super) const POLLRDNORM: i16 = 0x040;
 pub(super) const POLLWRNORM: i16 = 0x100;
 pub(super) const VIDEO_MAX_PLANES_USIZE: usize = VIDEO_MAX_PLANES as usize;
@@ -117,7 +120,19 @@ pub(super) fn zeroed<T>() -> T {
     unsafe { mem::zeroed() }
 }
 
+#[cfg(test)]
+type TestIoctl = fn(c_int, c_ulong, *mut c_void) -> Result<(), ()>;
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static TEST_IOCTL: std::cell::Cell<Option<TestIoctl>> = const { std::cell::Cell::new(None) };
+}
+
 pub(super) fn xioctl(fd: c_int, request: c_ulong, arg: *mut c_void) -> Result<(), ()> {
+    #[cfg(test)]
+    if let Some(mock) = TEST_IOCTL.with(std::cell::Cell::get) {
+        return mock(fd, request, arg);
+    }
     loop {
         let ret = unsafe { ioctl(fd, request, arg) };
         if ret >= 0 {

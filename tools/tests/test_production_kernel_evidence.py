@@ -13,6 +13,14 @@ CLEAN = ("summary: session-fatal(0x4000003)=0  system-fatal(0x5000003)=0  "
 
 
 class ProductionKernelEvidenceTests(unittest.TestCase):
+    def test_standalone_iommu_fault_fails_without_firmware_error(self):
+        message = 'arm-smmu 15000000.iommu: Unhandled context fault: fsr=0x402, iova=0xd3bfb700\n'
+        result = subprocess.run([str(ROOT / 'tools/capture-iris-kernel-log.sh'), '--classify'],
+                                input=message, text=True, capture_output=True, timeout=5)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('IOMMU-FAULT', result.stdout)
+        self.assertIn('kernel-bugs=1', result.stdout)
+
     def run_gate(self, summary):
         source = (ROOT / "tools/verify-production.sh").read_text()
         loop = source[source.index("for probe in rust-driver"):source.index("# This gate covers")]

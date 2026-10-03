@@ -17,6 +17,7 @@ mod image;
 mod pixel_format;
 mod state;
 mod surface;
+mod surface_backing;
 mod surface_export;
 mod sync;
 mod v4l2;
@@ -46,6 +47,21 @@ pub(crate) unsafe fn state_from_ctx<'a>(ctx: VADriverContextP) -> Option<&'a Dri
     Some(unsafe { &*((*ctx).pDriverData as *mut DriverBox) })
 }
 
+// libva's drm_state and derived dri_state begin with an owned display fd.
+// Keep a CLOEXEC duplicate: libva owns the original and may close it later.
+unsafe fn duplicate_display_drm_fd(ctx: VADriverContextP) -> Option<std::os::fd::OwnedFd> {
+    if ctx.is_null() || unsafe { (*ctx).drm_state }.is_null() {
+        return None;
+    }
+    let fd = unsafe { std::ptr::read_unaligned((*ctx).drm_state.cast::<c_int>()) };
+    if fd < 0 {
+        return None;
+    }
+    unsafe { std::os::fd::BorrowedFd::borrow_raw(fd) }
+        .try_clone_to_owned()
+        .ok()
+}
+
 unsafe fn driver_init(ctx: VADriverContextP) -> VAStatus {
     if ctx.is_null() || unsafe { (*ctx).vtable }.is_null() {
         return err(VA_STATUS_ERROR_INVALID_PARAMETER);
@@ -53,6 +69,7 @@ unsafe fn driver_init(ctx: VADriverContextP) -> VAStatus {
 
     let mut state = Box::new(DriverBox::new());
     state.profiles = config::advertised_profiles();
+    state.lock.lock().unwrap().drm_fd = unsafe { duplicate_display_drm_fd(ctx) };
     let max_profiles = state.profiles.len() as c_int;
     unsafe {
         (*ctx).pDriverData = Box::into_raw(state) as *mut c_void;
@@ -94,6 +111,32 @@ pub unsafe extern "C" fn __vaDriverInit_1_0(ctx: VADriverContextP) -> VAStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn display_drm_fd_is_borrowed_and_retained_with_close_on_exec() {
+        use std::os::fd::{AsRawFd, OwnedFd};
+        use std::os::unix::fs::FileExt;
+        let original = std::fs::File::open("/dev/null").unwrap();
+        let mut header = [original.as_raw_fd(), 0];
+        let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
+        ctx.drm_state = header.as_mut_ptr().cast::<c_void>();
+        let retained: OwnedFd = unsafe { duplicate_display_drm_fd(&mut ctx) }.unwrap();
+        assert_ne!(retained.as_raw_fd(), original.as_raw_fd());
+        let file = std::fs::File::from(retained);
+        unsafe extern "C" {
+            fn fcntl(fd: c_int, command: c_int, ...) -> c_int;
+        }
+        assert_ne!(unsafe { fcntl(file.as_raw_fd(), 1) } & 1, 0);
+        drop(original);
+        assert!(file.metadata().is_ok());
+        let mut byte = [0];
+        assert_eq!(file.read_at(&mut byte, 0).unwrap(), 0);
+        header[0] = -1;
+        assert_eq!(header[0], -1);
+        assert!(unsafe { duplicate_display_drm_fd(&mut ctx) }.is_none());
+        ctx.drm_state = std::ptr::null_mut();
+        assert!(unsafe { duplicate_display_drm_fd(&mut ctx) }.is_none());
+    }
 
     #[test]
     fn driver_init_reports_image_format_capacity() {

@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location(
     "sleep_witness", Path(__file__).resolve().parents[1] / "observe-iris-system-sleep.py")
@@ -19,6 +20,14 @@ class SleepWitnessTests(unittest.TestCase):
         result = module.verify_witness(self.before, self.after, self.log)
         self.assertEqual(result["sleep_mode"], "deep")
         self.assertIn("post-resume decode", result["scope"])
+
+    def test_known_faulted_boot_is_refused_before_module_or_power_access(self):
+        for boot in module.FAULTED:
+            with self.subTest(boot=boot), patch.object(Path, 'read_text', return_value=boot), \
+                 patch.object(Path, 'read_bytes') as note:
+                with self.assertRaisesRegex(ValueError, 'known faulted boot'):
+                    module.snapshot()
+                note.assert_not_called()
 
     def test_fault_even_after_resume_rejects(self):
         for fault in ("session error received 0x4000003", "WARNING: bad", "task blocked for more than 120 seconds"):

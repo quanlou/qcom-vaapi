@@ -1,0 +1,262 @@
+From: libva-v4l2 AV1 qualification work
+Subject: [EXPERIMENT] av1_vaapi: opt-in CBS full-frame slice transport
+
+Experimental paired producer only; no AV1 support advertisement. Enable with
+V4L2_VA_AV1_CBS_TRANSPORT=1 only with a validated matching driver. Original parsed
+headers stay immutable. Only complete FRAME OBUs/one tile group supported.
+No reserved VA ABI fields used. Standard slice data includes exact serialized
+headers and tile bytes; offsets still address only each tile payload.
+
+--- a/libavcodec/vaapi_av1.c
++++ b/libavcodec/vaapi_av1.c
+@@ -25,6 +25,7 @@
+ #include "internal.h"
+ #include "av1dec.h"
+ #include "thread.h"
++#include "iris_av1_cbs_va_transport.h"
+ 
+ typedef struct VAAPIAV1FrameRef {
+     AVFrame *frame;
+@@ -46,6 +47,8 @@
+ 
+     int nb_slice_params;
+     VASliceParameterBufferAV1 *slice_params;
++    int iris_cbs_transport;
++    IrisAV1VATransport iris_transport;
+ } VAAPIAV1DecContext;
+ 
+ static VASurfaceID vaapi_av1_surface_id(AV1Frame *vf)
+@@ -78,6 +81,9 @@
+ {
+     VAAPIAV1DecContext *ctx = avctx->internal->hwaccel_priv_data;
+ 
++    const char *iris_mode = getenv("V4L2_VA_AV1_CBS_TRANSPORT");
++    ctx->iris_cbs_transport = iris_mode && !strcmp(iris_mode, "1");
++
+     ctx->tmp_frame = av_frame_alloc();
+     if (!ctx->tmp_frame)
+         return AVERROR(ENOMEM);
+@@ -102,6 +108,7 @@
+         av_frame_free(&ctx->ref_tab[i].frame);
+ 
+     av_freep(&ctx->slice_params);
++    iris_av1_va_transport_close(&ctx->iris_transport);
+ 
+     return ff_vaapi_decode_uninit(avctx);
+ }
+@@ -126,6 +133,11 @@
+     uint8_t segmentation_feature_signed[AV1_SEG_LVL_MAX] = {1, 1, 1, 1, 1, 0, 0, 0};
+     uint8_t segmentation_feature_max[AV1_SEG_LVL_MAX] = {255, AV1_MAX_LOOP_FILTER,
+         AV1_MAX_LOOP_FILTER, AV1_MAX_LOOP_FILTER, AV1_MAX_LOOP_FILTER, 7 , 0 , 0 };
++
++    if (ctx->iris_cbs_transport) {
++        err = iris_av1_va_transport_prepare(&ctx->iris_transport, s->seq_ref, s->header_ref);
++        if (err < 0) goto fail;
++    }
+ 
+     bit_depth_idx = vaapi_av1_get_bit_depth_idx(avctx);
+     if (bit_depth_idx < 0)
+@@ -403,6 +415,28 @@
+     VAAPIAV1DecContext *ctx = avctx->internal->hwaccel_priv_data;
+     int err, nb_params;
+ 
++    if (ctx->iris_cbs_transport) {
++        const IrisAV1VATransport *transport = &ctx->iris_transport;
++        /* First experiment supports one complete FRAME OBU/tile group only.
++         * Refuse partial groups, duplicate calls and changed payloads. */
++        if (!transport->data || transport->slice_sent || s->tg_start != 0 ||
++            s->tg_end + 1 != s->raw_frame_header->tile_cols * s->raw_frame_header->tile_rows ||
++            transport->tile_offset > transport->size ||
++            size != transport->size - transport->tile_offset ||
++            memcmp(buffer, transport->data + transport->tile_offset, size)) {
++            err = AVERROR_INVALIDDATA;
++            goto fail;
++        }
++        for (int i = s->tg_start; i <= s->tg_end; i++) {
++            const TileGroupInfo *tile = &s->tile_group_info[i];
++            if (tile->tile_offset > size || tile->tile_size > size - tile->tile_offset ||
++                transport->tile_offset + tile->tile_offset > UINT32_MAX) {
++                err = AVERROR_INVALIDDATA;
++                goto fail;
++            }
++        }
++    }
++
+     nb_params = s->tg_end - s->tg_start + 1;
+     if (ctx->nb_slice_params < nb_params) {
+         VASliceParameterBufferAV1 *tmp = av_realloc_array(ctx->slice_params,
+@@ -420,7 +454,8 @@
+     for (int i = s->tg_start; i <= s->tg_end; i++) {
+         ctx->slice_params[i - s->tg_start] = (VASliceParameterBufferAV1) {
+             .slice_data_size   = s->tile_group_info[i].tile_size,
+-            .slice_data_offset = s->tile_group_info[i].tile_offset,
++            .slice_data_offset = s->tile_group_info[i].tile_offset +
++                (ctx->iris_cbs_transport ? ctx->iris_transport.tile_offset : 0),
+             .slice_data_flag   = VA_SLICE_DATA_FLAG_ALL,
+             .tile_row          = s->tile_group_info[i].tile_row,
+             .tile_column       = s->tile_group_info[i].tile_column,
+@@ -431,10 +466,11 @@
+ 
+     err = ff_vaapi_decode_make_slice_buffer(avctx, pic, ctx->slice_params, nb_params,
+                                             sizeof(VASliceParameterBufferAV1),
+-                                            buffer,
+-                                            size);
++                                            ctx->iris_cbs_transport ? ctx->iris_transport.data : buffer,
++                                            ctx->iris_cbs_transport ? ctx->iris_transport.size : size);
+     if (err)
+         goto fail;
++    if (ctx->iris_cbs_transport) ctx->iris_transport.slice_sent = 1;
+ 
+     return 0;
+ 
+--- /dev/null
++++ b/libavcodec/iris_av1_cbs_va_transport.h
+@@ -0,0 +1,84 @@
++/* Opt-in experimental AV1 full-OBU transport through ordinary VA slice data.
++ * Consumers must validate header/reference ownership before device submission.
++ */
++#ifndef IRIS_AV1_CBS_VA_TRANSPORT_H
++#define IRIS_AV1_CBS_VA_TRANSPORT_H
++#include <stdint.h>
++#include <string.h>
++#include "av1-cbs-normalized-content.h"
++#include "libavutil/mem.h"
++
++typedef struct IrisAV1VATransport {
++    CodedBitstreamContext *writer;
++    CodedBitstreamFragment normalized;
++    uint8_t *sequence;
++    size_t sequence_size;
++    const uint8_t *data;
++    size_t size;
++    size_t tile_offset;
++    int slice_sent;
++} IrisAV1VATransport;
++
++static void iris_av1_va_transport_close(IrisAV1VATransport *transport)
++{
++    ff_cbs_fragment_free(&transport->normalized);
++    ff_cbs_close(&transport->writer);
++    av_freep(&transport->sequence);
++    memset(transport, 0, sizeof(*transport));
++}
++
++static int iris_av1_va_transport_prepare(IrisAV1VATransport *transport,
++                                         AV1RawOBU *sequence, AV1RawOBU *frame)
++{
++    CodedBitstreamFragment original = {0};
++    int ret;
++    size_t prefix = 0;
++    if (!sequence || !frame || sequence->header.obu_type != AV1_OBU_SEQUENCE_HEADER ||
++        frame->header.obu_type != AV1_OBU_FRAME || frame->obu.frame.header.show_existing_frame)
++        return AVERROR_PATCHWELCOME;
++    const AV1RawTileData *tiles = &frame->obu.frame.tile_group.tile_data;
++    if (!tiles->data || !tiles->data_size || tiles->data_size > UINT32_MAX)
++        return AVERROR_INVALIDDATA;
++    if (!transport->writer) {
++        ret = ff_cbs_init(&transport->writer, AV_CODEC_ID_AV1, NULL);
++        if (ret < 0) return ret;
++    }
++    ff_cbs_fragment_reset(&transport->normalized);
++    transport->data = NULL;
++    transport->size = transport->tile_offset = 0;
++    transport->slice_sent = 0;
++    /* AV1 decoder seq_ref/header_ref are RefStruct-backed AV1RawOBUs. */
++    ret = ff_cbs_insert_unit_content(&original, -1, AV1_OBU_SEQUENCE_HEADER, sequence, sequence);
++    if (ret < 0) goto done;
++    ret = ff_cbs_insert_unit_content(&original, -1, AV1_OBU_FRAME, frame, frame);
++    if (ret < 0) goto done;
++    ret = iris_av1_normalized_content(transport->writer, &original, &transport->normalized);
++    if (ret < 0) goto done;
++    const CodedBitstreamUnit *seq = &transport->normalized.units[0];
++    const CodedBitstreamUnit *coded = &transport->normalized.units[1];
++    if (coded->data_size < tiles->data_size ||
++        memcmp(coded->data + coded->data_size - tiles->data_size, tiles->data, tiles->data_size)) {
++        ret = AVERROR_INVALIDDATA; goto done;
++    }
++    int same_sequence = transport->sequence_size == seq->data_size &&
++        transport->sequence && !memcmp(transport->sequence, seq->data, seq->data_size);
++    if (!same_sequence) {
++        uint8_t *copy = av_memdup(seq->data, seq->data_size);
++        if (!copy) { ret = AVERROR(ENOMEM); goto done; }
++        av_free(transport->sequence);
++        transport->sequence = copy;
++        transport->sequence_size = seq->data_size;
++    } else if (frame->obu.frame.header.frame_type != AV1_FRAME_KEY) {
++        prefix = seq->data_size;
++    }
++    if (transport->normalized.data_size - prefix > UINT32_MAX) {
++        ret = AVERROR_INVALIDDATA; goto done;
++    }
++    transport->data = transport->normalized.data + prefix;
++    transport->size = transport->normalized.data_size - prefix;
++    transport->tile_offset = transport->size - tiles->data_size;
++done:
++    ff_cbs_fragment_free(&original);
++    return ret;
++}
++#endif
+--- /dev/null
++++ b/libavcodec/av1-cbs-normalized-content.h
+@@ -0,0 +1,61 @@
++/* Experimental producer helper. Caller retains original parsed CBS units.
++ * Output owns writable content and tile references, including writer-held
++ * sequence references. This does not enable AV1 VAAPI support.
++ */
++#ifndef IRIS_AV1_CBS_NORMALIZED_CONTENT_H
++#define IRIS_AV1_CBS_NORMALIZED_CONTENT_H
++#include "libavcodec/cbs.h"
++#include "libavcodec/cbs_av1.h"
++
++static int iris_av1_normalized_content(CodedBitstreamContext *writer,
++                                      const CodedBitstreamFragment *original,
++                                      CodedBitstreamFragment *normalized)
++{
++    int ret;
++    for (int i = 0; i < original->nb_units; i++) {
++        const CodedBitstreamUnit *source = &original->units[i];
++        const AV1RawOBU *raw = source->content;
++        const AV1RawFrameHeader *header = NULL;
++        if (!raw || !source->content_ref) return AVERROR_INVALIDDATA;
++        switch (source->type) {
++        case AV1_OBU_SEQUENCE_HEADER:
++            if (raw->obu.sequence_header.decoder_model_info_present_flag)
++                return AVERROR_PATCHWELCOME;
++            break;
++        case AV1_OBU_TEMPORAL_DELIMITER:
++            break;
++        case AV1_OBU_FRAME:
++            header = &raw->obu.frame.header;
++            break;
++        case AV1_OBU_FRAME_HEADER:
++            header = &raw->obu.frame_header;
++            break;
++        default:
++            /* Separate tile groups and metadata need explicit transport rules. */
++            return AVERROR_PATCHWELCOME;
++        }
++        if (header && header->show_existing_frame) {
++            if (header->refresh_frame_flags) return AVERROR_PATCHWELCOME;
++            continue;
++        }
++        if (header && !header->show_frame && header->frame_type != AV1_FRAME_INTER)
++            return AVERROR_PATCHWELCOME;
++        ret = ff_cbs_insert_unit_content(normalized, -1, source->type,
++                                        source->content, source->content_ref);
++        if (ret < 0) return ret;
++        CodedBitstreamUnit *unit = &normalized->units[normalized->nb_units - 1];
++        /* CBS also clones owned tile buffers correctly; a shallow struct copy
++         * would double-release them or let the writer alter parser state. */
++        ret = ff_cbs_make_unit_writable(writer, unit);
++        if (ret < 0) return ret;
++        if (header && !header->show_frame) {
++            AV1RawOBU *copy = unit->content;
++            AV1RawFrameHeader *shown = source->type == AV1_OBU_FRAME ?
++                &copy->obu.frame.header : &copy->obu.frame_header;
++            shown->show_frame = 1;
++            shown->showable_frame = 1;
++        }
++    }
++    return normalized->nb_units ? ff_cbs_write_fragment_data(writer, normalized) : 0;
++}
++#endif

@@ -22,9 +22,12 @@ KERNEL = "7.3.0-15-qcom-x1e"
 FAULTED = {"c5ace5e4-12f0-4e9f-a222-639256685bf8", "4492e975-80dc-4be5-97cd-6de4431d6b5e",
            "311d78af-9cfb-44c3-ac47-30ea92056ad5",
            "b86c3104-05ca-4e40-a913-9226ea801cfb",
-           "4f13b3c1-dddf-4b86-9667-b104b7fad629"}
+           "4f13b3c1-dddf-4b86-9667-b104b7fad629",
+           "19bb9f80-c534-4c08-8011-43eebc92d448",
+           "94b61175-f76f-4a44-b6b2-9e65697698eb"}
 FAULT = re.compile(r"session error received|received system error|video hw is power on|"
-                   r"UBSAN:|KASAN:|BUG:|WARNING:|blocked for more than|watchdog:.*lockup")
+                   r"UBSAN:|KASAN:|BUG:|WARNING:|blocked for more than|watchdog:.*lockup|"
+                   r"Unhandled context fault|arm-smmu.*fault")
 
 
 def require_clean_messages(messages):

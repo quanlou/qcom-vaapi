@@ -71,11 +71,20 @@ def main():
     parser.add_argument("--seconds", type=int, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--run-id")
+    parser.add_argument("--inherit-fd", type=int, action="append", default=[],
+                        help="keep a reviewed lease descriptor in the private child")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not 1 <= args.seconds <= 3600 or not command:
         parser.error("provide a command and a timeout between 1 and 3600 seconds")
+    for fd in args.inherit_fd:
+        if fd < 3:
+            parser.error("inherited descriptors must be above stderr")
+        try:
+            os.fstat(fd)
+        except OSError:
+            parser.error("inherited descriptor is not open")
     start = time.monotonic()
     peak = 0
     timed_out = False
@@ -86,7 +95,8 @@ def main():
     def interrupted(_signal, _frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, interrupted)
-    process = subprocess.Popen(command, start_new_session=True)
+    process = subprocess.Popen(command, start_new_session=True,
+                               pass_fds=tuple(args.inherit_fd))
     try:
         while process.poll() is None:
             current, _ = session_rss(process.pid, tracked)

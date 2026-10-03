@@ -830,6 +830,7 @@ mod tests {
             v4l2: Some(session),
         });
         guard.surfaces[0] = Some(Surface {
+            backing: None,
             width: 16,
             height: 16,
             format: crate::pixel_format::DecodedFormat::Nv12,
@@ -841,32 +842,34 @@ mod tests {
             export_count: 0,
             export_fds: Vec::new(),
         });
-        // /dev/null cannot EXPBUF, but stabilization must happen before that
-        // ioctl and leave this surface pointing to its own copied allocation.
-        assert!(
-            crate::surface_export::export_ready_surface(
-                &mut guard,
-                DRV_ID_BASE_SURFACE,
-                crate::va_drm::DrmPrimeLayout::Composed
-            )
-            .is_err()
-        );
+        // The public export now owns independent storage. Export the saved
+        // pixels without consuming or relabeling another decoder CAPTURE slot.
+        let descriptor = crate::surface_export::export_ready_surface_for_test(
+            &mut guard,
+            DRV_ID_BASE_SURFACE,
+            crate::va_drm::DrmPrimeLayout::Composed,
+        )
+        .unwrap();
+        assert_eq!(guard.surfaces[0].as_ref().unwrap().cap_idx, Some(1));
+        let session = guard.contexts[0].as_ref().unwrap().v4l2.as_ref().unwrap();
+        assert_eq!(session.reserved_capture_for(DRV_ID_BASE_SURFACE), None);
         assert_eq!(
-            guard.surfaces[0].as_ref().unwrap().cap_idx,
-            Some(second_index)
+            session.legacy_len() + session.cap.buffers.len() - 1,
+            second_index
         );
-        assert_eq!(
-            guard.contexts[0]
-                .as_ref()
-                .unwrap()
-                .v4l2
-                .as_ref()
-                .unwrap()
-                .reserved_capture_for(DRV_ID_BASE_SURFACE),
-            Some(second_index)
-        );
+        assert_eq!(session.cap.buffers.last().unwrap().reserved_for, None);
+        use std::os::fd::FromRawFd;
+        use std::os::unix::fs::FileExt;
+        let exported = unsafe { std::fs::File::from_raw_fd(descriptor.objects[0].fd) };
+        let mut row = [0u8; 16];
+        for y in 0..16u64 {
+            exported
+                .read_exact_at(&mut row, y * u64::from(descriptor.layers[0].pitch[0]))
+                .unwrap();
+            assert!(row.iter().all(|byte| *byte == 0xA5));
+        }
         let copied = unsafe { std::slice::from_raw_parts(second_addr as *const u8, 384) };
-        assert!(copied.iter().all(|byte| *byte == 0xA5));
+        assert!(copied.iter().all(|byte| *byte == 0));
     }
 
     #[test]

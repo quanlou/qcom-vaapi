@@ -98,6 +98,8 @@ def main():
     parser.add_argument('original_probe', type=Path)
     parser.add_argument('samples_json', type=Path)
     parser.add_argument('evidence', type=Path)
+    parser.add_argument('--va-transport', action='store_true',
+                        help='Exercise actual producer full-OBU transport helper, software only')
     args = parser.parse_args()
     args.evidence.mkdir(exist_ok=False)
     results = []
@@ -105,7 +107,8 @@ def main():
         root = args.evidence / str(number)
         root.mkdir()
         source = sample['sample']
-        run([str(args.probe), source, str(root/'normalized.obu'), str(root/'index.jsonl')], root/'normalize.log')
+        run([str(args.probe), source, str(root/'normalized.obu'), str(root/'index.jsonl')]
+            + (['--va-transport'] if args.va_transport else []), root/'normalize.log')
         metadata = json.loads(subprocess.check_output(['ffprobe', '-v', 'error', '-select_streams', 'v:0',
                          '-show_entries', 'stream=width,height', '-of', 'json', source], text=True))['streams'][0]
         body = (root/'normalized.obu').read_bytes()

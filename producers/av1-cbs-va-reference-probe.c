@@ -8,6 +8,12 @@
 #include "libavcodec/cbs_av1.h"
 #include "libavformat/avformat.h"
 #include "av1-cbs-normalized-content.h"
+#include "av1-cbs-va-transport.h"
+#include "libavutil/refstruct.h"
+
+static int va_transport_mode;
+static AV1RawOBU *transport_sequence;
+static IrisAV1VATransport transport;
 
 static int normalize(CodedBitstreamContext *writer, CodedBitstreamFragment *fragment,
                      FILE *out, FILE *index, int packet, int64_t pts, int *unit_count)
@@ -34,13 +40,40 @@ static int normalize(CodedBitstreamContext *writer, CodedBitstreamFragment *frag
             }
         }
     }
-    ret = iris_av1_normalized_content(writer, fragment, &normalized);
+    if (va_transport_mode) {
+        for (int i = 0; i < fragment->nb_units; i++) {
+            const CodedBitstreamUnit *unit = &fragment->units[i];
+            AV1RawOBU *raw = unit->content;
+            if (unit->type == AV1_OBU_SEQUENCE_HEADER) {
+                av_refstruct_replace(&transport_sequence, unit->content_ref);
+            } else if (unit->type == AV1_OBU_FRAME || unit->type == AV1_OBU_FRAME_HEADER) {
+                const AV1RawFrameHeader *header = unit->type == AV1_OBU_FRAME ?
+                    &raw->obu.frame.header : &raw->obu.frame_header;
+                if (header->show_existing_frame) {
+                    if (header->refresh_frame_flags) { ret = AVERROR_PATCHWELCOME; goto done; }
+                    continue;
+                }
+                ret = iris_av1_va_transport_prepare(&transport, transport_sequence, raw);
+                if (ret < 0) goto done;
+                if (fwrite(transport.data, 1, transport.size, out) != transport.size ||
+                    fprintf(index, "{\"type\":-1,\"packet\":%d,\"bytes\":%zu}\n",
+                            packet, transport.size) < 0) { ret = AVERROR(EIO); goto done; }
+                (*unit_count)++;
+            } else if (unit->type != AV1_OBU_TEMPORAL_DELIMITER) {
+                ret = AVERROR_PATCHWELCOME; goto done;
+            }
+        }
+        ret = 0;
+    } else {
+        ret = iris_av1_normalized_content(writer, fragment, &normalized);
+    }
     if (ret < 0) goto done;
     for (int i = 0; i < fragment->nb_units; i++) {
         if (memcmp(&snapshots[i], fragment->units[i].content, sizeof(*snapshots))) {
             ret = AVERROR_INVALIDDATA; goto done;
         }
     }
+    if (va_transport_mode) goto done;
     *unit_count += normalized.nb_units;
     if (!normalized.nb_units) goto done;
     if (fwrite(normalized.data, 1, normalized.data_size, out) != normalized.data_size ||
@@ -61,7 +94,8 @@ int main(int argc, char **argv)
     AVPacket *packet = NULL;
     FILE *output = NULL, *index = NULL;
     int stream = -1, ret = AVERROR(EINVAL), count = 0, units = 0;
-    if (argc != 4) { fprintf(stderr, "input output.obu unit-index.jsonl required\n"); return 2; }
+    if (argc != 4 && (argc != 5 || strcmp(argv[4], "--va-transport"))) { fprintf(stderr, "input output.obu unit-index.jsonl [--va-transport] required\n"); return 2; }
+    va_transport_mode = argc == 5;
     if ((ret = avformat_open_input(&format, argv[1], NULL, NULL)) < 0) goto done;
     /* Container headers supply stream identity; never probe by opening a decoder. */
     for (unsigned i = 0; i < format->nb_streams; i++)
@@ -93,6 +127,8 @@ int main(int argc, char **argv)
 done:
     if (output && fclose(output) && !ret) ret = AVERROR(EIO);
     if (index && fclose(index) && !ret) ret = AVERROR(EIO);
+    iris_av1_va_transport_close(&transport);
+    av_refstruct_unref(&transport_sequence);
     ff_cbs_fragment_free(&fragment); ff_cbs_close(&cbs); ff_cbs_close(&writer);
     av_packet_free(&packet); avformat_close_input(&format);
     fprintf(stderr, "original_obu_probe packets=%d units=%d status=%d; host only\n", count, units, ret);

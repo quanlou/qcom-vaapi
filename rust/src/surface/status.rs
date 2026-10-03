@@ -98,6 +98,7 @@ mod tests {
 
     fn surface_with(state: SurfaceState) -> Surface {
         Surface {
+            backing: None,
             width: 16,
             height: 16,
             format: crate::pixel_format::DecodedFormat::Nv12,

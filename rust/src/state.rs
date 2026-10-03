@@ -37,8 +37,12 @@ pub(crate) const SUPPORTED_PROFILES: [VAProfile; 3] = [
     VAProfile::VAProfileH264High,
 ];
 
-pub(crate) const VENDOR: &[u8] =
-    b"msm_drv_video_rs: Qualcomm Iris (X1E80100) stateful V4L2 M2M, H264 Rust rewrite MVP\0";
+pub(crate) const VENDOR: &[u8] = concat!(
+    "qcom-vaapi ",
+    env!("CARGO_PKG_VERSION"),
+    ": Qualcomm Iris (X1E80100) stateful V4L2 M2M\0"
+)
+.as_bytes();
 
 #[derive(Clone)]
 pub(crate) struct Config {
@@ -82,11 +86,14 @@ pub(crate) struct Surface {
     /// vaDeriveImage). Replaced on every publish.
     pub(crate) frame: Option<SurfaceFrame>,
     pub(crate) owner: VAContextID,
+    /// Independent PRIME storage; survives decoder teardown and has no
+    /// association with a V4L2 CAPTURE pool until a picture is submitted.
+    pub(crate) backing: Option<crate::surface_backing::SurfaceBacking>,
     pub(crate) exported: bool,
     pub(crate) export_count: u64,
     /// Owned dup() of every fd handed out by vaExportSurfaceHandle. The
     /// descriptor fd belongs to the client; our dup keeps the underlying
-    /// dma-buf alive until the surface is retired, re-rendered, or dropped, and
+    /// dma-buf alive until the surface is destroyed, and
     /// gives leak-safe accounting. Content may legally be overwritten from the
     /// moment the surface is re-used (VA-API export contract).
     pub(crate) export_fds: Vec<OwnedFd>,
@@ -122,6 +129,9 @@ pub(crate) struct Image {
 }
 
 pub(crate) struct DriverState {
+    /// Duplicate of libva's already-open display DRM fd, usable in a browser
+    /// sandbox without opening another filesystem path.
+    pub(crate) drm_fd: Option<OwnedFd>,
     pub(crate) configs: Vec<Option<Config>>,
     pub(crate) contexts: Vec<Option<Context>>,
     pub(crate) surfaces: Vec<Option<Surface>>,
@@ -145,6 +155,7 @@ impl DriverBox {
         Self {
             profiles: Vec::new(),
             lock: Mutex::new(DriverState {
+                drm_fd: None,
                 configs: empty_slots(DRV_MAX_CONFIGS),
                 contexts: empty_slots(DRV_MAX_CONTEXTS),
                 surfaces: empty_slots(DRV_MAX_SURFACES),

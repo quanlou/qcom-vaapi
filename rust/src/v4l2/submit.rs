@@ -243,6 +243,10 @@ impl V4l2Session {
             .iter()
             .position(|b| b.state == BufferState::Free)
             .ok_or(())?;
+        if data.len() > self.out.buffers[idx].len[0] {
+            return Err(());
+        }
+        self.map_buffer(true, idx)?;
         let b = &mut self.out.buffers[idx];
         if b.num_planes == 0 || b.addr[0].is_null() || data.len() > b.len[0] {
             return Err(());
@@ -294,33 +298,7 @@ impl V4l2Session {
         // as its requested surface is ready, with other owners still draining.
         // Finish their existing decode sequence before ownerless replay. Keep
         // completions queued for normal publication, never erase hidden owners.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        let mut attempts = 0;
-        while (self.draining && !self.drain_last_seen)
-            || !self.fifo.is_empty()
-            || !self.no_output_waiting.is_empty()
-            || self.out_queued() != 0
-        {
-            if self.aborted || self.abandoned {
-                return Err(());
-            }
-            if attempts >= 2500 || std::time::Instant::now() >= deadline {
-                // A slow healthy drain is retryable. Do not START or abandon
-                // it just because its completion did not fit this wait budget.
-                return Err(());
-            }
-            attempts += 1;
-            if self.stable_capture || self.cap.streaming {
-                // Previous completions leave working slots Free. Queue only
-                // unreserved slots; held/exported allocations remain untouched.
-                self.queue_working_capture()?;
-            }
-            let ready = self.pump(2);
-            self.ready.extend(ready);
-        }
-        if self.aborted || self.abandoned {
-            return Err(());
-        }
+        self.finish_drain_before_resume(std::time::Instant::now() + OUTPUT_PACING_TIMEOUT)?;
         // START destroys the decoder's references on this firmware. Check
         // the complete published prefix before changing the device state;
         // filtering out missing pictures can silently change later pixels.
@@ -384,24 +362,9 @@ impl V4l2Session {
 
         // Bound total waiting across the whole GOP, rather than allowing a
         // fresh five-second wait for each of up to 1,024 access units.
-        let mut attempts = 0;
+        let replay_deadline = std::time::Instant::now() + OUTPUT_PACING_TIMEOUT;
         for chunk in &replay {
-            while self.out_queued() >= output_inflight_limit(self.source_change_flush) {
-                attempts += 1;
-                if attempts > 2500 || self.aborted || self.abandoned {
-                    if debug_enabled() {
-                        eprintln!(
-                            "msm_drv_video_rs: replay pacing stall {}",
-                            self.debug_snapshot()
-                        );
-                    }
-                    self.abandoned = true;
-                    return Err(());
-                }
-                let ready = self.pump(2);
-                self.ready.extend(ready);
-                self.replenish_replay_capture()?;
-            }
+            self.wait_replay_output(replay_deadline)?;
             if self.aborted || self.abandoned {
                 self.abandoned = true;
                 return Err(());
@@ -428,6 +391,54 @@ impl V4l2Session {
                 "msm_drv_video_rs: replayed {} published access units after drain",
                 replay.len()
             );
+        }
+        Ok(())
+    }
+
+    fn finish_drain_before_resume(&mut self, deadline: std::time::Instant) -> Result<(), ()> {
+        while (self.draining && !self.drain_last_seen)
+            || !self.fifo.is_empty()
+            || !self.no_output_waiting.is_empty()
+            || self.out_queued() != 0
+        {
+            if self.aborted || self.abandoned {
+                return Err(());
+            }
+            if std::time::Instant::now() >= deadline {
+                // A slow healthy drain is retryable. Do not START or abandon
+                // it just because its completion did not fit this wait budget.
+                return Err(());
+            }
+            if self.stable_capture || self.cap.streaming {
+                // Previous completions leave working slots Free. Queue only
+                // unreserved slots; held/exported allocations remain untouched.
+                self.queue_working_capture()?;
+            }
+            self.pump_output_wait(deadline)?;
+        }
+        if self.aborted || self.abandoned {
+            return Err(());
+        }
+        Ok(())
+    }
+
+    fn wait_replay_output(&mut self, deadline: std::time::Instant) -> Result<(), ()> {
+        while self.out_queued() >= output_inflight_limit(self.source_change_flush) {
+            if self.aborted || self.abandoned || self.pump_output_wait(deadline).is_err() {
+                if debug_enabled() {
+                    eprintln!(
+                        "msm_drv_video_rs: replay pacing stall {}",
+                        self.debug_snapshot()
+                    );
+                }
+                self.abandoned = true;
+                return Err(());
+            }
+            self.replenish_replay_capture()?;
+        }
+        if self.aborted || self.abandoned {
+            self.abandoned = true;
+            return Err(());
         }
         Ok(())
     }
@@ -535,11 +546,59 @@ impl V4l2Session {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::super::{O_RDWR, V4l2Queue, open};
     use super::*;
     use std::collections::VecDeque;
     use std::ffi::CString;
+
+    #[test]
+    fn replay_writable_poll_waits_for_elapsed_budget_before_abandoning() {
+        let mut session = streaming_session_with_pending_fifo(null_fd());
+        session.fifo.clear();
+        for _ in 0..2 {
+            let mut buffer = super::super::V4l2Buffer::new();
+            buffer.state = BufferState::Queued;
+            session.out.buffers.push(buffer);
+        }
+        let started = std::time::Instant::now();
+        let budget = std::time::Duration::from_millis(30);
+        assert!(session.wait_replay_output(started + budget).is_err());
+        let elapsed = started.elapsed();
+        eprintln!("replay pacing elapsed={elapsed:?}");
+        assert!(
+            elapsed >= budget,
+            "writable poll readiness is not decode completion"
+        );
+        assert!(
+            session.abandoned,
+            "partial reference restoration must fail closed"
+        );
+        assert_eq!(session.out_queued(), 2);
+    }
+
+    #[test]
+    fn incomplete_drain_waits_for_elapsed_budget_and_retains_owner() {
+        let mut session = streaming_session_with_pending_fifo(null_fd());
+        session.draining = true;
+        let started = std::time::Instant::now();
+        let budget = std::time::Duration::from_millis(30);
+        assert!(
+            session
+                .finish_drain_before_resume(started + budget)
+                .is_err()
+        );
+        let elapsed = started.elapsed();
+        eprintln!("drain pacing elapsed={elapsed:?}");
+        assert!(
+            elapsed >= budget,
+            "writable poll readiness cannot expire a healthy drain"
+        );
+        assert!(!session.abandoned, "pre-START timeout remains retryable");
+        assert_eq!(session.fifo.len(), 1);
+        assert!(session.draining);
+        assert!(!session.drain_last_seen);
+    }
 
     #[test]
     fn writable_fd_does_not_exhaust_output_wait_by_poll_count() {
@@ -587,7 +646,7 @@ mod tests {
     /// A synthetic session on /dev/null with a streaming OUTPUT queue and one
     /// pending fifo entry: the minimum state for the compatibility drain to
     /// attempt a STOP (which /dev/null then rejects).
-    fn streaming_session_with_pending_fifo(fd: i32) -> V4l2Session {
+    pub(crate) fn streaming_session_with_pending_fifo(fd: i32) -> V4l2Session {
         let mut session = V4l2Session {
             fd,
             devnode: "/dev/null".to_string(),

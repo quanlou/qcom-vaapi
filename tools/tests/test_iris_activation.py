@@ -173,6 +173,21 @@ class IrisActivationTests(unittest.TestCase):
         self.assertEqual(record['status'], 'failed')
         self.assertEqual(record['error'], 'faulted_boot_requires_restart')
 
+    def test_known_boot_guard_cannot_be_omitted_by_the_caller(self):
+        for index, boot in enumerate(IRIS.FAULTED_BOOT_IDS):
+            path = self.base / f'known-boot-{index}.json'
+            argv = ['activate', str(self.candidate), '--sha256', 'unused',
+                    '--evidence', str(path)]
+            with self.subTest(boot=boot), patch.object(sys, 'argv', argv), \
+                 patch.object(Path, 'read_text', return_value=boot), \
+                 patch.object(IRIS, 'run') as run, \
+                 patch.object(IRIS, 'open_lease') as lease:
+                self.assertEqual(IRIS.main(), 1)
+                run.assert_not_called()
+                lease.assert_not_called()
+            record = json.loads(path.read_text())
+            self.assertEqual(record['error'], 'faulted_boot_requires_restart')
+
     def test_unfinished_kernel_operation_is_recorded_as_unresolved(self):
         self.candidate.write_bytes(b'candidate')
         expected = hashlib.sha256(self.candidate.read_bytes()).hexdigest()
@@ -188,6 +203,7 @@ class IrisActivationTests(unittest.TestCase):
             raise IRIS.KernelCommandUnfinished(['insmod', str(candidate)], 123)
         argv = ['activate', str(self.candidate), '--sha256', expected, '--evidence', str(path), '--activate']
         with patch.object(sys, 'argv', argv), patch.object(IRIS.os, 'geteuid', return_value=0), \
+             patch.object(IRIS, 'FAULTED_BOOT_IDS', set()), \
              patch.object(IRIS, 'LOCK', lease), patch.object(IRIS, 'run', return_value=str(self.candidate)), \
              patch.object(IRIS, 'preflight', return_value=evidence), patch.object(IRIS, 'replace_module', side_effect=stuck):
             self.assertEqual(IRIS.main(), 1)

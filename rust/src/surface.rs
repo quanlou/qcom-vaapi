@@ -57,6 +57,7 @@ fn create_surfaces_common(
     }
     for (out_idx, slot_idx) in free.into_iter().enumerate() {
         guard.surfaces[slot_idx] = Some(Surface {
+            backing: None,
             width,
             height,
             format,
@@ -219,13 +220,24 @@ pub(crate) fn release_surface_capture(guard: &mut DriverState, surf_idx: usize) 
             tracked_exports
         );
     }
+    // Standalone PRIME storage belongs to this VA surface, not its decoder.
+    // Keep its fd identity alive across picture reuse and context teardown.
+    let standalone = guard.surfaces[surf_idx]
+        .as_ref()
+        .is_some_and(|surface| surface.backing.is_some());
     let Some(cap_idx) = cap_idx else {
+        if standalone {
+            return;
+        }
+
         if let Some(surf) = guard.surfaces[surf_idx].as_mut() {
             release_export_fds(surf);
         }
         return;
     };
-    let exported_fds = if let Some(surf) = guard.surfaces[surf_idx].as_mut() {
+    let exported_fds = if standalone {
+        0
+    } else if let Some(surf) = guard.surfaces[surf_idx].as_mut() {
         release_export_fds(surf)
     } else {
         0
@@ -322,6 +334,7 @@ mod tests {
 
     fn surface_with(state: SurfaceState) -> Surface {
         Surface {
+            backing: None,
             width: 16,
             height: 16,
             format: DecodedFormat::Nv12,

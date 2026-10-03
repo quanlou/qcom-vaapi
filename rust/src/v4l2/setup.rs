@@ -5,10 +5,9 @@
 //! negotiation, buffer allocation, and bounded CAPTURE STREAMON recovery.
 
 use super::{
-    BufferState, CAP_NUM_BUFFERS_MAX, CAP_NUM_BUFFERS_MIN, OUT_NUM_BUFFERS, V4l2Buffer,
-    V4l2Session, VIDIOC_CREATE_BUFS, VIDIOC_ENUM_FMT, VIDIOC_G_CTRL, VIDIOC_G_FMT, VIDIOC_QBUF,
-    VIDIOC_QUERYCAP, VIDIOC_QUERYCTRL, VIDIOC_S_CTRL, VIDIOC_S_FMT, WORKING_QUEUE_MAX,
-    debug_enabled, xioctl, zeroed,
+    BufferState, CAP_NUM_BUFFERS_MAX, OUT_NUM_BUFFERS, V4l2Buffer, V4l2Session, VIDIOC_CREATE_BUFS,
+    VIDIOC_ENUM_FMT, VIDIOC_G_CTRL, VIDIOC_G_FMT, VIDIOC_QBUF, VIDIOC_QUERYCAP, VIDIOC_QUERYCTRL,
+    VIDIOC_S_CTRL, VIDIOC_S_FMT, WORKING_QUEUE_MAX, debug_enabled, xioctl, zeroed,
 };
 use crate::bindings::*;
 use std::ffi::c_void;
@@ -408,7 +407,6 @@ impl V4l2Session {
     }
 
     pub(super) fn qbuf_capture(&mut self, idx: usize) -> Result<(), ()> {
-        self.map_buffer(false, idx)?;
         let b = self.cap.buffers.get_mut(idx).ok_or(())?;
         if b.state == BufferState::Queued || b.num_planes == 0 || b.len[0] == 0 {
             return Err(());
@@ -500,13 +498,15 @@ mod tests {
     }
 }
 
-// Firmware requirement plus working slack, with a conservative20slot floor.
+// Firmware requirement plus all six working slots. Surface-owned PRIME
+// backing and CPU snapshots do not need a spare pool of twenty mapped frames;
+// legacy CAPTURE reservations grow separately through CREATE_BUFS.
 // Invalid controls fail setup; they never authorize shrinking the queue.
 fn capture_target(firmware_minimum: i32) -> Result<u32, ()> {
     if !(1..=32).contains(&firmware_minimum) {
         return Err(());
     }
-    let target = (firmware_minimum as u32 + WORKING_QUEUE_MAX as u32).max(CAP_NUM_BUFFERS_MIN);
+    let target = firmware_minimum as u32 + WORKING_QUEUE_MAX as u32;
     if target > CAP_NUM_BUFFERS_MAX {
         return Err(());
     }
@@ -518,7 +518,8 @@ mod allocation_tests {
     use super::*;
     #[test]
     fn firmware_minimum_and_working_slack_bound_the_cpu_pool() {
-        assert_eq!(capture_target(4), Ok(20));
+        assert_eq!(capture_target(1), Ok(7));
+        assert_eq!(capture_target(4), Ok(10));
         assert_eq!(capture_target(14), Ok(20));
         assert_eq!(capture_target(18), Ok(24));
         assert_eq!(capture_target(32), Ok(38));
