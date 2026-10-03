@@ -1,3 +1,954 @@
+ROOT HUMAN-AUTHORIZED ISOLATED CHROME IMPORT HOST CANDIDATE / PLAYBACK DEFERRED (2026-10-03):
+Human continue authorized the host-only fix in isolated checkout
+/home/mq/.codex/worktrees/chrome-prime-import/libva-v4l2 at ca519631.
+Candidate adds real linear NV12/P010 caller-buffer backing for legacy PRIME
+and PRIME2, including per-plane aliases of one dma-buf. Retained CLOEXEC fd,
+validated extents/layout/alias/size/budget, no import clearing, visible-row
+copies into caller offsets/pitches, sync failure latches Dead, atomic rollback.
+Tiling/nonzero modifiers/distinct storage objects remain unsupported. Actual
+failed Chrome descriptor/flag/modifier unobserved; separate vaEndPicture
+internal decoding error cause remains UNOBSERVED. No live fix claim.
+Final 277 all-feature host tests/4 ignored, 4 stress tests and 281 parallel
+host tests/4 ignored, fmt/diff/strictClippy/system-av1 release PASS. 80 imported
+publication/export cycles verify exact caller bytes/padding and bounded handles.
+Two first host fixture/contract failures remain preserved. Frozen215 source
+files/243-file seal chrome-prime-import-host-candidate.nolmssmh; driver SHA256
+69fab07eb730d45a23b63875125ad844ac02c99f9db569a5a0c28ad999cc7e75.
+Independent patch reconstruction/source/binary/hash verification PASS in
+chrome-prime-import-independent-review.8mb19is7. Initial independent main-clean
+assertion failed because concurrent main V4L2/context/import edits appeared;
+original failure/read-only patch retained, corrected audit PASS. Concurrent
+CPU/import owner work preserved and root never edited main Rust sources.
+Installed b811 playback failure remains FAILED. Candidate UNINSTALLED and
+HARDWARE UNQUALIFIED; required matrix/churn and Chrome/exact510/traced memory
+NOT RUN under human qualification playback deferral. Strict120s/512MiB and
+browser thresholds unchanged; no old receipt transfer or hardware operations.
+Root ZERO decoder/BPF/ptrace/lease/privilege/install/publication/message ops.
+Full expanded qualification incomplete. Current automation PAUSED observed;
+status preserved, no autonomous reactivation. Historical ACTIVE wording below
+is superseded by actual current automation status. No duplicate privilege/
+restart/playback-stop request, cross-chat message or competing main source edit.
+
+ROOT HUMAN CHROME YOUTUBE PLAYER FAILURE VERIFIED / QUALIFICATION TESTS DEFERRED (2026-10-03):
+User reports repeated YouTube player failures and supplied AV1 Main854x480
+VaapiVideoDecoder/platformtrue export for y6U-XRymBlU. Frame-resource surface
+creation fails at4.733s, then PIPELINE_ERROR_DECODE/Stopped. Existing Chrome
+journal records3 vaCreateSurfaces import-mode unsupported-memory failures;
+third correlates with this export within0.360ms. A separate vaEndPicture
+internal decoding error is retained with causeUNOBSERVED. Single export does
+not establish all-time frequency or a whole-browser process crash.
+Root13-file chrome-youtube-import-failure-review.6194daee.erq0932d preserves
+export/journal/mappings/frozen-source/current identities and host correction
+requirements. review.py exit0 + independent13-file hashseal/correlation audit
+PASS validates failed evidence only; actual playback remainsFAILED. Pointer
+current-chrome-youtube-import-failure-review.txt under resume-20261002.
+Current same journal PID31394 maps current RC6 b811/5ce disk inode/device
+identities at capture, not a sampled proof of mappings at failure instant.
+All3 copied frozen RC6 source files/manifest match current source; creation
+rejects external surface memory. Exact requested flag/descriptor/modifier is
+unobserved. PRIME export does not implement import; accepting attributes while
+allocating unrelated storage is not a valid fix. Chromium main source read is
+context only, not exact installedChrome154 source proof. No media download.
+Boot6194 wholeboot1205rows/0 existing case-sensitive fault matches, all3 exact
+loaded-selected module IDs/hashes, installedRC6 verified. Ref1/runtimeactive
+at capture; earlier1199/ref0/suspended snapshot remains historical unchanged.
+No actual kernel/firmware/SMMU fault established; do not permanently exclude
+6194 without actual fault. Root ZERO decoder/BPF/ptrace/lease/privilege/install/
+publish/message operations; no browser restart, owner source edit or controller.
+User qualification playback deferral remains effective. Current b811 AV1/
+traced memory/browser/stability/10bit/sustained/sleep/removal and expanded
+qualification incomplete. All historical failures, strict thresholds and
+original receipts retained; no28f transfer or unchanged retry.
+
+ROOT CURRENT BOOT 6194 READ-ONLY SNAPSHOT / PLAYBACK DEFERRAL UNCHANGED (2026-10-03):
+Current boot6194daee-c9a2-4675-a7fa-aa7a6379154f supersedes earlier8e902/5d4
+current-state captures. Four-file rc6-current-host-snapshot.6194daee.ry5z9gym
+records installed RC6 b811/5ce/package0.1.1~rc.6, kernel7.3.0-15-qcom-x1e,
+all3 exact loaded-selected module builds/file hashes, wholeboot1199rows/fault0
+under existing case-sensitive guard, ref0/runtime suspended at capture only.
+Validation: snapshot.py exit0 + independent4-file hashseal PASS; pointer
+current-rc6-host-snapshot.txt. Earlier8e902 four-file evidence remains retained
+in rc6-current-host-snapshot.8e902de0.eppxdlgp; every historical proof/failure
+stays bound to its original boot/run/binary. No activation/cold seal or root
+decoder/BPF/lease/privilege/install/publication/message operations. No actual
+fault established; do not permanently exclude6194 without actual kernel/
+firmware/SMMU fault. Owner idle and user install-only playback deferral remains
+effective across boot changes. No hardware/controller/privilege request from
+an idle snapshot. Current b811 AV1/traced memory/browser/general stability/
+10bit/sustained/sleep/removal and expanded qualification still incomplete;
+strict gates unchanged. Healthy snapshot needs no operator action.
+
+ROOT CURRENT BOOT 8E902 READ-ONLY SNAPSHOT / PLAYBACK STILL DEFERRED (2026-10-03):
+New boot8e902de0-a9ef-490e-9020-bf56dcc5ae24 observed. Four-file hash-sealed
+rc6-current-host-snapshot.8e902de0.eppxdlgp independently records kernel
+7.3.0-15-qcom-x1e, wholeboot1170rows/0 existing case-sensitive fault matches,
+all3 exact loaded/selected module builds and selected file hashes, installed
+RC6 package0.1.1~rc.6/driverb811536e/companion5ce and ref0/runtime suspended
+at capture only. No activation/cold seal or root decoder/BPF/lease/privilege/
+install/publication/message operation. No actual kernel/firmware/SMMU fault
+established; do not permanently exclude this boot without an actual fault.
+Earlier5d4 snapshots and every historical success/failure remain bound to
+original boot/run/binary. Owner is idle at latest read-only snapshot; user
+install-only playback deferral remains effective and does not change merely
+because a new boot is observed. Do not launch old stopped controllers or
+hardware/privilege requests. Exact b811 AV1/traced-memory/browser/general
+stability/10bit/sustained/sleep/removal and expanded qualification remain
+incomplete; strict gates unchanged. Validation: snapshot.py exit0 and
+independent4-file seal PASS. Pointer current-rc6-host-snapshot.txt under
+resume-20261002. This new healthy snapshot needs no operator action.
+
+ROOT RC6 PUBLICATION AND INSTALLED IDENTITIES VERIFIED / PLAYBACK DEFERRED (2026-10-03):
+The separate owner completed experimental RC6 publication and a new authorized
+installation of public Debian c57a78f0469ae0adf6e3de28a4b14c1edeb5b6955ebb1460becb24e72ddcd775.
+Root independently verified saved publication receipts in 15-file hash-sealed
+rc6-published-receipt-review.5d4da472.hyolw3hm: release402409855/main and tag
+ca51963101c87b5cc4325cb5aba2b3cc5b13fe5b, all7 saved API asset digests/sizes,
+all6 saved public checksum entries, five matching local payloads and cached
+public Debian contents b811536e/companion5ce. Final saved CI37109615234,
+37109615275 and37109611720 are completed/success. Parent18-file audit verifies
+217 build-source files and71 exact frozen build inputs. Public tag-source
+archive content was not checked; its digest matches saved API/checksums only.
+No root network or baseline media download, publication or installation.
+
+Separate 12-file hash-sealed rc6-installed-identity-review.5d4da472.rcx_n307
+independently preserves/verifies owner attempt/success/install log/postinstall
+receipts, current dpkg 0.1.1~rc.6 and clean dpkg-V, vendor label, driver
+b811536ef7f4d7ed9d022078b9ddf9b587c1180ca01234f6bad0aaedeeb0533e and companion
+5ce5b3fc9bf59bbab03ad94ff50c3bc45d04cfae92c112278fe8d618407a2fef. Current
+new inode matches receipt and differs from old inode; existing process driver
+mapping versions were not determined. User explicitly chose install only in
+the owner chat; playback checks are deferred and no background test controller
+is running. Do not launch hardware or an old stopped controller from an idle
+snapshot. The earlier privileged installer busy refusal and capacity/cache/
+export failures remain preserved; later separate installation does not erase
+them. Original public authentication-cause wording is retained, while the
+actual old privileged busy-idle traceback governs that failed attempt.
+
+Fresh root read-only boot5d4da472-3be6-4806-84cb-cd9a7824cb58 snapshot:
+1169 kernel rows/0 existing case-sensitive fault matches; all3 loaded/selected
+module build IDs and selected file hashes match; ref0/runtime suspended at
+capture only. No current activation/cold seal or root decoder/BPF/lease/install/
+privilege/publication/message operations. No actual fault established; do not
+permanently exclude this boot absent actual kernel/firmware/SMMU fault. Recheck
+wholeboot/identities/idle immediately before any future changed qualified
+session after owner readiness and applicable human authorization. Installation
+and publication never transfer old28f exact510/memory/Chrome proof to b811.
+Current b811 baseline parity/churn receipts remain bounded to their runs,
+matrix838984KiB does not establish general memory. Exact510/traced memory,
+stable/diverse/sustained/browser10bit/generalAV1/sleep/removal and expanded
+qualification remain incomplete. Firefox remains deferred for root. Keep
+120s/512MiB traced and original browser thresholds; no subtraction/relaxation,
+unchanged retry, duplicate sudo/restart request, browser interruption, competing
+source/hardware/installer or cross-chat message. Pointers under resume-20261002:
+current-rc6-published-receipt-review.txt and current-rc6-installed-identity-review.txt.
+
+ROOT OFFLINE RELEASE-BUNDLE PRESERVATION REVIEW (2026-10-03):
+The separate owner completed human-requested deletion of RC5/RC6 release-asset
+holding branches; saved before/after release metadata (7 assets per release,
+IDs/digests/sizes/targets) are identical. Root13-file hash-sealed
+release-bundle-preservation-review.n_uadthl preserves those receipts and both
+recovery bundles. Offline bare clones and full git fsck pass for pinned
+RC5 bf00d8c48051323937838a86ff127e6a4b3cfc5e and RC6
+ca086c61ba1e63362aa8e507e4975a8018acb8aa. All5 payloads per bundle match saved
+public asset hashes/sizes; original5-entry checksums agree. RC5 original tilde
+Debian filename maps to documented public dotted filename with identical
+bytes/hash. Prior22/18/15/12-file root publication/prepared/install seals still
+match. Initial private wrong seal filename and missing legacy filename mapping
+failures are retained with their scripts/output; corrected audit and independent
+13-file seal PASS. Remaining main/retained public tags are saved-owner-receipt
+proof only; no fresh remote query/public download or root branch/source/remote/
+install/hardware/lease/privilege/message/publication operation. No deleted
+branch recreated. User playback deferral and all qualification gaps/strict
+gates unchanged. Pointer current-release-bundle-preservation-review.txt.
+
+ROOT RC6 PREPARED ASSETS VERIFIED / CAPACITY INTERRUPTION RETAINED (2026-10-03):
+Publication owner turn01a100d4-5363-7ea3-bb28-f6fa4d14edcb failed with selected
+model at capacity; actual later turn01a100dd-7322-7f42-9775-48c9e2e50394 active
+at read-only snapshot. Root18-file hashseal rc6-prepared-assets-capacity-review.
+5d4da472.2_0j3uyd preserves failure/resume metadata and local prepared receipts;
+pointer current-rc6-prepared-assets-capacity-review.txt under resume-20261002.
+Five saved checksum entries and local pinned Git payloads at ca086c61ba1e63362aa8e507e4975a8018acb8aa
+verified; release-prepared Debianc57a78f0469ae0adf6e3de28a4b14c1edeb5b6955ebb1460becb24e72ddcd775
+contains b811536e/companion5ce. Build-source archive217files match its clean
+source snapshot and all71 exact frozen Rust/producer/wrapper/build inputs.
+This is local prepared-asset proof, not public-release completion/download,
+installation, browser or expanded production qualification. Installed remains
+RC5 driver29e at capture; controllerSTOPPED and busy-state refusal unchanged.
+Original214file local package4af/rollback0e remain preserved and distinct.
+Publication qualification correctly says browsers/exact4K UNQUALIFIED/NOTRUN
+and does not transfer RC5 hardware results. Its authentication-did-not-complete
+cause wording conflicts with actual saved privileged Python busy-idle refusal;
+root preserves both and follows actual traceback. No concurrent owner metadata
+or source edited. Host-stress log reports4stress/274parallel/4ignored and222
+verifier unittest OK; mock activation-failure trailers are host evidence only,
+never current-boot kernel failures. Root initial wrong provenance-map key and
+trailing-OK assumptions retained; corrected archive and explicit summary audits
+PASS, independent18file seal verified. Fresh5d4 read-only1167kernelrows/fault0/
+ref1runtimeactive/installed29e at capture, no idle assumption. No root device/
+BPF/lease/privilege/install/publish/message operation or unchanged retry.
+Owner resumed separately authorized release work; inspect without competing.
+Expanded stable/diverse/generalAV1/tracedmemory/10bit/sleep/removal incomplete,
+120s/512MiB and browser thresholds unchanged; every prior failure preserved.
+
+ROOT RC6 INSTALLER BUSY REFUSAL VERIFIED / CONTROLLER STOPPED (2026-10-03):
+Latest actual saved installer exit1 overrides historical authentication-wait
+and automatic-run assumptions. Privileged Python reached idle preflight and
+raised decoder is busy or not safely runtime-suspended before writing an
+installation-attempt or invoking dpkg. This is an observed busy-state refusal,
+not an inferred authentication timeout. Controller STOPPED at08:14:06UTC with
+no_retry=true; installer30331/controller31137 gone. RC6 installation/success/
+verification receipts, canonical browser-test-system and headless evidence
+absent at capture. Installed remains RC5 0.1.1~rc.5 driver29e02311/companion5ce.
+Root20-file own hashseal rc6-install-busy-refusal-review.5d4da472.of0ntjev,
+pointer current-rc6-install-busy-refusal-review.txt under resume-20261002,
+preserves original tool traceback and controller/scripts. Offline RC6 Debian
+4af3df3cc473250fae319a42f8527a46e8f8f0b8d31c3ff6717ae67a7fe71e38 payload
+b811536ef7f4d7ed9d022078b9ddf9b587c1180ca01234f6bad0aaedeeb0533e/5ce,
+RC5 rollback0e0f1619 payload29e/5ce and all214 source-archive contents match
+frozen manifest. Source archiveSHA bfa72044cb7802ba40f5b4aca97c28cc02e655d3082b9561e0356f9b386e759f.
+Initial root JS string-construction failure retained; corrected offline audit
+and independent20-file seal checks PASS. No installer/controller retry, new
+privilege/password/restart request, browser interruption or hardware launch by
+root. Browser/release owner now has separate human authorization to push main/
+publish experimental RC6 and owns those source/artifact actions. Root does not
+inherit publication/install/message authorization. Fresh5d4 wholeboot1167rows/
+0faultmatches at read-only capture, ref1/runtimeactive; no idle/current hardware
+qualification assumption or SMMU cause/fix claim. No actual kernel/firmware fault
+established; do not permanently exclude5d4 absent actual fault. RootZERO
+decoder/BPF/install/privilege/lease/publication operations. Scoped current b811
+AV1 exact510/tracedmemory/browser checks and expanded stable/diverse/sustained/
+10bit/sleep/removal remain incomplete. Preserve all older hardware/host failures;
+no historical28f receipt transfer, unchanged retry or threshold relaxation.
+
+ROOT RC6 b811 BASELINE INDEPENDENTLY VERIFIED / BROWSER OWNER PENDING (2026-10-03):
+Root read-only audit of frozen rc6-qtj419yu verifies all214 source-manifest
+entries and270host tests/4ignored/fmt/strictClippy/release receipts. Changed
+b811536ef7f4d7ed9d022078b9ddf9b587c1180ca01234f6bad0aaedeeb0533e baseline
+has H2641/30/full300/edges exact, GL300 rawI420 byte equality plus nativeNV12
+hashes after chroma interleave, HEVC/Main10/VP9 one/30 ordered parity, reference/
+three full recovery300 rows and churn7/7. Observed kernel windows clean and
+both phases exit0/bounded cleanup. Resolution780/long3600 remain count/sanity
+witnesses, AV1 skipped and optionalhwmap218 retained. Matrix63.507s/838984KiB
+exceeds512MiB; churn30.049s/186344KiB. Baseline does not certify general or
+traced memory; old28f exact510/memory/browser receipts never transfer to b811.
+Own111-file hashseal rc6-baseline-independent-review.5d4da472.u6hpw8iu;
+pointer current-rc6-baseline-independent-review.txt under resume-20261002.
+Original RC6 private-cache Firefox normal-sandbox check staysFAILED:
+zero driver publications, libva va_openDriver=-1 then software fallback,
+outerexit1/90.929s/2068740KiB, no timeout/lingering/denied/unresolved. Wrapper
+internal-handle-bound reason does not prove an actual overflow: no exported
+surface was observed. Exact library-load failure cause is unobserved in captured
+log; source/cache-path evidence retained. Old rc5 host regression exit101 and
+actual606publication/export64 hardware failure remain preserved. Root Firefox
+scope remains deferred. Browser owner alone prepares authorized canonical RC6
+installation and new browser checks; no competing root source/install/hardware/
+lease/BPF/privilege/operator handoff/messages. Current5d4 read-only wholeboot
+1167rows/0faultmatches, installed29e/companion5ce at capture; ref1/runtimeactive,
+so no idle assumption. RootZERO decoder/BPF/installation/privilege operations.
+Current b811 exact510/AV1 traced memory, stable/diverse/sustained/browser10bit,
+sleep/removal and full expanded qualification remain unproven/incomplete.
+
+ROOT SAVED PUBLIC RC5 ASSETS VERIFIED / CURRENT5D4 SNAPSHOT (2026-10-03):
+Current boot5d4da472-3be6-4806-84cb-cd9a7824cb58 supersedes9ded/66d5.
+Installed29e02311/companion5ce5b3fc remain unchanged at read-only capture.
+Release owner completed experimental RC5 publication and its final CI/download
+checks; root independently verified six saved public checksum entries/pinned
+assets, publicc8ba97b1 Debian payload29e/5ce,72exact frozen build-source files
+and213tagged-source file contents/modes/sizes.22-file own hashseal
+rc5-published-asset-review.5d4da472.4blblr2h; pointer current-rc5-published-
+asset-review.txt under resume-20261002. Initial compressed-byte equivalence
+assumption, nonexistent build.rs assertion and changed9ded-boot refusal retained
+in parent. Public/local compressed bytes differ but all213 files/modes/sizes
+match; compression/container difference cause UNOBSERVED. One550320-byte source
+download; no baseline media download. Fresh5d4 wholeboot1164rows/0faultmatches,
+all3loaded-selected IDs/ref0/suspended at capture only. No activation/coldseal/
+lease/device/BPF/install/privilege/publication operation by root. Publication
+is not expanded production qualification; no historical28f receipt transfer to
+29e. NativeFirefox migration completed; original29e export64/fallback failure
+remainsFAILED. Browser owner now handles export-lifecycle source fix and
+regressions/build/browser qualification; no competing edits/hardware/messages/
+operator requests. Root Firefox scope remains deferred. Stable/diverse/
+sustained/generalAV1/memory/sleep/removal and current29e scoped gates incomplete.
+Read historical entries below with their original boot/build/run binding.
+
+ROOT OTHER-OWNER FIREFOX FALLBACK PRESERVED / SCOPED QUALIFICATION OPEN (2026-10-03):
+Separate human-authorized nativeFirefox157/private-profile H264 test actually
+used current29e on9ded and FAILED:606driverpublications, surface1073741829
+trackedexport_fds64, TooManyExports, then IsHardwareAccelerated=false.
+Outerexit1/29.677s/1695628KiB; no timeout/lingering/denied/unresolved. Innerexit0
+and performance-qualified line never erase fallback. Before/after same3module
+identities/ref0/suspended; fresh root wholeboot0faultmatches at capture only.
+First old28f-binding preflight stopped before hardware and remains preserved.
+Root19-file independent hashseal rc5-firefox-export-failure-review.9ded44ac.
+lh1mwatk; pointer current-rc5-firefox-export-failure-review.txt. Initial private
+generic-error substring assertion retained; exact driver-prefix auditPASS.
+No root device/BPF/lease/install/privilege/source operations. Root Firefox
+remains deferred; migration/follow-up belongs to its current owner. No export
+limit relaxation or unchanged retry here. This failed off-scope29e browser run
+does not establish changed29e exact510/matrix/Chromium qualification, memory
+stability or SMMU cause/fix. Historical28f PASSES below keep their original
+binary/run binding; current29e expanded qualification remains incomplete.
+
+ROOT CURRENT RC5 LABEL IDENTITY VERIFIED / HISTORICAL RECEIPTS RETAINED (2026-10-03):
+Current boot9ded44ac-0642-45c2-81b3-09eee67a8519 supersedes66d5.
+Other-owner current installed driver29e0231149eb402d93fdf5f83d40d9c31889d916a0a6ce008d1539363c615b41,
+companion5ce5b3fc unchanged. Root verified both208-file frozen source manifests:
+only Cargo.lock/Cargo.toml exact rc4-to-rc5 version replacements. New Debian
+payload/build/installed identities and original28f rollback match; host268/
+4ignored,fmt/release receipts checked. ELF.text differs; no executable
+equivalence or transfer of historical28f exact510/matrix/Chrome qualification.
+New29e hardware qualification remains UNRUN.30-file root hashseal
+rc5-label-identity-review.9ded44ac.hweb6hx3; pointer current-rc5-label-identity-
+review.txt under resume-20261002. Wholeboot1172rows/0faultmatches using existing
+case-sensitive guard, all3loaded-selected identities and ref0/suspended at
+capture only; no current activation/cold seal/sharedlease/device/BPF operation.
+Initial offline path failure, changed-boot refusal and private re.I Wi-Fi
+deprecation false positive preserved in parents. Shared safety guards unchanged;
+no actual kernel/firmware/SMMU fault established on9ded. No decoder/BPF/install/
+privilege operations by root. Release owner handles CI/release work; independent
+Firefox owner handles its user-authorized migration, root scope stays deferred.
+No competing source/hardware/installation/messages/operator requests.
+Historical entries below stay bound to their original boot/build/run. Expanded
+stable/diverse/sustained/generalAV1/memory/sleep/removal qualification incomplete.
+
+ROOT LIVE YOUTUBE EXPORT INDEPENDENTLY VERIFIED (2026-10-03):
+User752f2481 media-internals export of3YTohytF9oE shows AV1Main3840x2160/24fps
+VaapiVideoDecoder/platformtrue and seek followed byPlaying, no recorded decoder
+error/fallback.51events/125.967s eventspan is not a complete stable-playback
+benchmark. Roughness42.991/freezingRatio1.00266 retained; do not transfer local
+zero-drop result or exactAKe510 pixel/memory proof to this distinct live3Y corpus.
+Rootfresh wholeboot66d5 faultscan0 at capture.6-file hashseal
+live-youtube-export-review.66d5a769.01isbudt; pointer current-live-youtube-export-
+review.txt under resume-20261002. No new decoder/BPF/installation/lease/privilege
+operations. Smoothness/diverse/sustained/generalAV1/sleep/removal and complete
+expanded production qualification remain open; no SMMU cause/fix claim.
+
+ROOT RC5 EXACT510 AND LOCAL CHROME VERIFIED / EXPANDED SCOPE OPEN (2026-10-03):
+Other-owner RC5 driver28f57894 is installed; root read-only package/source/
+installed-driver+companion verification matched. Exact changed510 replay PASS
+independently verified:259global+25trace hashes, exact newpath codegenPASS1.218s/
+emptylog, session2042970120/510inputs/1050encoded/516outputs, all510orderedcoded
+NV12/510EndPicture/publications, READY/STOPPED/emptyerrors, no midstreamSTOP/
+START/DRAIN, clean observed kernel/idle and bounded24.838s exit0. RSS521016KiB
+<=524288KiB:3272KiB observed headroom only; no general/unique/kernel-memory or
+SMMU cause/fix claim. Root27-file seal av1-510-lazy-success-review.66d5a769.8tulvyzy.
+Changed28f matrix/churn independently verified in97-file lazy-baseline-independent-
+review.66d5a769.koyb7uu1: required1/30/full300 parity, ordered GL300 byte/native-
+converted parity, HEVC/Main10/VP9 one/30 and churn7/7; clean windows/boundedexit0.
+Matrix63.140s/839880KiB andchurn30.145s/196952KiB do not certify general memory;
+AV1profile skipped, optionalhwmap218 retained, resolution780/long3600 counts/
+sanity only. All original failures and prior RC4 rollback remain preserved.
+Installed local AKecorpus24fps Chrome55s/1329frames/24.163FPS/0drops/1433driver
+publications plus seek/loop/cleanexit verified; outer treeRSS1906596<2097152KiB
+browser gate.26-file rc5-installed-chrome-review.66d5a769.6mtpk6p_ includes
+installed identities/current wholeboot and blockedMSE attempt beforehardware.
+MSE stopped because another playback owns decoder; root capture66d5 wholeboot/
+three loaded-selected IDs clean, ref1/runtimeactive. No idle assumption or old
+command retry. Release chat owns remaining browser/live adaptive checks; root
+ZEROdecoder/BPF/install/lease/privilege operations and no competing edits,
+hardware/tracing/messages/operator requests. Diverse/stable/sustained/generalAV1,
+sleep/removal/expanded qualification remain incomplete. Latest pointers under
+resume-20261002: current-av1-510-lazy-success-review.txt,
+current-lazy-baseline-independent-review.txt,current-rc5-installed-chrome-review.txt.
+
+ROOT BASELINE CHECKS INDEPENDENTLY VERIFIED / EXPANDED GATES STILL OPEN (2026-10-03):
+Other-owned natural-grace-baseline-r2-8ghk75ao completed on66d5a769 with exact
+b79c0c69 driver. Root offline audit verified required H2641/30/full300 exact
+checksum files, ordered GL300 raw I420 equality/native NV12 hashes after chroma
+interleave, HEVC/Main10/VP9 one/30 and reference/three recovery300-frame rows.
+Logged churn7/7, boundedphase exits and observed kernel windows clean.
+Resolution780/long3600 count/sanity witnesses only; AV1profile skipped, optional
+hwmap218 retained. Matrix63.978s/839452KiB andchurn30.280s/219084KiB are sampled
+shared-page tree RSS; matrix above512MiB and no memoryPASS.98-file hashsealed
+root review natural-baseline-independent-review.66d5a769.abwnf0j2; pointer
+current-natural-baseline-independent-review.txt. Corrected offline auditPASS;
+initial I420/NV12-layout assertion failure and initialrc126 launcher retained.
+BaselinePASS scope only; no transfer to lazy-map changed candidate or installed
+RC4. Prior traced510 memory failures remainFAILED. Release chat owns mapping
+integration/privatefreeze/new exact gates; rootZEROdecoder/BPFopens, no
+competing hardware/lease/source/privilege/message/operator action. Browser,
+sustained/sleep/removal/expanded production remain incomplete. Latest completed
+baseline supersedes historical pending-baseline paragraphs below.
+
+ROOT NARROW-INVENTORY ACTUAL510 MEMORY FAILURE (2026-10-03):
+Other-owned av1-AKe-510-trace-inventory-st9u1j3v on c188 completed510ordered
+codedNV12 pixels/publications exactly, one4039901192session/READY/STOPPED,
+empty trace/kernelerrors,25.240s/workerexit0/boundedcleanup. FULLverdict
+FAILED592676KiB>524288KiB. PeakPython34980/BPF183856/replay331412/journal42428;
+sequential aggregate RSS/shared pages, no unique/kernel/leak claim or subtraction
+to relabel failedgate. Root independently verified260packet+25trace manifests,
+exactnewpath codegenPASS1.088s/emptylog, inventoryhasha0cc4483. Same e757trace
+retains26probe sites/16unique functions/24monotonic event clocks. No receipt
+transfer or unchangedretry. Root26-file failure review hashsealed at
+av1-510-inventory-memory-failure-review.c188bef9.j30qpw8b; pointer
+current-av1-510-inventory-memory-failure-review.txt under resume-20261002.
+All originals/prior failures/old375BLOCKED/installedRC4 retained. Currentbootnow
+66d5a769-8e6d-4b33-a2ea-ffbbc8576bc9; release chat owns baseline r2 guard/run,
+initialrc126 launcher failure preserved beforedevice. Root readonlyoverwatch only,
+no lease/device/BPF/privilege/source operations, no competing retry or operator
+requests. Fresh baseline preference remains deferred for this task; other-owned
+in-progress baseline neverPASS. Private lazy-map HOSTprototype/unqualified and
+all matrix/churn/GL/browser/sustained/sleep/removal/memory gates still pending.
+
+ROOT CAPTURED DMA COMPARISON / CURRENTc188 SNAPSHOT (2026-10-03):
+Compared preserved old4c40frame and new65full510frame traces offline only:
+44to34exact DMA return/free-entry pairs; requested extent peak626299904to
+500962304bytes, reduction125337600bytes. Capture-sized pool20to10, sixqueued
+inboth; unobserved queues14to4. Freeentry doesnotprove completion/unmapping,
+requested sizes are not separately measured kernel resident memory. Different
+40/510workloads preclude RSS leak/regression attribution; both512MiB gates
+remainFAILED. Review av1-510-allocation-comparison.uh1cn5u0:17-file hashseal,
+independent arithmetic/count checks and exact current compare.py reproduction
+4nj2vy7l PASS/identical3outputs. Currentc188 wholeboot/3loaded-selected identities/
+idle matched at readonlysnapshot only; no activation/coldseal/lease/hardware.
+Root awaits changed owner packet/evidence; release chat owns HOSTmemory/trace-
+runtime investigation. No competing edits/privilege/hardware/unchanged retry.
+Pointers current-av1-510-allocation-comparison.txt and reproduction pointer under
+resume-20261002. Full510pixels on65 stay specific run PASS, overallmemoryFAILED;
+production/matrix/churn/GL/browser/sustained still incomplete, old375BLOCKED.
+
+ROOT CHANGED510 PIXELS COMPLETE / MEMORY FAILED (2026-10-03):
+Other-owned av1-AKe-510-natural-grace-jky9_6pv actually ran once on65d91632.
+Root independently verified all510ordered coded NV12 MD5 records including
+hidden frames,510EndPicture/510publications/actualAV1queue, one2049703944trace
+session with510inputs/1050encoded/516outputs, READY/STOPPED and empty stderr.
+Workerexit0/25.807s/boundedcleanup/no timeout/lingering/denied signals; observed
+kernel window clean. FULLverdictFAILED:612768KiB>524288KiB. Peak sample Python
+35708/bpftrace193308/replay345548/journalctl38204KiB; shared pages count per
+process, no unique/kernel-memory claim or subtraction to relabel failure.
+Candidateb79c0c69 stays UNINSTALLED/UNQUALIFIED; strict512MiB unchanged,
+matrix/churn/GL/browser/sustained gates remain mandatory. All260packet+24trace
+manifest entries and exactnewpath codegenPASS1.894s/emptylog verified. Root
+copied/hash-sealed25files in av1-510-natural-memory-failure-review.65d91632.s9y4s9h8
+(pointer current-av1-510-natural-memory-failure-review.txt). Original seal/logs
+and every prior failure kept; no unchanged retry. Wholeboot/3identities/idle
+were independently clean at root65 review, not proof of SMMU fix/causation.
+Currentbootnowc188bef9-c419-4367-a819-46eb212598ba after normal operator restart;
+no presumed qualification. Release chat owns nextHOST memory/trace-runtime
+diagnosis; root read-only audit only, ZEROdecoder/BPFopens. No competing source,
+hardware, messages or duplicate sudo/restart requests. Old375wrapper BLOCKED.
+
+ROOT FAILED510 ALLOCATION / MEMORY AUDIT AND CURRENT65BOOT (2026-10-03):
+Current65d91632-57a2-45a1-b775-c13e4be3990e observed only; no qualification or
+competing hardware/trace operations. Original4c510 failure stays40/510 INCOMPLETE
+and560452KiB>524288KiB FAILED, no unchanged retry. Read-only hash-sealed audit
+av1-510-allocation-memory-audit.4c710ca8.55e27atb independently checked900events:
+44successful DMA allocation returns /44same device+base+size free-call entries,
+no live-record overlap/reuse/unmatched end records. Free entry is not completion,
+unmapping, mapping validity, leak absence or SMMU cause. Peak recorded requested
+extents626299904bytes; not separately measured kernel resident memory.20capture-
+sized12533760byte extents:6have BUF_OUTPUT queue calls,14have no observed queues;
+11DPB extents12591104bytes. Worker/BPF/replay all inside aggregate sampled RSS;
+shared-page counts and missing per-process/phase data prevent memory attribution.
+Removing spare DMA allocations alone cannot establish the process-RSS gate fix.
+Other-owner correction: HFI39/40 have full payloads but V4L2 returns empty ERROR;
+frame-info/property error fields absent, exact reason UNOBSERVED. Premature STOP/
+backlog is concrete, not proof of that conversion's cause. Active owners prepare
+sync/setup host candidate and supplemental metadata; no competing source edits,
+operator requests or hardware. Initial offline parser failure preserved; corrected
+audit and independent signed-event consistency PASS,18files hash verified. Pointer
+current-av1-510-allocation-memory-audit.txt under resume-20261002. Expanded gates
+remain pending, original375wrapper BLOCKED and installedRC4 untouched.
+
+ROOT EXACT510 NEWBOOT ACTUAL FAILURE (2026-10-03):
+Warning-free release-owned AKe510packet ran on4c710ca8; FAILED after41attempts/
+40published coded frames.40NV12 rows equal reference prefix;510/fulltrace
+incomplete NEVERPASS. Drain/START/replayed40history then unowned CAP35..38 and
+discarded next pending surface; exit1. Process tree560452KiB>524288KiB also
+FAILED,6.321s/no timeout/no lingering/denied signals. OneREADY/oneSTOPPED, empty
+trace-errors and clean observed kernel prove short attachment only, not a SMMU
+fix or mapping validity. No unchanged retry; original packet seal/evidence kept.
+Root read-only preservation av1-510-first-failure-review.4c710ca8.52sdhiu_ under
+resume-20261002 (pointer current-av1-510-first-failure-review.txt); originals,
+old375BLOCKEDwrapper, all failedboots/installedRC4/concurrent work untouched.
+Active owner handles host drain/replay investigation; no competing hardware/edits,
+other-chat messages or extra sudo/restart requests. Expanded scope incomplete.
+
+ROOT WARNING-FREE EXACT510 RECEIPT READ-ONLY AUDIT (2026-10-03):
+Release-owned av1-AKe-510-traced-r3.ipnrxwev has actual privileged warning-free
+codegen PASSexit0/1.64s, empty log. Root independently verified267packet+24trace
+manifest entries, tracee757f082/manifest8f6b9fc9, exact -k/-q/-Bline command,
+three loaded module builds/file hashes and installed artifacts. No new privilege
+request or attachment/decoder/browser operations. AKe510coded/480displayed is
+distinct from3753Y corpus; no receipt/qualification transfer. Prior375hand-off
+stays BLOCKED, all failures/original source preserved. Current94 still faulted;
+no fresh seal/evidence or hardware qualification. Release chat owns its guarded
+operator wrapper, do not compete or repeat sudo/restart requests. Full READY,
+ordered pixel/HFI, journal/idle/lease/teardown gates and expanded scope pending.
+Evidence resume-20261002/warning-free-510-receipt-review.f4w0hq8p; pointer
+current-warning-free-510-receipt-review.txt. Firmware/SMMU cause unproven.
+
+ROOT OPERATOR HANDOFF BLOCKED FOR TRACE WARNING REVIEW (2026-10-03):
+Release chat found actualr3 codegen warnings: discarded delete(map,key) return
+values. Compileexit0 remainsPASS for compilation; runtime strict ANYstderr gate
+could reject it, -q suppression unproven. No attachment/replay attempted.
+Root blocks previously presented av1-4k-compiled-handoff.abnsebar/run-reviewed.py
+before any operation via BLOCKED.json; originalsource run-reviewed.pre-warning.py
+and originalreview/test receipts retained unchanged. Never execute preserved
+source directly or rerun unchanged. Operator told to HOLD previous replaycommand;
+no new sudo/restart request. Release chat owns warning-free privatefork/review;
+no cross-chat messaging or edits to its files by this task. Current94b61175 still
+faulted/forbidden; no devices/decoder/BPF/install operations. Corrected exactnew
+packet must get its own compiler/runtimeready/identity proof; no receipttransfer.
+Latest actualcompile PASS is not hardwarequalification or a SMMU cause/fix.
+
+ROOT CORRECTED TRACE ACTUAL COMPILE PASS / FRESHBOOT HANDOFF (2026-10-03):
+User actual r3 trace/compile-only.py PASSexit0 in1.68s: trace81a340b9,
+trace manifest75bc28ec, exact3selected/loaded modules/live inventory verified,
+zeroattachments/decoder/browser opens. Independently matched receipt/command/
+279artifact hashes against frozen owned110s CLOCK_MONOTONIC packet; no oldreceipt
+transfer. Root compile prerequisite complete; actual attachment/replay unproven.
+Current94b61175 remains faulted/forbidden, ZERO hardware opens by this task.
+Prepared immutable operator handoff av1-4k-compiled-handoff.abnsebar/run-reviewed.py
+outside original packet: pins r3manifesta8e24a04, read-only check first, verifies
+existing exact compile receipt, exclusive fresh seal then exec one owned replay.
+No compiler rerun, install/reboot/module/browser operations. Five focused host
+control-flow tests PASS; requires root and refuses manifest/previous-attempt/first
+check failures. Existing issue run-traced-av1-check.sh retained but SUPERSEDED for
+this receipt: it would rerun compile-only and fail exclusive existing log.
+Operator normal restart and Chrome CLOSED required before the new singlecommand;
+then exactcurrentactivation/3builds/selectedSHAs/wholebootclean/idle/lease gates
+remain mandatory. Trace READY/full375orderedcodedpixels/120s512MiB/kernel/
+teardown gates unchanged. SMMU cause unproven; hardware/production not qualified.
+Use pointer resume-20261002/current-av1-4k-compiled-handoff.txt. No duplicate
+compile/sudo/restart request while this single operator handoff is pending.
+
+ROOT CORRECTED TRACE COMPILE REVIEW (2026-10-03):
+Original issue packet memory-trace-host.stdz9r0e now has actual privileged
+codegen PASS (no attachments/decoder opens); receipt exact original hash verified.
+Original bare BOOTTIME clock stays unsuitable for unadjusted journal correlation;
+PASS is not transferable to changed110s CLOCK_MONOTONIC owned packet.
+Readonly complete279-file +25trace-file manifests/actual3loaded+selected module
+identities/installedRC4+companion all verified. Corrected exact compile receipt
+still absent. Production chat presents corrected packet compile-only operator
+command once; reserve that step here to avoid duplicate sudo requests.
+Current94b61175 remains faulted/decoder-forbidden; no attachment/hardware/install.
+Next compile-only.py in av1-4k-owned-trace-r3.i209cgqx/trace needs operator root
+for live symbol inventory/codegen only. Safe futureboot coldseal/clean journal
+and all remaining required gates still pending; no firmware-cause/fix claim.
+Review pointer resume-20261002/current-corrected-trace-compile-review.txt.
+
+ROOT OWNED TRACED4K HOST PACKET PREPARED (2026-10-03):
+Fresh immutable av1-4k-owned-trace-r3.i209cgqx binds combined RC4+terminalpoll+
+elapsed drain/replay wait driver eee27a3a010fe09c9158889be80dbf4208229ceb32e4efb3d00225263263a9ba,
+unchanged5ce5b3fc companion, exact375coded4K32tile NV12 fixture/reference/client
+and corrected24event CLOCK_MONOTONIC trace. 23guarded lifecycle/range/kernel+
+14exact trace host tests, Python syntax/frozen manifest PASS. Actual host child
+inherits shared lease and terminates on injected watchdog fault; tracer READY,
+loss/error/early exit, exact compile receipt, single-session/full observation
+and bounded cleanup gates modeled with userspace processes only. Trace timer110s
+inside120s process-tree budget,512MiB remains strict. Standalone trace attach
+disabled; parent owns one replay and retains kernel observer/lease through cleanup.
+Current94b61175 refusal PASS before lease/attachment/device; no cold seal and
+NO hardware experiment. Initial host fixture/omitted test-dependency failures
+and immutable parent packets retained; never relabeled PASS. InstalledRC4,
+normal browser profiles and all concurrent Rust/kernel work untouched.
+Root codegen and actual attach still UNPROVEN; no receipt transfers from old
+30s/BOOTTIME packets. Exact new compile-only witness then safe futureboot
+current activation/3actual builds/selected SHAs/wholebootclean/idle/coldseal/
+lease are mandatory before any decoder. Existing other-chat compile-only request
+pending; no duplicate sudo/restart or live operation requested here. All7faulted/
+warned boots remain forbidden. SMMU cause UNPROVEN; no hardware/production claim.
+Required matrix/churn/GL/browser/sustained/expanded-scope qualification pending.
+Pointer resume-20261002/current-av1-4k-owned-trace.txt; result frozen-host-result.json.
+
+ROOT IMMUTABLE DRAIN/POLL HOST FREEZE + TRACE CLOCK REVIEW (2026-10-03):
+Current94b61175 still permanently decoder-forbidden; ZERO hardware/tracer/
+installation operations by this task. Frozen RC4+terminalpoll+reviewed elapsed
+submit drain/replay wait candidate fatal-poll-drain-rc4.r1lt6kwb driver
+eee27a3a010fe09c9158889be80dbf4208229ceb32e4efb3d00225263263a9ba;
+companion unchanged5ce5b3fc, submit327af2cb. 263unit PASS/3ignored, both CPU-only
+actual capture tests explicitly PASS966coded/bothorders, fullfmt/strictall-
+targets/allfeaturesClippy/system-av1release/source+artifactIDs PASS. Unchanged
+realgraphics test previouslyPASS was NOT repeated; no graphics device opens.
+InstalledRC4bb9c42 untouched. This fixes demonstrated elapsed wait defects,
+NOT an established SMMU cause; required matrix/churn/GL/4K/browser pending.
+Review of issue memory-trace-host.stdz9r0e found bare nsecs defaults CLOCK_
+BOOTTIME (includes suspend), while journal fault time is CLOCK_MONOTONIC.
+Do NOT use that packet for unadjusted journal address attribution. Original
+packet/logs/compile-only pending request preserved; no new request here.
+Prepared immutable corrected fork iris-memory-trace-monotonic.9esdp0x1;
+all24 event clock calls explicitly nsecs(monotonic). 14hostchecks/manifest/
+currentfaultedboot attachrefusal PASS; no receipt carried forward, rootcodegen/
+liveattach unproven. Clock source primary bpftrace0.25 docs at
+https://bpftrace.org/docs/release_025/stdlib#nsecs. Future guarded trace needs
+exact corrected-packet privileged compile witness before attachment, then
+safe newboot/3actualbuilds/selectedSHAs/wholebootclean/idle/sharedlease and
+owned bounded playback cleanup. Never attach or decode on current94; no
+repeated sudo/restart request. Range evidence/rootcause/hardware stillunproven.
+
+IRIS MEMORY TRACE HOST PREPARATION (2026-10-03):
+Current94b61175 remains permanently decoder-forbidden. Zero decoder opens by
+this production task; failed375pixel seal remainsfailed/unrun. Exact user
+Chrome source3YTohytF9oE confirmed by issue chat; newcleanboot SMMU/system
+failure persists independently of old19bb poisoning. Firmware/userspace
+rootcause UNPROVEN. Prepared DWARF-bound HFIqueue/release/internaldestroy/
+Irisdevice DMAfree BPF memory-range trace for exact installed231cb9 module,
+plus offline analyzer. 55focused guard/observer/replay/range checks PASS.
+Range tests reject truncated/lost/diagnostic output, failed/ambiguous calls,
+wrong extents and distinguish DMAfree/addressreuse; no causal inference.
+Tracefs permission blocked unprivileged format/codegen; originalfailed logs
+preserved. Rootattach/live trace UNPROVEN. Host-only frozen packet
+iris-memory-trace-host.94b61175.r1; no operational operator command yet.
+Current source/installedRC4/kernel/userbrowsers untouched by this preparation.
+No new sudo/restart/sleep/unload request, no hardware/production claim.
+Next finish guarded trace wrapper/host lifetime investigation before changed
+safe-boot experiment; never repeat failed packets unchanged.
+
+FRESH94b6 REFAULTED BEFORE AGENT DECODER TEST (2026-10-03):
+Boot94b61175-f76f-4a44-b6b2-9e65697698eb is now FAULTED and permanently
+forbidden for further decoder opens. User chose normal restart; first readonly
+check exact3patched loaded/selectedIDs/installedRC4/idle/wholebootclean PASS.
+Before sealed375pixel experiment opened anydecoder, new Iris-domain SID1947
+SMMU Unhandled contextfault at02:17:51.455816+07 IOVA d3bf4e00; firmware
+0x5000002 then0x5000003/0x5000001 andmore SMMU faults. Later seal correctly
+REFUSED. ZERO decoder opens by this production task on94b6; no hardware test
+run. Ref0 does not restore safe boot. User asked to pause playback; no forced
+browser close/module/reboot/installation operations. Wholekernel/incident/
+3identities/preflightrefusal retained; pointer current-iris-smmu-fault.txt.
+Never rerun av1-4k-isolated.94b61175.rtk9pnq9 unchanged; failed seal retained.
+All current knownboot activation/sleep/module guards add94b6; observers now
+explicitly fail standalone SMMUcontextfault before firmware error. Firmware/
+userspace rootcause stillUNPROVEN. Continue HOST-ONLY address/lifetime/corpus
+investigation and prepare bounded trace before any new clean-state hardware.
+Latest userChrome prior19bb AKeUssuu3Is4K memoryfault remainsfailed. Hardware
+qualification hasNOT resumed, no AV1/Chrome success or production claim.
+
+RC4 EXPORT/POLL COMBINED HOST PASS / HARDWARE BLOCKED (2026-10-03):
+IndependentRC4 installation receipt and actual system hash PASS: installed
+bb9c42ed4ed10022ca612a64eec6c61feb1c2f2dfd674ce51b1770c9f671605f;
+companion unchanged5ce5b3fc. Faulted19bb remains forbidden, no decoder opens by
+this production task and no protected/install/module changes. Replacing
+userspace does not clear firmware faults or qualify installedRC4.
+Fresh immutableRC4 export/backing/context architecture plus terminalpoll only
+fatal-poll-rc4.im1g3798 driver40e623792d5e64b4dea5123865f24f2eff2302290120de36ba224816403f64dc
+PASS261Rust and all3ignored tests explicitlyPASS:966coded actualAV1 CPUcaptures
+both orders, realMSM graphicsbuffers in2modeled4K contexts, export beforepicture/
+exact copiedpixels/clientfd lifetime afterteardown (noIrisopens/noGPUsubmission).
+Fmt/strictClippy/release/source identities PASS. Current repo and otherchat
+install/export work untouched; originalRC2/RC3 snapshots/failures preserved.
+Fresh runnable av1-4k-rc4-future-boot.onwtvyn2 binds combined exactsource/driver/
+companion and375coded4K NV12 reference. Previous frozen7runner/21measurement/
+kernel tests reused unchanged; wholepacket identities/reference PASS. Current
+check refuses faulted boot BEFORE lease/device opens. Successful futureboot
+read-only cold3identity seal, selectedhashes/wholebootclean/idle/shared lease
+needed before the one120s/512MiB boundedpixel experiment. All375coded inclhidden
+must match in order with actualAV1controls/publications/completeclean kernel
+window/cleanprocess tree. No hardware attempt, no unchanged failed retry.
+Browser/GL/twoactualdecodercontexts/sustainedperformance not established by
+host graphics. Required full decoder matrix and session churn remain before
+qualifying queue/publication/export changes. Expanded scope still incomplete;
+originalrav1e26FPS remainsFAILED and user-deferred baseline incomplete. No
+4K60/battery/zero-copy/separatekernelmemory claim or repeated operator request.
+
+FROZEN RC3/POLL + NEXT4K EXPERIMENT PREPARED (2026-10-03):
+Current19bb9f80 remains FAULTED and permanently decoder-forbidden; zero decoder
+opens by this production task. Independent receipt/system hash confirms another
+user-authorized release chat installedRC3 f6bb7cf8717d3d55799ffdb725caa267e73f7c5b6bfd85a47656ea868208e7c7;
+companion unchanged5ce5b3fc. Existing browser/firmware remain untouched.
+Fresh immutableRC3+terminal-poll candidate fatal-poll-rc3.ksj_x7_e driver
+c8f0b7d4af786e426a03f704cec0c5b3d17657b66de0d41092d34773d778f173:
+244Rust PASS, both actual corpus tests PASS966coded/both orders, fmt/strictClippy/
+release/source identities PASS. Actual pipePOLLERR records codec/dimensions/
+queued/pending counts once without debug, fails pending owners without pixels/
+reopen. No media payload/site logged. No firmware-trigger/root-cause claim.
+Isolated snapshot EXCLUDES independently active Surface-owned predecode export
+architecture; installedRC3 and working-tree ownership/export work preserved.
+New tools/qualify-av1-4k-replay.py and frozen av1-4k-future-boot.g18_mxbz ready:
+375coded3840x2160NV12 including hidden pixels require full ordered reference,
+actual AV1 controls/publications, complete clean kernel window, bounded120s
+process tree/clean exit/no linger and512MiB RSS. Read-only cold seal must match
+current actual3module/selected identities and frozen source/artifacts. Parent/
+monitor/worker share inherited lease through cleanup; competing host flock
+refused.7focused frozen runner +21measurement/kernel tests PASS; current boot
+preflight fails before lease/device opens. Reused exact prior frozen replay
+source/binary, verified provenance, after absent distro libva pkg-config entries;
+initial setup failure preserved. First corpus path mismatch corrected and original
+failed log retained. No protected/install/module writes or new operator request.
+This packet is a pixel/lifetime experiment only: full required matrix/churn/GL/
+browser/sustained performance and expanded PM scope still required before
+production. No4K60/battery/zero-copy/kernel-memory claim. Original26FPS failure
+and user-deferred baseline remain failed/incomplete; don't rerun unchanged.
+Next use a safe future boot and frozen export candidate for actual browser work;
+never run on19bb. Hardware qualification has NOT resumed.
+
+FATAL-POLL HOST CANDIDATE PASS / HARDWARE STILL BLOCKED (2026-10-03):
+Current19bb9f80-c534-4c08-8011-43eebc92d448 remains FAULTED, no further decoder
+opens. Zero decoder opens by this production task on current boot. Another
+user-authorized release chat installedRC2 AFTER the five prior fatal errors;
+current system driver8840f5c4b7d8f76c589e1956d4e3f52c904467f72fa29ab0ab4c6ded07b5c53f,
+companion unchanged5ce5b3fc9bf59bbab03ad94ff50c3bc45d04cfae92c112278fe8d618407a2fef.
+This replacement does not restore a clean boot. RC2 installation receipt under
+.local/share/qcom-vaapi/releases/0.1.1-rc.2/installation.json; this task made no
+protected/install/module writes. Incident rc2-install-addendum.json preserved.
+Actual libc pipe POLLERR reproduces original pump failing to latch an active
+queue error. Candidate distinguishes expected startup/empty-queue POLLERR from
+terminal active queued streams; HUP/NVAL always terminal. Pending coded/no-output
+VA owners are failed once with no pixels/reopen; mapping/queue teardown retained.
+239Rust PASS plus both ignored actual-corpus tests explicitlyPASS966coded/both
+orders; strictClippy/release/source identities PASS. All host-only, no decoder.
+Frozen isolated RC2-based fatal-poll-candidate.uviix9ss driver
+8c9a72fb7d2601123f2570d06bd54f72929f5812d60a53331a7645c8f3df1335;
+source manifest and logs/result.json; original failure fatal-poll-host.c0u7tgfw.
+Concurrent context-overlap work preserved and EXCLUDED from isolated snapshot;
+combined candidate requires its own freeze/checks. First working-tree corpus
+compile hit that concurrent signature edit; failed log preserved; isolated
+snapshot allchecksPASS. Publication missing-import setup failure also preserved.
+No firmware-trigger/root-cause/hardware-fix claim: actual incident revents were
+not captured. Source analysis shows local Iris fatal calls bothvb2 queueerrors;
+upstream polling contract supports handling, not actual-incident cause proof.
+Both tools/verify-rust-driver.sh and verify-session-churn.sh remain REQUIRED
+before qualifying this polling change; no hardware gates attempted on19bb.
+Next on a safe future operator boot verify exact current activation/loaded3IDs/
+selectedSHAs/wholeboot clean/lease, freeze necessary changed375coded4K experiment
+and strict browser/lifecycle regressions. Never repeat failed packet unchanged.
+No new sudo/restart request here; release chat already presented operator step.
+Diverse browser performance, active sleep/removal and expanded production remain
+incomplete. Original26FPS failure preserved, baseline user-deferred incomplete.
+
+CURRENT BOOT FIRMWARE FAULT / HARDWARE STOP (2026-10-03):
+Boot19bb9f80-c534-4c08-8011-43eebc92d448 is FAULTED. Five actual Iris session
+fatal errors0x4000003 occurred01:15:57+07 during normal user Chrome use.
+No agent decoder opens on this boot; prepared read-only identity preflight
+refused wholeboot faults before any test. User cannot remember video/site;
+codec/resolution/root cause UNPROVEN. Never further decoder opens on this boot,
+even if runtime suspended/refcount0. Incident snapshot later saw refcount1;
+normal browser ownership is not an agent test and must not be forcibly closed.
+Evidence resume-20261002/iris-user-fault.19bb9f80.vpf_psut contains fullkernel,
+incident window/Chrome errors, exact loaded3builds/selectedSHAs/installed artifacts.
+Installed qcom-vaapi0.1.1~rc.1 driver2cddceff55dd7551157eeef23ce30b05746836878fad5ab657bc3ed47766ddae,
+companion5ce5b3fc9bf59bbab03ad94ff50c3bc45d04cfae92c112278fe8d618407a2fef.
+Priorfea15ab3 installed default-loader AV1 replay PASS591coded/588display exactNV12
+in av1-installed-coldboot.fea15ab3.8ibyikh9, complete clean kernel/exit/idle/3IDs;
+it does not qualify new19bb boot. Both restarts were user-chosen normal restarts.
+Previousfea Chrome shutdownTRAP occurred AFTER orderly GNOME reboot request;
+separate evidence desktop-reset.fea15ab3.jyr_rebw, no crash-caused reboot claim.
+Focused startup Media/page diagnostic fea uiesh210 is prepared but UNRUN;
+19bb identity packetfi4rrxj3 failed preflight, no new playback or baseline.
+Known-boot guards updated;40focused activation/module/sleep host checksPASS.
+Continue HOST-ONLY fault investigation and review/freeze concurrent YouTube4K
+final-tile fix. That fix has232Rust/actual966coded bothorders hostPASS but no
+hardware proof and no established connection to current fatal errors. Preserve
+all failures and user changes; installed rc1 untouched. No sudo/reboot/sleep/
+unload request now; no hardware until a safe future boot plus reviewed changed
+candidate and exact identities/lease/clean prerequisites. Expanded production
+qualification incomplete; original rav1e26FPS gate remainsFAILED, full supported
+baseline user-deferred remainsincomplete. Historical status below is superseded.
+
+CHROME STARTUP TRACE CLEAN / VARIANCE CAUSE STILL UNPROVEN (2026-10-03):
+Changed diagnostic av1-rav1e-media-trace.e56c1f3a.02w3q_js PASS strict browser
+limits/seek/export/exit/full clean kernel/final idle/exact3IDs, exec50641 exited0.
+Official Chrome154 own8s media/GPU/renderer trace captured71310events/13MiB;
+evidence/media-trace-analysis.json. Startup stall again NOT reproduced, no fix
+claimed and original dpcykc8c26FPS failure remains FAILED. Both failed sample
+and passing media trace contain Wayland no-focus warnings, not sufficient cause.
+Instrumented timings may alter scheduling. All runners exited; SVT not run.
+No user/operator step now. Next use source/trace startup scheduling comparison
+and prepare one focused failure-triggered diagnostic; no repeated unchanged gate,
+no warmup exclusions/relaxed limits. Basic AV1 browser functionality proved for
+2samples; diverse stable performance/lifecycle/general AV1/deployment incomplete.
+
+AV1 STARTUP TIMING DIAGNOSTIC CLEAN / FAILURE NOT REPRODUCED (2026-10-03):
+Single changed read-only timestamp/page-telemetry diagnostic
+av1-rav1e-startup-timing.e56c1f3a.9jetackc PASS756non-dropped/25.0007s30.239FPS,
+774hardware publications/strictseek/cleanexit/clean full kernel/finalidle/3IDs.
+Original rav1e dpcykc8c26FPS remains FAILED; no fix or variance qualification
+claimed. Diagnostic receipt timings first5s EndPicture-to-publication median3.39ms,
+max12.43ms; first playing-to-seek30.27FPS. No startup stall reproduced. Timing
+perturbs scheduling; no proof about original failure. evidence/timing-analysis.json.
+Transparent child logger3focused testsPASS preserves exit/output/silent behavior.
+Fresh changed Chrome own media/GPU/renderer8s startup trace+page timing prepared
+av1-rav1e-media-trace.e56c1f3a.02w3q_js ACTIVE exec50641, frozen exactdriver/
+companion/actualChrome/3moduleIDs/currentactivation/lease/wholebootclean preflight
+PASS. Official exact-version tracing_switches.cc confirms flags; missing optional
+trace_startup_config.cc404 preserved, not needed for confirmed switches. No extra
+baseline, sudo/reboot/installation/module changes. Inspect without competing;
+original failed gate immutable, SVT still not run pending startup investigation.
+
+AV1 BROWSER DIVERSITY STOPPED ON STRICT PERFORMANCE FAILURE (2026-10-03):
+Exec47228 exited1 after rav1e; all runners exited. Original xphob2yu browser PASS
+and libaom av1-browser-diverse.e56c1f3a.1.3u5i2zoj PASS754non-dropped/25.001s,
+30.1588FPS/801hardware publications/strictseek/cleanexit/clean kernel preserved.
+Rav1e .2.dpcykc8c FAIL throughput_below_requirement:650non-dropped/25.0006s =
+25.9994FPS below27;3drops/653=0.46% within1%, no decoder errors/softwarefallback,
+actualAV1 queues/control/publications, clean complete kernel window/exit/no linger/
+final ref0 suspended usage0/3loadedidentities unchanged. Result remains FAILED.
+Offline telemetry shows slow startup before seek; after-seek progression near30FPS,
+cause UNPROVEN. evidence/startup-timing-offline.json, no warmup exclusion/limit
+weakening/retry. SVT .3.19i51f05 prepared but NOT RUN due stop-first-failure.
+No new kernel fault; current boot not faulted. Next investigate initial Chrome
+rav1e playback scheduling/decode/export timing offline before changed diagnostic;
+no unchanged failed rerun. Narrow AV1 Chrome has2samplepasses but diverse strict
+qualification/persistent deployment/general lifecycle incomplete. Baseline remains
+user-deferred. No operator action, no module/reboot/sleep/install change.
+
+ACTUAL CHROME AV1 PLAYBACK/SEEK/EXPORT/EXIT PASS (2026-10-03):
+Fresh av1-chromium-order.e56c1f3a.xphob2yu PASS actual GoogleChrome154.0.8037.97
+Chromium path after proven collector-order fix. 810non-dropped frames/25.0005s,
+833actualhardware CAPTURE publications,1,708,108KiB observed tree RSS within2GiB,
+strict1%drop/performance limits, acknowledged real seek/continued playback/clean
+exit/full kernel window/3actualidentities unchanged/final ref0 suspended usage0.
+AV1 OUTPUTfourcc+decode-order controls witnessed; no software fallback. Frozen
+driver5e747cffd72aa1c82334c4da47a1c0f4f2047934de845995b7fac812bed2c9f3,
+unchanged companion5ce5b3fc9bf59bbab03ad94ff50c3bc45d04cfae92c112278fe8d618407a2fef.
+Actual Rust corpus591coded/281hidden passes both parameter/data orders;231Rust,
+strictClippy/release PASS. First4crqj5ov Chrome failure stays FAILED, no rerun;
+fixed real order supported by actual-function reproduced old error18.
+Next active exec47228 prepares3distinct libaom/rav1e/SVT private browser packets,
+lossless repeat4 MP4 fixtures checked exactNV12 original projection, then serial
+strict browser runs stop first failure. Inspect without competing. No operator
+step/install/module/reboot changes. Narrow8bit/no grain experimental AV1 only;
+general lifecycle, supported regression, active playback sleep/removal and
+persistent deployment qualification incomplete. Baseline user-deferred stays
+incomplete. Browser proof now actual Chrome154, old Chromium152 Snap absent.
+
+ACTUAL CHROME AV1 BUFFER ORDER FAILURE / FIX ACTIVE (2026-10-03):
+Chromium Snap is now absent; current installed Google Chrome154.0.8037.97 binary
+/opt/google/chrome/chrome, official source commitb510e9d7cd3a2fbd78d0ddc42234103206c5f78d.
+Read-only source confirms complete original data/sentinel contract persists.
+Fresh av1-complete-browser.e56c1f3a.4crqj5ov FAIL real vaRenderPicture invalid
+parameter on first picture, then software playback; full kernel window clean,
+exit0/browser observer but strict gate FAIL/no linger/final idle/3IDs unchanged.
+Failure preserved; no claim from smooth software playback. Exact source submits
+picture/data/tile parameters, while opt-in collector required ranges before data.
+Actual function/corpus reproduces original error18 before any queue submission,
+chromium-buffer-order-original-failure.log. Fix accepts one bounded nonempty data
+buffer before tile ranges; duplicate/empty data refused, all finish bounds/ref
+validation retained. 231Rust/strictClippy PASS, actual591coded/281hidden corpus
+now tests both producer and Chromium buffer order with exact normalized bytes.
+Fresh frozen av1-chromium-order.e56c1f3a.xphob2yu building then conditional browser
+playback/seek/exit under existing lease/wholeboot observer/current3IDs/current
+activation; run session74851. Do not compete or repeat failed packet. Baseline
+user-deferred/incomplete; no reboot/sudo/installation/module change. General AV1,
+active playback sleep/removal, persistent qualification incomplete.
+
+AV1 COMPLETE ORIGINAL-BUFFER VA REPLAY PASS (2026-10-03):
+Bounded CBS companion now wired into opt-in RawDecoder through private versioned
+ABI; original buffer selection/tile bytes/display visibility/actual refresh and
+live surface ownership validated before generation commit. No VA ABI extension.
+230 Rust/strictClippy/release PASS; actual original-buffer host corpus591coded/
+281hidden PASS, separate callback normalized bytes match prior frozen producer.
+Driver5e0a18ee603a2de3a55a10047b11571a72a7b74928dc1e4b06dac73884764acc,
+companion5ce5b3fc9bf59bbab03ad94ff50c3bc45d04cfae92c112278fe8d618407a2fef.
+Actual VA replay original300 .0.imbbbjyh,aom99coded/96display .1.2ctcg1ck,
+rav1e96 .2.jirwhu73,SVT96 .3.oh763j0w ALL591coded pixels exact NV12 including
+hidden frames, original588display projection exact/order. Prefix av1-complete-va.e56c1f3a;
+summary av1-complete-va-diversity-summary.json. All full clean kernel windows,
+exit0/no linger/safe final idle/current3builds unchanged; all runners exited.
+These are complete-original-buffer VA replays, not actual Chromium callbacks or
+browser playback. Next freeze actual stock Chromium playback/seek/export/exit
+experiment using same driver+companion in private Snap-visible staging. Installed
+VA/global launcher unchanged; no operator action. Narrow8bit/profile0/singlelayer/
+one tilegroup/no grain;10bit hardware unqualified. Baseline user-deferred stays
+incomplete. Older paired/reference/visibility failures retained unchanged.
+
+AV1 COMPLETE ORIGINAL-BUFFER HOST ADAPTER PASS (2026-10-02):
+Exact installed Chromium152.0.7977.64/commit506c834ecceaa943c5f41e6cfe7f68acb5c45346
+already submits entire original DecoderBuffer through ordinary VA slice data.
+New producers/av1-cbs-complete-buffer.h host prototype parses complete original
+packets with independent CBS reader, retains original sequence/reference state,
+normalizes each coded generation through validated copy-on-write writer, caches
+bounded64frames/64MiB input, and preserves original tile offsets/bytes. Explicit
+peek/commit keeps invalid caller metadata from consuming generations; replacing
+unconsumed packets, extra commit and empty input rejected. Actual FFmpeg VA
+callback harness proves ALL591coded normalized bytes/maps identical to prior
+frozen captures across4corpus, including147multi-frame original packets. Host
+artifact av1-complete-buffer-host.xyzrk6d0 Werror build PASS (upstream-only
+sign-compare diagnostic scoped out); initial compiler failure kept. No decoder
+opens for this adapter, no Chromium callback or hardware proof claimed.
+Driver standard omitted-display sentinel validation now229Rust/strictClippy PASS;
+actual591coded/281hidden host assembly with both display styles PASS, foreign
+display surfaces rejected. Existing actual hardware results remain tied to old
+d03ca7af driver. New full-buffer helper is HOST PROTOTYPE ONLY, not driver-wired,
+not deployed. Next connect bounded original-buffer normalization at RawDecoder
+with correct full-buffer/frame selection and original ownership, freeze paired
+stock-Chromium-input tests, then browser playback/lifecycle qualification. Actual
+seek u_ul2cxx139coded/120display PASS exact pixels/clean kernel/teardown/current
+boot identities. No reliable completion ETA; no operator action currently.
+Baseline user-deferred/incomplete, all failure evidence retained.
+
+AV1 SEEK PASS / STOCK CHROMIUM CONTRACT INSPECTION (2026-10-02):
+Fresh av1-paired-seek.e56c1f3a.u_ul2cxx input seek6s into original GOP PASS
+139actual coded completions/120display exact NV12, EOS/cleanexit/no linger/full
+clean kernel window/safeidle/3actualbuilds unchanged. Baseline still deferred.
+Frozen runner enforces same input seek in software/VA and bounded seconds,
+9focused tests PASS. General churn, active-playback sleep/removal still pending.
+Exact installed Chromium152.0.7977.64 source fetched from official repository,
+commit506c834ecceaa943c5f41e6cfe7f68acb5c45346, artifact
+chromium-av1-installed-source.zw5qqreq. Actual AV1 SubmitDecode sends WHOLE
+original DecoderBuffer in standard VASliceDataBufferType and offsets tiles into
+it. Thus stock Chromium already preserves original headers; it still needs a
+validated per-coded-frame full-buffer normalization path (multi-frame packets,
+original hidden references), not assumption that FFmpeg CBS transport is present.
+It also uses current_display_picture=VA_INVALID_SURFACE without film grain.
+Driver now accepts that standard omission while requiring current_frame actual
+BeginPicture target and rejecting foreign display surfaces. Host actual corpus
+sentinel/map validation pending; no new hardware candidate frozen/installed yet.
+Existing paired results remain bound to d03ca7af driver. All failures retained.
+
+AV1 ACTUAL PAIRED VA DIVERSITY PASS (2026-10-02):
+Original300 av1-paired-diverse.e56c1f3a.0.l2c8jopz, rav1e96 .2.ym_m9e7z,
+SVT96 .3.rb1z3wt_ ALL PASS492coded/display ordered byteexact NV12 via actual
+patched FFmpeg VA callbacks and opt-in driver. Exit0/no linger/complete clean
+kernel windows/safe final idle/current3loaded identities unchanged; all runners
+exited. Summary av1-paired-va-diversity-summary.json. First aom packet remains
+FAIL wrong planar software reference; independent NV12 offline audit matches all
+96 VA frames, not relabeled gate. Strict runner now freezes explicit NV12
+reference/generation witness;8focused tests PASS. Driver frozen SHA d03ca7af5d4769505b503c189133595e7cb2fb3646e791c583f68fafe6f87c01,
+producer92a763a2a3c757f074a29a0cb5107a62331844eeba10e0f0094e9add4a5ee477.
+229Rust/strictClippy/release and actual captured591frame driver ownership tests
+PASS. Scope narrow8bit profile0/single-layer/fullFRAME/one tilegroup/no grain.
+Installed/default AV1 still gated; lifecycle/churn/seeks/Chromium producer and
+browser parity/playback proof next. Baseline stays user-deferred/incomplete,
+all failed evidence retained; no privileged install/module/boot edits.
+
+AV1 PAIRED VA FIRST RUN / FORMAT AUDIT (2026-10-02):
+Opt-in producer/driver transport and live surface validation implemented. Frozen
+229Rust/strictClippy/release PASS; actual FFmpeg VA callback captures591coded/
+281hidden exercise actual RawDecoder with exact bytes/maps/refresh, invalid
+header/tile/ref/current ownership rejected before state commit. Packet
+av1-paired-va.e56c1f3a.5cg85jt6 driver d03ca7af5d4769505b503c189133595e7cb2fb3646e791c583f68fafe6f87c01.
+Actual first VA run99coded/96display, exit0/no lingering children, complete clean
+kernel observer, final safe idle and actual3builds unchanged. Frozen result FAIL
+pixel parity because prepared software reference was planar420 while VA NV12.
+Failure retained unchanged. Independent software NV12 audit of same original
+input matches ALL96 returned VA frames exactly/order; evidence/software-format-audit.json.
+This is offline audit, not relabeling failed frozen gate. Runner now requires
+explicit frozen NV12 reference and actual rawvideo NV12 generation log; focused
+8 tests PASS. Fresh original300/rav1e/SVT paired VA packets preparing, no unchanged
+failed packet rerun. Installed AV1 remains gated; lifecycle/Chromium unqualified.
+Baseline explicitly user-deferred/incomplete; all historical failures preserved.
+
+AV1 AUTHORITATIVE OWNERSHIP PREFIX HOST PASS (2026-10-02):
+Bounded Rust OBU/sequence/frame-prefix parser reads real refresh mask, order
+hint, primary reference and error resilience from normalized producer bytes.
+Independent actual CBS oracle matches ALL690coded frames across5corpus, including
+10bit, dimensions/depth correct and parsed prefix ends before every tile payload.
+Evidence av1-prefix-parser-host.iv4mq9ru; rustc-Dwarnings/2malformed+random-input
+host tests and13existing focused tests PASS. Narrow profile0 single-layer,
+non-timed/no frame-id/no monochrome/RGB/no film-grain scope rejects other syntax.
+This parses ownership prefix ONLY, not remaining frame/tile syntax. It is not
+wired into driver yet: next consume full buffer with tile-bound checks and exact
+VA map/current-surface ownership; commit refresh from actual parsed mask, then
+freeze paired candidate before VA hardware. No hardware/installed/profile
+changes/operator step; baseline stays deferred/incomplete. All failures retained.
+
+AV1 ACTUAL VA PRODUCER TRANSPORT HOST PASS (2026-10-02):
+Isolated actual FFmpeg VA callbacks now use opt-in CBS normalized full-OBU
+standard slice-data transport; tile offsets adjusted, original parser state
+unchanged, no reserved VA fields. Complete FRAME/one tile group only; partial,
+duplicate, changed/out-of-bounds tiles refused. Full FFmpeg build/actual callback
+Werror/7 offline actual-function capture cases PASS, patch applies cleanly to
+user untouched FFmpeg. Artifact av1-va-producer-build.bt5re3wc, repo patch
+producers/ffmpeg-av1-cbs-va-transport.patch. Same transport helper five software
+samples including10bit PASS690coded/684display exact tiles/pixels/order at
+av1-va-transport-host.u7t3a42x;13 focused tests PASS. First global-Werror configure
+math detection failure and first NDEBUG host-assert build failure preserved;
+corrected callback tests use always-active av_assert0. No hardware/device opens,
+installed changes or operator step. Driver full-header parsing/ref ownership and
+actual VA diversity/lifecycle/Chromium still pending; installed AV1 disabled.
+Baseline remains explicitly deferred/incomplete; native old failures preserved.
+
 AV1 PRODUCER COPY-ON-WRITE HEADER OWNERSHIP HOST PASS (2026-10-02):
 New reusable CBS helper clones parsed content through standard CBS writable-unit
 API, retaining tile buffer and writer-held sequence lifetimes. Original parsed
