@@ -20,6 +20,8 @@ short and update it whenever a task starts, finishes, or gets blocked.
   before marking it done.
 
 ## Active task
+Root Chrome import host candidate frozen/tested in isolated checkout; candidate69fab07e UNINSTALLED/HARDWARE UNQUALIFIED. Required matrix/churn and playback remain user-deferred. Main/concurrent sources preserved; no decoder/BPF/lease/privilege/install/publication/message operations.
+
 AV1 PRODUCER COPY-ON-WRITE HEADER OWNERSHIP HOST PASS (2026-10-02):
 New reusable CBS helper clones parsed content through standard CBS writable-unit
 API, retaining tile buffer and writer-held sequence lifetimes. Original parsed
@@ -565,6 +567,18 @@ physical-memory claims. Preserve all user changes/failures. All runners exited,
 refcnt0; stay quiet while operator pending unless meaningful new progress.
 
 ## Completed recently
+
+- Root Chrome PRIME import HOST PHASE prepared (2026-10-03), isolated ca519631
+  candidate69fab07e. Final cargo test --locked --offline --all-features --lib:
+  277 PASS/4 ignored; tools/verify-host-stress.sh:4 stress +281 parallel PASS/
+  4 ignored; fmt/diff/strictClippy/system-av1 release PASS. Frozen215 source/
+  243 sealed files and independent patch/source/binary audit PASS in
+  /home/mq/.cache/libva-v4l2-qualification/resume-20261002/chrome-prime-import-host-candidate.nolmssmh
+  First test/independent-review failures retained. Tiled/distinct-object PRIME2
+  unsupported; exact Chrome descriptor and separate decode error unresolved.
+  Required hardware matrix/churn NOT RUN under explicit human playback deferral;
+  implementation remains UNQUALIFIED, installedb811 failure unchanged. Concurrent
+  main V4L2/context/import changes preserved; no root edits to main Rust source.
 SCOPED INSTALLED PRODUCTION QUALIFICATION COMPLETE (2026-10-02).
 Boot ec980588-64dd-447d-a29a-00e44e786ae8 automatically loaded persistent
 candidate build231cb9f3a0141c3ddfa7b8df87df0889eff2f5f2, module SHAa604eda3...230aa,

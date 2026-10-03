@@ -3,6 +3,7 @@
 //! A client may export before BeginPicture. Its allocation must remain stable
 //! when decoding starts, contexts overlap, or a CAPTURE queue is rebuilt.
 
+use crate::surface_import::ImportLayout;
 use std::ffi::{c_int, c_ulong, c_void};
 use std::fs::OpenOptions;
 use std::io;
@@ -323,6 +324,7 @@ pub(crate) struct SurfaceBacking {
     sync: Sync,
     wait: Wait,
     poisoned: bool,
+    imported: Option<ImportLayout>,
 }
 
 // The mapping belongs to this allocation and is accessed only through &mut
@@ -362,7 +364,38 @@ impl SurfaceBacking {
         Self::from_fd(fd, layout, wait_writable, sync_dmabuf)
     }
 
+    pub(crate) fn import(fd: OwnedFd, layout: ImportLayout) -> io::Result<Self> {
+        Self::map_fd(
+            fd,
+            layout.capture(),
+            wait_writable,
+            sync_dmabuf,
+            Some(layout),
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn import_for_test(fd: OwnedFd, layout: ImportLayout) -> io::Result<Self> {
+        Self::map_fd(
+            fd,
+            layout.capture(),
+            |_| Ok(()),
+            |_, _| Ok(()),
+            Some(layout),
+        )
+    }
+
     fn from_fd(fd: OwnedFd, layout: CaptureExport, wait: Wait, sync: Sync) -> io::Result<Self> {
+        Self::map_fd(fd, layout, wait, sync, None)
+    }
+
+    fn map_fd(
+        fd: OwnedFd,
+        layout: CaptureExport,
+        wait: Wait,
+        sync: Sync,
+        imported: Option<ImportLayout>,
+    ) -> io::Result<Self> {
         // MAP_SHARED, PROT_READ | PROT_WRITE: the exported fd observes writes.
         let addr = unsafe {
             mmap(
@@ -384,10 +417,14 @@ impl SurfaceBacking {
             sync,
             wait,
             poisoned: false,
+            imported,
         };
-        let access = CpuWrite::begin(backing.fd.as_raw_fd(), backing.wait, backing.sync)?;
-        backing.bytes_mut().fill(0);
-        access.finish()?;
+        // Imported buffers belong to the caller: creation must not clear them.
+        if imported.is_none() {
+            let access = CpuWrite::begin(backing.fd.as_raw_fd(), backing.wait, backing.sync)?;
+            backing.bytes_mut().fill(0);
+            access.finish()?;
+        }
         Ok(backing)
     }
 
@@ -423,6 +460,11 @@ impl SurfaceBacking {
             return Err(io::ErrorKind::InvalidData.into());
         }
         let access = CpuWrite::begin(self.fd.as_raw_fd(), self.wait, self.sync)?;
+        if let Some(imported) = self.imported {
+            // Preserve prefix, row padding, inter-plane gaps and tail bytes.
+            imported.copy_frame(frame, self.bytes_mut());
+            return access.finish();
+        }
         let dest = self.bytes_mut();
         dest.fill(0);
         let copied = copy_semiplanar_region(
@@ -455,7 +497,22 @@ impl SurfaceBacking {
         let fd = self.fd.try_clone()?;
         let mut capture = self.layout;
         capture.fd = fd.into_raw_fd();
-        Ok(DrmPrimeDescriptor::from_capture(capture, layout))
+        let mut descriptor = DrmPrimeDescriptor::from_capture(capture, layout);
+        if let Some(imported) = self.imported {
+            match layout {
+                DrmPrimeLayout::Composed => {
+                    descriptor.layers[0].offset[..2].copy_from_slice(&imported.offsets);
+                    descriptor.layers[0].pitch[..2].copy_from_slice(&imported.pitches);
+                }
+                DrmPrimeLayout::Separate => {
+                    for (i, layer) in descriptor.layers[..2].iter_mut().enumerate() {
+                        layer.offset[0] = imported.offsets[i];
+                        layer.pitch[0] = imported.pitches[i];
+                    }
+                }
+            }
+        }
+        Ok(descriptor)
     }
 
     #[cfg(test)]

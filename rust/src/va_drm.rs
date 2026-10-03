@@ -14,10 +14,12 @@ use crate::bindings::{
 use crate::pixel_format::DecodedFormat;
 use crate::v4l2::CaptureExport;
 
+pub(crate) const VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME: u32 = 0x2000_0000;
+
 pub(crate) const VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2: u32 = 0x4000_0000;
 
 pub(crate) fn exported_surface_memory_types(internal_va: u32) -> u32 {
-    internal_va | VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2
+    internal_va | VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME | VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2
 }
 
 const DRM_FORMAT_NV12: u32 = fourcc(b'N', b'V', b'1', b'2');
