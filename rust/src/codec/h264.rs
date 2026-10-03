@@ -72,6 +72,7 @@ impl H264Decoder {
         );
         self.slices.clear();
         Ok(EncodedFrame {
+            vp9_show_existing: None,
             bytes: frame.bytes,
             headers: self.synth.header_bytes(),
             keyframe,

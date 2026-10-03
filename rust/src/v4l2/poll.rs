@@ -47,6 +47,17 @@ fn drc_resume_mode(cap_streaming: bool) -> DrcResumeMode {
 }
 
 impl V4l2Session {
+    pub(super) fn poll_events(&self) -> i16 {
+        let mut events = super::POLLIN | super::POLLRDNORM | super::POLLPRI;
+        // With a single chosen target, only a CAPTURE completion can finish
+        // the picture once OUTPUT has returned. Polling writable OUTPUT then
+        // wakes immediately and spins a CPU while the hardware is decoding.
+        if !self.direct_capture_mode() || self.out_queued() != 0 {
+            events |= super::POLLOUT | super::POLLWRNORM;
+        }
+        events
+    }
+
     pub(crate) fn pump(&mut self, timeout_ms: i32) -> Vec<ReadyCapture> {
         let mut ready = std::mem::take(&mut self.ready);
         // A CPU-copy client can block in sync/download while its submitter
@@ -64,11 +75,7 @@ impl V4l2Session {
         }
         let mut pfd = PollFd {
             fd: self.fd,
-            events: super::POLLIN
-                | super::POLLRDNORM
-                | super::POLLPRI
-                | super::POLLOUT
-                | super::POLLWRNORM,
+            events: self.poll_events(),
             revents: 0,
         };
         let ret = unsafe { poll(&mut pfd, 1, timeout_ms) };
@@ -130,6 +137,7 @@ impl V4l2Session {
                 ready.push(ReadyCapture {
                     surface: pending.surface,
                     failed: true,
+                    direct: false,
                     cap_idx: None,
                     frame: None,
                 });
@@ -138,6 +146,7 @@ impl V4l2Session {
                 ready.push(ReadyCapture {
                     surface,
                     failed: true,
+                    direct: false,
                     cap_idx: None,
                     frame: None,
                 });
@@ -179,6 +188,7 @@ impl V4l2Session {
             ready.push(ReadyCapture {
                 surface,
                 failed: true,
+                direct: false,
                 cap_idx: None,
                 frame: None,
             });
@@ -194,6 +204,11 @@ impl V4l2Session {
     }
 
     pub(crate) fn requeue_capture(&mut self, idx: usize) {
+        if self.direct_capture_mode() {
+            // Old surfaces can still name slot zero after another picture
+            // has rebound it. Only bind_decode_target may replenish it.
+            return;
+        }
         // Legacy-pool slots have no kernel queue to return to; they are
         // read-only remnants of a previous device incarnation.
         if idx < self.legacy_len() {
@@ -277,6 +292,61 @@ impl V4l2Session {
         Some((b, pix.width, pix.height, pix.plane_fmt[0].bytesperline))
     }
 
+    pub(crate) fn recycle_snapshot(&mut self, frame: crate::state::SurfaceFrame) {
+        // Hidden-frame aliases and late readers must retain immutable bytes.
+        // Never mutate an allocation still shared by another surface.
+        const MAX_CACHED_BYTES: usize = 64 * 1024 * 1024;
+        if let Ok(bytes) = std::sync::Arc::try_unwrap(frame.data)
+            && bytes.capacity() <= MAX_CACHED_BYTES
+        {
+            self.recycled_snapshot = Some(bytes);
+        }
+    }
+
+    pub(crate) fn capture_is_publishing(&self, idx: usize) -> bool {
+        self.resolve_cap(idx)
+            .is_some_and(|(buffer, _, _, _)| buffer.state == BufferState::Publishing)
+    }
+
+    pub(crate) fn publish_capture_into(
+        &mut self,
+        idx: usize,
+        backing: &mut crate::surface_backing::SurfaceBacking,
+    ) -> Result<(), ()> {
+        if !self.capture_is_publishing(idx) {
+            return Err(());
+        }
+        if idx >= self.legacy_len() {
+            self.map_buffer(false, idx - self.legacy_len())?;
+        }
+        let (b, width, height, stride) = self.resolve_cap(idx).ok_or(())?;
+        let format =
+            crate::pixel_format::DecodedFormat::from_v4l2_fourcc(self.capture_fourcc).ok_or(())?;
+        let required = semiplanar_storage_size(width, height, stride, format).ok_or(())?;
+        if b.addr[0].is_null() || required > b.len[0] {
+            return Err(());
+        }
+        let read = super::dmabuf::CpuReadAccess::begin(b.cpu_sync_fd())?;
+        let data = unsafe { std::slice::from_raw_parts(b.addr[0] as *const u8, b.len[0]) };
+        let result = backing
+            .copy_decoded(data, stride, height, format)
+            .map_err(|_| ());
+        read.finish()?;
+        result
+    }
+
+    pub(crate) fn finish_capture_publication(&mut self, idx: usize) {
+        let base = self.legacy_len();
+        if idx < base {
+            return; // A legacy pool has no firmware queue left to replenish.
+        }
+        if let Some(buffer) = self.cap.buffers.get_mut(idx - base)
+            && buffer.state == BufferState::Publishing
+        {
+            buffer.state = BufferState::Free;
+        }
+    }
+
     pub(crate) fn capture_copy(&mut self, idx: usize) -> Option<(Vec<u8>, u32, u32)> {
         // Legacy pools retain mappings established before their slots moved.
         // Live slots need no CPU mapping until a completed frame is read.
@@ -284,6 +354,7 @@ impl V4l2Session {
         if idx >= legacy_len {
             self.map_buffer(false, idx - legacy_len).ok()?;
         }
+        let mut bytes = self.recycled_snapshot.take().unwrap_or_default();
         let (b, width, height, stride) = self.resolve_cap(idx)?;
         let format = crate::pixel_format::DecodedFormat::from_v4l2_fourcc(self.capture_fourcc)?;
         let required = semiplanar_storage_size(width, height, stride, format)?;
@@ -294,8 +365,10 @@ impl V4l2Session {
             b.import_fd.as_ref().map(std::os::fd::AsRawFd::as_raw_fd),
         )
         .ok()?;
-        let bytes =
-            unsafe { std::slice::from_raw_parts(b.addr[0] as *const u8, b.len[0]) }.to_vec();
+        bytes.clear();
+        bytes.extend_from_slice(unsafe {
+            std::slice::from_raw_parts(b.addr[0] as *const u8, b.len[0])
+        });
         read.finish().ok()?;
         Some((bytes, stride, height))
     }
@@ -683,6 +756,13 @@ impl V4l2Session {
             .iter()
             .position(|pending| pending.timestamp == ts_usec)
         else {
+            if self.direct_capture_mode() {
+                // A foreign completion cannot be published or used to advance
+                // the chosen allocation. Replay drops apply only to the
+                // compatibility working pool.
+                self.abandoned = true;
+                return None;
+            }
             if debug_enabled() {
                 eprintln!(
                     "msm_drv_video_rs: CAP timestamp {} has no pending surface; dropping replay output",
@@ -734,31 +814,71 @@ impl V4l2Session {
         // state layer.
         let format = crate::pixel_format::DecodedFormat::from_v4l2_fourcc(self.capture_fourcc)
             .unwrap_or(crate::pixel_format::DecodedFormat::Nv12);
-        let frame =
+        let zero_copy = self
+            .direct_target
+            .as_ref()
+            .is_some_and(|(owner, _)| *owner == surface);
+        if self.direct_capture_mode() && (!zero_copy || idx != 0) {
+            self.abandoned = true;
+            return None;
+        }
+        let direct_copy = !zero_copy
+            && pending.direct_copy
+            && !self.stable_capture
+            && self.no_output_waiting.iter().all(|&owner| owner == surface);
+        if direct_copy && debug_enabled() {
+            eprintln!("msm_drv_video_rs: deferring snapshot surface={surface} cap_idx={cap_idx}");
+        }
+        let frame = if zero_copy {
+            self.cap.buffers[idx].state = BufferState::DirectComplete;
+            if debug_enabled() {
+                eprintln!(
+                    "msm_drv_video_rs: direct DMA-BUF completed surface={surface} cap_idx={cap_idx} copy_bytes=0"
+                );
+            }
+            None
+        } else if direct_copy {
+            // Keep the working allocation out of subsequent queue top-ups
+            // until apply_ready_captures copies it into the surface's backing.
+            self.cap.buffers[idx].state = BufferState::Publishing;
+            None
+        } else {
             self.capture_copy(cap_idx)
                 .map(|(data, stride, height)| crate::state::SurfaceFrame {
                     data: std::sync::Arc::new(data),
                     stride,
                     height,
                     format,
-                });
-        if frame.is_none() {
+                })
+        };
+        if frame.is_none() && !direct_copy && !zero_copy {
             self.abandoned = true;
             return None;
         }
         let ready = ReadyCapture {
             surface,
             failed: false,
+            direct: zero_copy,
             cap_idx: Some(cap_idx),
             frame,
         };
         for hidden_surface in self.no_output_waiting.drain(..) {
+            // A synthetic VP9 show_existing submission completes the same
+            // owner as its hidden input. Publish it once, including one copy
+            // into the client's backing allocation.
+            if hidden_surface == surface {
+                continue;
+            }
             self.ready.push(ReadyCapture {
                 surface: hidden_surface,
                 failed: false,
+                direct: false,
                 cap_idx: ready.cap_idx,
                 frame: ready.frame.clone(),
             });
+        }
+        if zero_copy && self.advance_direct_target().is_err() {
+            self.abandoned = true;
         }
         Some(ready)
     }
@@ -816,6 +936,7 @@ mod tests {
             surface: 9,
             timestamp: 7,
             expects_output: true,
+            direct_copy: false,
         });
         session.no_output_waiting.push(10);
         session
@@ -930,6 +1051,7 @@ mod tests {
             surface: 9,
             timestamp: 7,
             expects_output: true,
+            direct_copy: false,
         });
         session.no_output_waiting.push(10);
         let mut ready = Vec::new();
@@ -1005,9 +1127,13 @@ mod tests {
             capture_fourcc: crate::pixel_format::DecodedFormat::Nv12.v4l2_fourcc(),
             out: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE as u32),
             cap: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE as u32),
+            direct_target: None,
+            direct_targets: VecDeque::new(),
+            decode_order: false,
             legacy: Vec::new(),
             fifo: Vec::new(),
             ready: Vec::new(),
+            recycled_snapshot: None,
             no_output_waiting: Vec::new(),
             eos: false,
             draining: false,

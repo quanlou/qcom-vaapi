@@ -192,6 +192,7 @@ mod tests {
             surface: 299,
             timestamp: 299,
             expects_output: true,
+            direct_copy: false,
         };
         assert!(!rebuild_is_complete(
             &history,
@@ -204,6 +205,7 @@ mod tests {
                 surface: chunk.surface.unwrap(),
                 timestamp: chunk.timestamp,
                 expects_output: chunk.expects_output,
+                direct_copy: false,
             })
             .collect();
         let queued: Vec<_> = history.iter().map(|chunk| chunk.data.clone()).collect();
@@ -216,6 +218,7 @@ mod tests {
                 surface: 999,
                 timestamp: 999,
                 expects_output: true,
+                direct_copy: false,
             },
         );
         assert!(!rebuild_is_complete(&history, &owners, &queued));
@@ -301,11 +304,13 @@ mod tests {
                 surface: 0,
                 timestamp: 0,
                 expects_output: true,
+                direct_copy: false,
             },
             PendingFrame {
                 surface: 1,
                 timestamp: 1,
                 expects_output: true,
+                direct_copy: false,
             },
         ];
         let mut data = vec![vec![0], vec![1]];
@@ -327,6 +332,7 @@ mod tests {
             surface: 0,
             timestamp: 0,
             expects_output: true,
+            direct_copy: false,
         }];
         assert!(!rebuild_is_complete(&history, &pending, &[vec![0]]));
     }
@@ -338,6 +344,7 @@ mod tests {
             surface: 1,
             timestamp: 1,
             expects_output: true,
+            direct_copy: false,
         }];
         assert!(!rebuild_is_complete(&history, &pending, &[vec![1]]));
     }

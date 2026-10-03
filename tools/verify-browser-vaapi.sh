@@ -104,6 +104,7 @@ html="$run_dir/video.html"
 cat > "$html" <<HTML
 <!doctype html>
 <meta charset="utf-8">
+<style>html,body{margin:0;background:#111}video{display:block;max-width:100vw;max-height:100vh;margin:auto}</style>
 <video id="v" src="/sample.mp4" autoplay muted loop playsinline controls></video>
 <script>
 const v = document.getElementById('v');
@@ -207,7 +208,7 @@ JS
             V4L2_VA_DEBUG=1 \
             MOZ_ENABLE_WAYLAND=1 \
             MOZ_DISABLE_RDD_SANDBOX=1 \
-            MOZ_LOG="PlatformDecoderModule:5,DMABUF:5,FFmpegVideo:5" \
+            MOZ_LOG="PlatformDecoderModule:5,Dmabuf:5,FFmpegVideo:5" \
             "$browser_bin" --no-remote --profile "$profile" "$url" \
             > "$log" 2>&1 &
         monitor_pid=$!

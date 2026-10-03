@@ -1,4 +1,5 @@
-//! CAPTURE queue mode selection.
+//! CAPTURE queue mode selection. Direct mode queues only its chosen target;
+//! the working/reservation pools below serve the compatibility copy path.
 //!
 //! CPU-copy clients match completed working buffers to surfaces by timestamp.
 //! Both modes keep an unqueued spare pool for a first post-decode export. Pre-decode
@@ -6,7 +7,8 @@
 //! slot before submission, so an exported dma-buf keeps backing the same
 //! surface. This module owns that split.
 //!
-//! Stable-capture slots are a reservation pool, not decoder targets. This
+//! Stable-capture slots are a reservation pool, not decoder targets. With
+//! multiple buffers available, this
 //! firmware chooses its own CAPTURE buffer for every decoded frame, so a
 //! queued reservation receives someone else's frame. Export identity therefore
 //! requires that reserved slots never be queued: the firmware decodes into
@@ -208,7 +210,20 @@ impl V4l2Session {
     /// pool one surface at a time and interleaves exports with decode; if
     /// every Free slot were queued after the first submit, later exports
     /// would have nothing left to reserve.
+    /// Direct mode instead queues only slot zero and keeps completed targets
+    /// out of the queue until the next surface allocation is bound.
     pub(super) fn queue_working_capture(&mut self) -> Result<(), ()> {
+        if self.direct_target.is_some() {
+            if self
+                .cap
+                .buffers
+                .first()
+                .is_some_and(|b| b.state == BufferState::Free)
+            {
+                self.qbuf_capture(0)?;
+            }
+            return Ok(());
+        }
         let mut queued = self
             .cap
             .buffers
@@ -320,9 +335,13 @@ mod tests {
             capture_fourcc: crate::pixel_format::DecodedFormat::Nv12.v4l2_fourcc(),
             out: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE as u32),
             cap: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE as u32),
+            direct_target: None,
+            direct_targets: VecDeque::new(),
+            decode_order: false,
             legacy: Vec::new(),
             fifo: Vec::new(),
             ready: Vec::new(),
+            recycled_snapshot: None,
             no_output_waiting: Vec::new(),
             eos: false,
             draining: false,

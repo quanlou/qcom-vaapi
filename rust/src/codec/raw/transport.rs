@@ -163,6 +163,7 @@ impl Transport {
         self.headers = headers.clone();
         refs.refresh(pp, frame.refresh);
         Ok(EncodedFrame {
+            vp9_show_existing: None,
             bytes: prepared.map_or(original, |p| p.data),
             headers,
             keyframe: key,

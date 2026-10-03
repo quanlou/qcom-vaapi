@@ -7,6 +7,7 @@ use std::ptr;
 mod abi;
 mod capture;
 mod debug;
+mod direct;
 mod dmabuf;
 mod import;
 mod poll;
@@ -59,10 +60,12 @@ pub(crate) struct ReadyCapture {
     /// STOP completed without pixels for this owner (for example discarded
     /// seek preroll). Report a picture error, never successful publication.
     pub(crate) failed: bool,
+    /// Completion already resides in the owning surface allocation.
+    pub(crate) direct: bool,
     pub(crate) cap_idx: Option<usize>,
-    /// Pixels copied at dequeue time. CAPTURE slots are recycled as soon as
-    /// they are requeued, so late surface reads must use this snapshot rather
-    /// than the slot's live mapping.
+    /// Detached pixels for CPU clients. A standalone display backing instead
+    /// retains a Publishing slot until publication and omits this snapshot.
+    /// Late reads always use the snapshot or the surface-owned backing.
     pub(crate) frame: Option<crate::state::SurfaceFrame>,
 }
 
@@ -71,6 +74,8 @@ struct PendingFrame {
     surface: u32,
     timestamp: u64,
     expects_output: bool,
+    /// Populate an existing standalone surface backing before recycling CAPTURE.
+    direct_copy: bool,
 }
 
 #[derive(Clone)]
@@ -120,10 +125,16 @@ pub(crate) struct V4l2Session {
     capture_fourcc: u32,
     out: V4l2Queue,
     cap: V4l2Queue,
+    direct_target: Option<(u32, crate::surface_backing::DecodeTarget)>,
+    direct_targets: VecDeque<(u32, crate::surface_backing::DecodeTarget)>,
+    decode_order: bool,
     /// CAPTURE pools from before session rebuilds, in pool order.
     legacy: Vec<LegacyPool>,
     fifo: Vec<PendingFrame>,
     ready: Vec<ReadyCapture>,
+    /// Reuse an exclusively owned snapshot when its VA surface is reused.
+    /// One cached allocation bounds idle memory without changing late reads.
+    recycled_snapshot: Option<Vec<u8>>,
     no_output_waiting: Vec<u32>,
     eos: bool,
     draining: bool,
@@ -205,9 +216,13 @@ impl V4l2Session {
             capture_fourcc,
             out: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE as u32),
             cap: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE as u32),
+            direct_target: None,
+            direct_targets: VecDeque::new(),
+            decode_order: false,
             legacy: Vec::new(),
             fifo: Vec::new(),
             ready: Vec::new(),
+            recycled_snapshot: None,
             no_output_waiting: Vec::new(),
             eos: false,
             draining: false,
@@ -258,6 +273,46 @@ impl V4l2Session {
             buffer.state = BufferState::Queued;
             session.out.buffers.push(buffer);
         }
+        session
+    }
+
+    #[cfg(test)]
+    pub(crate) fn publishing_test_session(
+        data: &[u8],
+        stride: u32,
+        height: u32,
+        format: crate::pixel_format::DecodedFormat,
+    ) -> Self {
+        let path = CString::new("/dev/null").unwrap();
+        let fd = unsafe { open(path.as_ptr(), O_RDWR, 0) };
+        assert!(fd >= 0);
+        let mut session = Self::pending_sync_test_session(fd, false);
+        session.fifo.clear();
+        session.capture_fourcc = format.v4l2_fourcc();
+        let mut pix: v4l2_pix_format_mplane = zeroed();
+        pix.width = stride / format.bytes_per_sample();
+        pix.height = height;
+        pix.num_planes = 1;
+        pix.plane_fmt[0].bytesperline = stride;
+        session.cap.fmt.fmt.pix_mp = pix;
+        let addr = unsafe {
+            mmap(
+                ptr::null_mut(),
+                data.len(),
+                PROT_READ | PROT_WRITE,
+                0x22,
+                -1,
+                0,
+            )
+        };
+        assert_ne!(addr as isize, -1);
+        unsafe { ptr::copy_nonoverlapping(data.as_ptr(), addr.cast(), data.len()) };
+        let mut buffer = V4l2Buffer::new();
+        buffer.addr[0] = addr;
+        buffer.len[0] = data.len();
+        buffer.num_planes = 1;
+        buffer.state = BufferState::Publishing;
+        session.cap.buffers.push(buffer);
         session
     }
 
@@ -523,9 +578,13 @@ mod tests {
             capture_fourcc: crate::pixel_format::DecodedFormat::Nv12.v4l2_fourcc(),
             out: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE as u32),
             cap: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE as u32),
+            direct_target: None,
+            direct_targets: VecDeque::new(),
+            decode_order: false,
             legacy: Vec::new(),
             fifo: Vec::new(),
             ready: Vec::new(),
+            recycled_snapshot: None,
             no_output_waiting: Vec::new(),
             eos: false,
             draining: false,
@@ -835,6 +894,39 @@ mod tests {
         let before = UNMAPPED_PLANES.with(std::cell::Cell::get);
         drop(session);
         assert_eq!(UNMAPPED_PLANES.with(std::cell::Cell::get) - before, 1);
+    }
+
+    #[test]
+    fn snapshot_reuse_preserves_shared_pixels_and_reuses_exclusive_allocation() {
+        use crate::pixel_format::DecodedFormat;
+        use crate::state::SurfaceFrame;
+        use std::os::unix::fs::FileExt;
+        use std::sync::Arc;
+        let _mock = use_queue_mock();
+        let (mut session, reader) = metadata_only_session();
+        reader.write_all_at(&[0xa2; 4096], 6 * 4096).unwrap();
+        let (snapshot, stride, height) = session.capture_copy(2).unwrap();
+        let address = snapshot.as_ptr();
+        let frame = SurfaceFrame {
+            data: Arc::new(snapshot),
+            stride,
+            height,
+            format: DecodedFormat::Nv12,
+        };
+        let retained = frame.clone();
+        session.recycle_snapshot(frame);
+        assert!(session.recycled_snapshot.is_none());
+        assert_eq!(retained.data.as_slice(), &[0xa2; 4096]);
+        session.recycle_snapshot(retained);
+        assert_eq!(
+            session.recycled_snapshot.as_ref().unwrap().as_ptr(),
+            address
+        );
+        reader.write_all_at(&[0xb3; 4096], 6 * 4096).unwrap();
+        let (replacement, _, _) = session.capture_copy(2).unwrap();
+        assert_eq!(replacement.as_ptr(), address);
+        assert_eq!(replacement, vec![0xb3; 4096]);
+        assert!(session.recycled_snapshot.is_none());
     }
 
     #[test]

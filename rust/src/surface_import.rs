@@ -80,19 +80,19 @@ impl ImportLayout {
 
     // The layout and complete source size/stride have been validated before
     // CPU access starts. Only visible bytes are overwritten in caller storage.
-    pub(crate) fn copy_frame(self, frame: &crate::state::SurfaceFrame, dest: &mut [u8]) {
+    pub(crate) fn copy_bytes(self, data: &[u8], stride: u32, height: u32, dest: &mut [u8]) {
         let sample = self.format.bytes_per_sample() as usize;
         let rows = [self.height as usize, self.height.div_ceil(2) as usize];
         let bytes = [
             self.width as usize * sample,
             self.width.div_ceil(2) as usize * 2 * sample,
         ];
-        let source = [0, frame.stride as usize * frame.height as usize];
+        let source = [0, stride as usize * height as usize];
         for i in 0..2 {
             for row in 0..rows[i] {
-                let src = source[i] + row * frame.stride as usize;
+                let src = source[i] + row * stride as usize;
                 let dst = self.offsets[i] as usize + row * self.pitches[i] as usize;
-                dest[dst..dst + bytes[i]].copy_from_slice(&frame.data[src..src + bytes[i]]);
+                dest[dst..dst + bytes[i]].copy_from_slice(&data[src..src + bytes[i]]);
             }
         }
     }
@@ -547,6 +547,7 @@ mod tests {
                         cap_idx: Some(0),
                         frame: Some(pixels),
                         failed: false,
+                        direct: false,
                     }],
                 );
                 let kind = if round % 2 == 0 {
@@ -800,6 +801,7 @@ mod tests {
                 cap_idx: Some(0),
                 frame: Some(frame(l.format)),
                 failed: false,
+                direct: false,
             }],
         );
         let s = g.surfaces[0].as_ref().unwrap();

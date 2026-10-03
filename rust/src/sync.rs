@@ -22,44 +22,74 @@ pub(crate) fn apply_ready_captures(
     owner: VAContextID,
     ready: Vec<ReadyCapture>,
 ) {
+    let DriverState {
+        surfaces, contexts, ..
+    } = guard;
+    let mut session = context_index(owner)
+        .and_then(|idx| contexts.get_mut(idx).and_then(Option::as_mut))
+        .and_then(|context| context.v4l2.as_mut());
     for r in ready {
+        // The working index can already hold the next chosen target. A direct
+        // completion owns stable surface storage, independent of that index.
+        let zero_copy = r.direct && r.frame.is_none();
+        let direct_copy = r.frame.is_none()
+            && r.cap_idx.is_some_and(|idx| {
+                session
+                    .as_ref()
+                    .is_some_and(|v| v.capture_is_publishing(idx))
+            });
         if let Some(idx) = surface_index(r.surface)
-            && let Some(s) = guard.surfaces[idx].as_mut()
+            && let Some(s) = surfaces[idx].as_mut()
             && s.owner == owner
         {
             if r.failed {
                 s.frame = None;
                 s.state = SurfaceState::Dead;
-                continue;
-            }
-            if std::env::var_os("V4L2_VA_DEBUG").is_some() {
-                eprintln!(
-                    "msm_drv_video_rs: publish surface={} cap_idx={:?} previous_state={:?} previous_cap={:?} export_fds={}",
-                    r.surface,
-                    r.cap_idx,
-                    s.state,
-                    s.cap_idx,
-                    s.export_fds.len()
-                );
-            }
-            if let Some(cap_idx) = r.cap_idx {
-                s.cap_idx = Some(cap_idx);
-                if let Some(backing) = s.backing.as_mut()
-                    && r.frame
-                        .as_ref()
-                        .is_none_or(|frame| backing.copy_frame(frame).is_err())
-                {
-                    s.frame = None;
-                    s.state = SurfaceState::Dead;
-                    continue;
+            } else {
+                if std::env::var_os("V4L2_VA_DEBUG").is_some() {
+                    eprintln!(
+                        "msm_drv_video_rs: publish surface={} cap_idx={:?} previous_state={:?} previous_cap={:?} export_fds={}",
+                        r.surface,
+                        r.cap_idx,
+                        s.state,
+                        s.cap_idx,
+                        s.export_fds.len()
+                    );
                 }
-                s.frame = r.frame;
+                if let Some(cap_idx) = r.cap_idx {
+                    s.cap_idx = Some(cap_idx);
+                    let copy_failed = match s.backing.as_mut() {
+                        Some(_) if zero_copy => false,
+                        Some(backing) if direct_copy => session
+                            .as_mut()
+                            .is_none_or(|v| v.publish_capture_into(cap_idx, backing).is_err()),
+                        Some(backing) => r
+                            .frame
+                            .as_ref()
+                            .is_none_or(|frame| backing.copy_frame(frame).is_err()),
+                        None => direct_copy || zero_copy,
+                    };
+                    if copy_failed {
+                        s.frame = None;
+                        s.state = SurfaceState::Dead;
+                    } else {
+                        s.frame = r.frame;
+                        s.state = SurfaceState::Ready;
+                    }
+                } else {
+                    s.state = SurfaceState::Ready;
+                }
+                // A PRIME export is a handle to the CAPTURE allocation, not a
+                // one-frame lease. Keep the bookkeeping live while the same VA
+                // surface is reused so importers can retain the fd across frames.
+                s.exported = !s.export_fds.is_empty();
             }
-            // A PRIME export is a handle to the CAPTURE allocation, not a
-            // one-frame lease. Keep the bookkeeping live while the same VA
-            // surface is reused so importers can retain the fd across frames.
-            s.exported = !s.export_fds.is_empty();
-            s.state = SurfaceState::Ready;
+        }
+        if direct_copy
+            && let Some(cap_idx) = r.cap_idx
+            && let Some(v) = session.as_mut()
+        {
+            v.finish_capture_publication(cap_idx);
         }
     }
 }
@@ -285,6 +315,96 @@ mod tests {
     }
 
     #[test]
+    fn direct_publication_pins_capture_and_late_images_read_surface_owned_pixels() {
+        use crate::pixel_format::DecodedFormat;
+        use crate::surface_backing::SurfaceBacking;
+        for format in [DecodedFormat::Nv12, DecodedFormat::P010] {
+            let driver = pending_sync_driver(false);
+            let stride = 128 * format.bytes_per_sample();
+            let storage_height = 80;
+            let pixels: Vec<u8> = (0..stride * storage_height * 3 / 2)
+                .map(|i| (i as u8).wrapping_add((i / stride) as u8))
+                .collect();
+            let mut guard = driver.lock.lock().unwrap();
+            guard.contexts[0].as_mut().unwrap().v4l2 =
+                Some(crate::v4l2::V4l2Session::publishing_test_session(
+                    &pixels,
+                    stride,
+                    storage_height,
+                    format,
+                ));
+            let surface = guard.surfaces[0].as_mut().unwrap();
+            surface.width = 128;
+            surface.format = format;
+            surface.backing = Some(SurfaceBacking::allocate_for_test(128, 64, format).unwrap());
+            let session = guard.contexts[0].as_mut().unwrap().v4l2.as_mut().unwrap();
+            assert!(session.capture_is_publishing(0));
+            session.requeue_capture(0);
+            assert!(session.capture_is_publishing(0));
+            apply_ready_captures(
+                &mut guard,
+                DRV_ID_BASE_CONTEXT,
+                vec![ReadyCapture {
+                    surface: DRV_ID_BASE_SURFACE,
+                    failed: false,
+                    direct: false,
+                    cap_idx: Some(0),
+                    frame: None,
+                }],
+            );
+            let surface = guard.surfaces[0].as_ref().unwrap();
+            assert_eq!(surface.state, SurfaceState::Ready);
+            assert!(
+                surface.frame.is_none(),
+                "display publication needs no CPU snapshot"
+            );
+            let snapshot = surface.backing.as_ref().unwrap().download().unwrap();
+            assert_eq!((snapshot.stride, snapshot.height), (stride, 64));
+            let y_size = stride as usize * 64;
+            let src_uv = stride as usize * storage_height as usize;
+            let uv_size = stride as usize * 32;
+            assert_eq!(&snapshot.data[..y_size], &pixels[..y_size]);
+            assert_eq!(
+                &snapshot.data[y_size..y_size + uv_size],
+                &pixels[src_uv..src_uv + uv_size]
+            );
+            let session = guard.contexts[0].as_mut().unwrap().v4l2.as_mut().unwrap();
+            assert!(!session.capture_is_publishing(0));
+            assert!(
+                session
+                    .publish_capture_into(
+                        0,
+                        &mut SurfaceBacking::allocate_for_test(128, 64, format).unwrap()
+                    )
+                    .is_err()
+            );
+            guard.contexts[0].as_mut().unwrap().v4l2 =
+                Some(crate::v4l2::V4l2Session::publishing_test_session(
+                    &vec![0xee; pixels.len()],
+                    stride,
+                    storage_height,
+                    format,
+                ));
+            drop(guard);
+            let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
+            ctx.pDriverData = (&*driver as *const DriverBox).cast_mut().cast();
+            let mut image: VAImage = unsafe { std::mem::zeroed() };
+            assert_eq!(
+                unsafe { crate::image::derive_image(&mut ctx, DRV_ID_BASE_SURFACE, &mut image) },
+                ok()
+            );
+            let guard = driver.lock.lock().unwrap();
+            let buf_idx = crate::state::buffer_index(image.buf).unwrap();
+            let data = &guard.buffers[buf_idx].as_ref().unwrap().data;
+            assert_eq!(&data[..y_size], &pixels[..y_size]);
+            assert_eq!(
+                &data[y_size..y_size + uv_size],
+                &pixels[src_uv..src_uv + uv_size]
+            );
+        }
+    }
+
+    #[test]
     fn sync_short_timeout_preserves_pending_decode_without_stop() {
         let driver = pending_sync_driver(false);
         let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
@@ -357,6 +477,7 @@ mod tests {
                 vec![ReadyCapture {
                     surface: DRV_ID_BASE_SURFACE,
                     failed,
+                    direct: false,
                     cap_idx: Some(3),
                     frame: None,
                 }],
@@ -373,6 +494,7 @@ mod tests {
             vec![ReadyCapture {
                 surface: DRV_ID_BASE_SURFACE,
                 failed: false,
+                direct: false,
                 cap_idx: Some(9),
                 frame: None,
             }],
@@ -415,6 +537,7 @@ mod tests {
                 vec![ReadyCapture {
                     surface: DRV_ID_BASE_SURFACE,
                     failed: false,
+                    direct: false,
                     cap_idx: Some(9),
                     frame: Some(crate::state::SurfaceFrame {
                         data: std::sync::Arc::new(vec![2; 64 * 64 * 3 / 2]),
@@ -461,6 +584,7 @@ mod tests {
             VA_INVALID_ID,
             vec![ReadyCapture {
                 failed: false,
+                direct: false,
                 surface: surf_id,
                 cap_idx: Some(3),
                 frame: None,
@@ -489,6 +613,7 @@ mod tests {
             vec![ReadyCapture {
                 surface: DRV_ID_BASE_SURFACE + 7,
                 failed: true,
+                direct: false,
                 cap_idx: None,
                 frame: None,
             }],
@@ -510,12 +635,14 @@ mod tests {
             vec![
                 ReadyCapture {
                     failed: false,
+                    direct: false,
                     surface: DRV_ID_BASE_SURFACE + 9_999,
                     cap_idx: Some(0),
                     frame: None,
                 },
                 ReadyCapture {
                     failed: false,
+                    direct: false,
                     surface: VA_INVALID_ID,
                     cap_idx: Some(1),
                     frame: None,
@@ -538,6 +665,7 @@ mod tests {
             VA_INVALID_ID,
             vec![ReadyCapture {
                 failed: false,
+                direct: false,
                 surface: DRV_ID_BASE_SURFACE,
                 cap_idx: Some(11),
                 frame: None,
@@ -571,6 +699,7 @@ mod tests {
             VA_INVALID_ID,
             vec![ReadyCapture {
                 failed: false,
+                direct: false,
                 surface: DRV_ID_BASE_SURFACE,
                 cap_idx: Some(4),
                 frame: None,
@@ -592,6 +721,7 @@ mod tests {
             VA_INVALID_ID,
             vec![ReadyCapture {
                 failed: false,
+                direct: false,
                 surface: DRV_ID_BASE_SURFACE + 5,
                 cap_idx: None,
                 frame: None,

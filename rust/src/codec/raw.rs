@@ -11,6 +11,7 @@ mod complete;
 mod transport;
 #[cfg(test)]
 mod transport_tests;
+mod vp9;
 
 use super::{Codec, EncodedFrame};
 use crate::bindings::*;
@@ -213,11 +214,19 @@ impl RawDecoder {
         } else {
             headers
         };
+        let vp9_show_existing = if self.codec == Codec::Vp9 {
+            vp9::hidden_reference(&bytes)
+                .map_err(|_| err(VA_STATUS_ERROR_UNSUPPORTED_PROFILE))?
+                .map(|slot| 0x88 | slot)
+        } else {
+            None
+        };
         Ok(EncodedFrame {
             bytes,
             headers,
             keyframe: self.keyframe,
-            expects_output: true,
+            expects_output: vp9_show_existing.is_none(),
+            vp9_show_existing,
             timestamp_usec: sequence.saturating_mul(33_333),
         })
     }

@@ -12,6 +12,7 @@ use crate::surface::release_surface_capture;
 use crate::sync::{pump_and_publish, sync_surface};
 use crate::{err, ok, state_from_ctx};
 use std::ffi::c_int;
+use std::os::fd::AsRawFd;
 
 pub(crate) unsafe extern "C" fn begin_picture(
     ctx: VADriverContextP,
@@ -160,15 +161,22 @@ unsafe fn begin_picture_inner(
             );
         }
     }
+    let previous_frame = guard.surfaces[surf_idx]
+        .as_mut()
+        .and_then(|surface| surface.frame.take());
     let Some(c) = guard.contexts[ctx_idx].as_mut() else {
         return err(VA_STATUS_ERROR_INVALID_CONTEXT);
     };
+    if let Some(frame) = previous_frame
+        && let Some(session) = c.v4l2.as_mut()
+    {
+        session.recycle_snapshot(frame);
+    }
     c.frame_open = true;
     c.render_target = render_target;
     c.decoder.begin_picture();
     if let Some(surf) = guard.surfaces[surf_idx].as_mut() {
         surf.state = SurfaceState::InProgress;
-        surf.frame = None;
         surf.owner = context;
     }
     ok()
@@ -301,6 +309,106 @@ pub(crate) unsafe extern "C" fn end_picture(
             frame.keyframe
         );
     }
+    let surf_idx = surface_index(render_target).unwrap();
+    let can_direct = c.v4l2.is_some()
+        && !matches!(
+            c.profile,
+            VAProfile::VAProfileAV1Profile0 | VAProfile::VAProfileAV1Profile1
+        );
+    // A context with any declared caller-imported target keeps the copy path
+    // for all pictures. CAPTURE mode cannot change after streaming begins.
+    let can_direct = can_direct
+        && !guard.contexts[ctx_idx]
+            .as_ref()
+            .unwrap()
+            .render_targets
+            .iter()
+            .filter_map(|&id| surface_index(id).and_then(|idx| guard.surfaces[idx].as_ref()))
+            .any(|s| s.backing.as_ref().is_some_and(|b| b.is_imported()));
+    if can_direct && guard.surfaces[surf_idx].as_ref().unwrap().backing.is_none() {
+        let surface = guard.surfaces[surf_idx].as_ref().unwrap();
+        let required = match crate::surface_backing::SurfaceBacking::allocation_size(
+            surface.width as u32,
+            surface.height as u32,
+            surface.format,
+        ) {
+            Ok(size) => size,
+            Err(_) => {
+                fail_picture(&mut guard, ctx_idx);
+                return err(VA_STATUS_ERROR_ALLOCATION_FAILED);
+            }
+        };
+        let allocated = guard
+            .surfaces
+            .iter()
+            .flatten()
+            .filter_map(|s| s.backing.as_ref())
+            .map(|b| b.size())
+            .sum::<usize>();
+        if allocated
+            .checked_add(required)
+            .is_none_or(|n| n > crate::surface_export::MAX_EXPORT_BACKING_BYTES)
+        {
+            fail_picture(&mut guard, ctx_idx);
+            return err(VA_STATUS_ERROR_ALLOCATION_FAILED);
+        }
+        let drm_fd = guard.drm_fd.as_ref().map(AsRawFd::as_raw_fd);
+        let backing = match crate::surface_backing::SurfaceBacking::allocate_with_drm(
+            surface.width as u32,
+            surface.height as u32,
+            surface.format,
+            drm_fd,
+        ) {
+            Ok(backing) => backing,
+            Err(_) => {
+                fail_picture(&mut guard, ctx_idx);
+                return err(VA_STATUS_ERROR_ALLOCATION_FAILED);
+            }
+        };
+        guard.surfaces[surf_idx].as_mut().unwrap().backing = Some(backing);
+    }
+    let target = if can_direct {
+        match guard.surfaces[surf_idx]
+            .as_ref()
+            .unwrap()
+            .backing
+            .as_ref()
+            .unwrap()
+            .decode_target()
+        {
+            Ok(target) => target,
+            Err(_) => {
+                fail_picture(&mut guard, ctx_idx);
+                return err(VA_STATUS_ERROR_DECODING_ERROR);
+            }
+        }
+    } else {
+        None
+    };
+    let direct_copy = guard.surfaces[surf_idx]
+        .as_ref()
+        .unwrap()
+        .backing
+        .as_ref()
+        .is_some_and(|backing| backing.can_download());
+    let c = guard.contexts[ctx_idx].as_mut().unwrap();
+    if target.is_none() && c.v4l2.as_ref().is_some_and(|v| v.direct_capture_mode()) {
+        // Undeclared targets cannot switch an active direct session to an
+        // incompatible imported layout or reuse the preceding surface's fd.
+        fail_picture(&mut guard, ctx_idx);
+        return err(VA_STATUS_ERROR_DECODING_ERROR);
+    }
+    if let Some(target) = target
+        && c.v4l2
+            .as_mut()
+            .unwrap()
+            .bind_decode_target(render_target, target)
+            .is_err()
+    {
+        fail_picture(&mut guard, ctx_idx);
+        return err(VA_STATUS_ERROR_DECODING_ERROR);
+    }
+    let direct_decode = c.v4l2.as_ref().is_some_and(|v| v.direct_capture_mode());
     let submit = c
         .v4l2
         .as_mut()
@@ -314,7 +422,24 @@ pub(crate) unsafe extern "C" fn end_picture(
                 frame.expects_output,
                 frame.timestamp_usec,
                 &frame.headers,
-            )
+                direct_copy,
+            )?;
+            if let Some(show) = frame.vp9_show_existing {
+                // Stateful Iris suppresses hidden reference output. The
+                // standard show_existing command exports that decoded reference
+                // while retaining the original bitstream's entropy/MV state.
+                v.submit_frame(
+                    render_target,
+                    cap_idx,
+                    &[show],
+                    false,
+                    true,
+                    frame.timestamp_usec,
+                    &[],
+                    direct_copy,
+                )?;
+            }
+            Ok(())
         })
         .map_err(|_| err(VA_STATUS_ERROR_DECODING_ERROR));
     c.out_seq = c.out_seq.saturating_add(1);
@@ -336,16 +461,21 @@ pub(crate) unsafe extern "C" fn end_picture(
     // Submit pacing may have completed earlier frames inside the V4L2 session;
     // surface that progress now so pipelining clients can recycle surfaces.
     pump_and_publish(&mut guard, ctx_idx, 0);
-    let exported = surface_index(render_target)
-        .and_then(|idx| guard.surfaces[idx].as_ref())
-        .is_some_and(|surface| surface.exported);
+    let surface = guard.surfaces[surf_idx].as_ref().unwrap();
+    let sync_submission = if direct_decode {
+        surface
+            .backing
+            .as_ref()
+            .is_some_and(|b| b.requires_submission_sync())
+    } else {
+        surface.exported
+    };
     drop(guard);
-    if exported {
-        // Stable exports are populated by a CPU copy, which does not install
-        // a completion fence in dma_resv. An implicit-sync GL consumer can
-        // otherwise sample the previous frame as soon as EndPicture returns.
-        // Complete publication before handing this allocation to that client.
-        // Release the driver lock so other submitters can make progress.
+    if sync_submission {
+        // Iris does not install a completion fence in the surface's dma_resv.
+        // Finish pre-exported targets before a client can sample them. Other
+        // clients wait through SyncSurface/export; CAPTURE rebinds after each
+        // completion in decode order. Release the driver lock while waiting.
         return unsafe { sync_surface(ctx, render_target) };
     }
     ok()

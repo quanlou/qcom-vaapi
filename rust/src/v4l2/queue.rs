@@ -8,17 +8,20 @@ use std::ptr;
 pub(super) enum BufferState {
     Free,
     Reserved,
+    /// Completed pixels retained until publication into a surface backing.
+    Publishing,
+    /// Completed directly in the current surface's own DMA-BUF. Never
+    /// replenish this slot until the next picture binds its chosen target.
+    DirectComplete,
     Queued,
 }
 
 pub(super) struct V4l2Buffer {
     pub(super) state: BufferState,
     /// VA surface that owns this slot as a stable-capture reservation.
-    /// Reserved slots never enter the kernel queue: this firmware picks its
-    /// own target buffer for every decoded frame, so the only way an
-    /// exported dma-buf can keep backing the same VA surface is for its
-    /// allocation to be invisible to the decoder until the driver copies the
-    /// completed working-slot frame in at dequeue time.
+    /// Reserved slots never enter the compatibility working queue. Direct
+    /// mode instead binds one surface-owned allocation to slot zero, making
+    /// that allocation the firmware's only available output target.
     pub(super) reserved_for: Option<u32>,
     pub(super) num_planes: usize,
     pub(super) addr: [*mut c_void; VIDEO_MAX_PLANES_USIZE],

@@ -174,9 +174,9 @@ pub(crate) unsafe extern "C" fn get_image(
         buffers,
         ..
     } = &mut *guard;
-    let Some((surf_width, surf_height, surf_state, surf_frame)) = surfaces[surf_idx]
+    let Some((surf_width, surf_height, surf_state)) = surfaces[surf_idx]
         .as_ref()
-        .map(|s| (s.width, s.height, s.state, s.frame.as_ref()))
+        .map(|s| (s.width, s.height, s.state))
     else {
         return err(VA_STATUS_ERROR_INVALID_SURFACE);
     };
@@ -194,8 +194,12 @@ pub(crate) unsafe extern "C" fn get_image(
     if surf_state != SurfaceState::Ready {
         return err(VA_STATUS_ERROR_DECODING_ERROR);
     }
-    // Read the snapshot taken when the frame was dequeued. The CAPTURE slot
-    // itself may already have been requeued and overwritten by the decoder.
+    if let Err(status) = ensure_snapshot(surfaces[surf_idx].as_mut().unwrap()) {
+        return status;
+    }
+    let surf_frame = surfaces[surf_idx].as_ref().and_then(|s| s.frame.as_ref());
+    // Read the detached snapshot or download the surface-owned allocation.
+    // The CAPTURE slot may already have been overwritten by the decoder.
     // AV1 hidden-reference frames complete without display pixels; keep
     // vaGetImage consistent with vaDeriveImage by exposing a zeroed image
     // rather than turning a successful no-output decode into a hard error.
@@ -274,6 +278,11 @@ pub(crate) unsafe extern "C" fn derive_image(
         Ok(g) => g,
         Err(_) => return err(VA_STATUS_ERROR_OPERATION_FAILED),
     };
+    if let Some(surface) = guard.surfaces[surf_idx].as_mut()
+        && let Err(status) = ensure_snapshot(surface)
+    {
+        return status;
+    }
     let Some((surf_width, surf_height, surf_state, surf_frame)) = guard.surfaces[surf_idx]
         .as_ref()
         .map(|s| (s.width, s.height, s.state, s.frame.as_ref()))
@@ -289,8 +298,8 @@ pub(crate) unsafe extern "C" fn derive_image(
     let mut cap_h = surf_height as u32;
     let mut data: Vec<u8> = Vec::new();
 
-    // Read the snapshot taken when the frame was dequeued; the CAPTURE slot
-    // itself may already have been requeued and overwritten by the decoder.
+    // The snapshot comes from dequeue or the surface-owned display allocation;
+    // the recycled CAPTURE slot is never a source for a late image request.
     if surf_state == SurfaceState::Ready
         && let Some(frame) = surf_frame
     {
@@ -348,3 +357,19 @@ pub(crate) unsafe extern "C" fn derive_image(
 
 #[cfg(test)]
 mod tests;
+
+fn ensure_snapshot(surface: &mut crate::state::Surface) -> Result<(), VAStatus> {
+    if surface.state == SurfaceState::Ready
+        && surface.frame.is_none()
+        && let Some(backing) = surface.backing.as_ref()
+    {
+        match backing.download() {
+            Ok(frame) => surface.frame = Some(frame),
+            Err(_) => {
+                surface.state = SurfaceState::Dead;
+                return Err(err(VA_STATUS_ERROR_DECODING_ERROR));
+            }
+        }
+    }
+    Ok(())
+}

@@ -20,7 +20,10 @@ def main():
     parser.add_argument('--ffmpeg-source', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--qualification', type=Path)
+    parser.add_argument('--source-ref', help='Exact repository commit for a development package')
     args = parser.parse_args()
+    if args.source_ref and not re.fullmatch(r'[0-9a-f]{40}', args.source_ref):
+        parser.error('--source-ref must be a full lowercase Git commit hash')
     version = tomllib.loads((ROOT / 'rust/Cargo.toml').read_text())['package']['version']
     deb_version = version.replace('-rc.', '~rc.')
     driver, companion = args.driver.resolve(), args.companion.resolve()
@@ -59,11 +62,14 @@ def main():
         shutil.copyfile(release_doc if release_doc.exists() else ROOT / 'README.md', docs / 'README')
         if args.qualification:
             shutil.copyfile(args.qualification, docs / 'qualification.json')
+        source_url = ('https://github.com/quanlou/qcom-vaapi/tree/' + args.source_ref
+                      if args.source_ref else
+                      f'https://github.com/quanlou/qcom-vaapi/releases/tag/v{version}')
         (docs / 'copyright').write_text(
             'Rust driver and original companion: MIT; see LICENSE.driver-MIT.\n'
             'Producer patches: GPL-2.0-or-later; see LICENSE.producer-patches.\n'
             'Linked FFmpeg code retains its licenses; see FFmpeg-LICENSE.md and COPYING files.\n'
-            f'Corresponding sources: https://github.com/quanlou/qcom-vaapi/releases/tag/v{version}\n')
+            f'Corresponding sources: {source_url}\n')
         (work / 'debian').mkdir()
         (work / 'debian/control').write_text('Source: qcom-vaapi\nSection: video\nPriority: optional\n'
             'Maintainer: qcom-vaapi contributors\nStandards-Version: 4.7.0\n\n'

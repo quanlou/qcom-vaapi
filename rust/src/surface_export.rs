@@ -258,6 +258,11 @@ fn export_ready_surface_with_operations(
     if let Some(tracked) = tracked {
         surface.export_fds.push(tracked);
     }
+    if surface.state == SurfaceState::Empty {
+        // Pre-exporting clients can sample a retained allocation immediately
+        // after EndPicture. Iris does not attach a decode completion fence.
+        surface.backing.as_mut().unwrap().mark_predecode_export();
+    }
     Ok(desc)
 }
 
@@ -401,6 +406,15 @@ mod tests {
         .unwrap();
         assert_eq!(guard.surfaces[0].as_ref().unwrap().owner, VA_INVALID_ID);
         assert_eq!(guard.surfaces[0].as_ref().unwrap().cap_idx, None);
+        assert!(
+            guard.surfaces[0]
+                .as_ref()
+                .unwrap()
+                .backing
+                .as_ref()
+                .unwrap()
+                .requires_submission_sync()
+        );
         assert_eq!((desc.width, desc.height), (64, 64));
         assert_eq!(desc.num_layers, 1);
         let client = unsafe { std::os::fd::OwnedFd::from_raw_fd(desc.objects[0].fd) };
@@ -452,6 +466,7 @@ mod tests {
                     VA_INVALID_ID,
                     vec![ReadyCapture {
                         failed: false,
+                        direct: false,
                         surface: DRV_ID_BASE_SURFACE,
                         cap_idx: Some(0),
                         frame: Some(SurfaceFrame {

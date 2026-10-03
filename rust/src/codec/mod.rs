@@ -51,6 +51,9 @@ pub(crate) struct EncodedFrame {
     pub(crate) headers: Vec<u8>,
     pub(crate) keyframe: bool,
     pub(crate) expects_output: bool,
+    /// Expose a hidden VP9 reference without changing its encoded show_frame
+    /// bit (which would change subsequent motion-vector decoding semantics).
+    pub(crate) vp9_show_existing: Option<u8>,
     pub(crate) timestamp_usec: u64,
 }
 

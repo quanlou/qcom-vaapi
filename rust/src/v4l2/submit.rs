@@ -83,6 +83,7 @@ impl V4l2Session {
         expects_output: bool,
         _timestamp_usec: u64,
         headers: &[u8],
+        direct_copy: bool,
     ) -> Result<(), ()> {
         if self.abandoned {
             return Err(());
@@ -133,7 +134,17 @@ impl V4l2Session {
             self.headers = headers.to_vec();
         }
         let output_deadline = std::time::Instant::now() + OUTPUT_PACING_TIMEOUT;
-        while self.out_queued() >= output_inflight_limit(self.source_change_flush) {
+        // A VP9 packet can contain hidden input, its reference export, and a
+        // visible picture. The old two-input pacing waits for hidden decode
+        // inside avcodec_send_packet and triggers Firefox's slow-frame gate.
+        // Chosen CAPTURE targets still advance one at a time; use the existing
+        // four bounded OUTPUT slots to enqueue this packet asynchronously.
+        let inflight_limit = if self.direct_capture_mode() {
+            super::OUT_NUM_BUFFERS as usize
+        } else {
+            output_inflight_limit(self.source_change_flush)
+        };
+        while self.out_queued() >= inflight_limit {
             if self.aborted && self.recover().is_ok() {
                 continue;
             }
@@ -214,6 +225,7 @@ impl V4l2Session {
             surface,
             timestamp: timestamp_usec,
             expects_output,
+            direct_copy,
         });
         let ready = self.pump(0);
         self.ready.extend(ready);
@@ -655,9 +667,13 @@ pub(super) mod tests {
             capture_fourcc: crate::pixel_format::DecodedFormat::Nv12.v4l2_fourcc(),
             out: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE as u32),
             cap: V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE as u32),
+            direct_target: None,
+            direct_targets: VecDeque::new(),
+            decode_order: false,
             legacy: Vec::new(),
             fifo: Vec::new(),
             ready: Vec::new(),
+            recycled_snapshot: None,
             no_output_waiting: Vec::new(),
             eos: false,
             draining: false,
@@ -686,6 +702,7 @@ pub(super) mod tests {
             surface: 0,
             timestamp: 0,
             expects_output: true,
+            direct_copy: false,
         });
         session
     }
@@ -761,7 +778,7 @@ pub(super) mod tests {
         session.headers = vec![1];
         assert!(
             session
-                .submit_frame(9, None, &[2], true, true, 9, &[3])
+                .submit_frame(9, None, &[2], true, true, 9, &[3], false)
                 .is_err()
         );
         assert!(session.no_output_waiting.is_empty());
@@ -786,7 +803,7 @@ pub(super) mod tests {
         session.no_output_waiting.clear();
         assert!(
             session
-                .submit_frame(9, None, &[2], true, true, 9, &[3])
+                .submit_frame(9, None, &[2], true, true, 9, &[3], false)
                 .is_err()
         );
         assert!(!session.abandoned);
@@ -842,7 +859,7 @@ pub(super) mod tests {
         assert!(!session.aborted);
         assert!(
             session
-                .submit_frame(0, None, &[1], true, true, 0, &[2])
+                .submit_frame(0, None, &[1], true, true, 0, &[2], false)
                 .is_err()
         );
         assert!(
@@ -870,7 +887,7 @@ pub(super) mod tests {
         session.headers = vec![1, 2, 3];
         assert!(
             session
-                .submit_frame(7, None, &[9], true, true, 0, &[4])
+                .submit_frame(7, None, &[9], true, true, 0, &[4], false)
                 .is_err()
         );
         assert_eq!(session.sync_drain_failures, 1, "must try STOP before QBUF");
@@ -916,7 +933,7 @@ pub(super) mod tests {
         // OUTPUT has no backing allocation, so the final QBUF cannot succeed.
         assert!(
             session
-                .submit_frame(7, Some(foreign_idx), &[1], false, true, 0, &[])
+                .submit_frame(7, Some(foreign_idx), &[1], false, true, 0, &[], false)
                 .is_err()
         );
         assert_eq!(

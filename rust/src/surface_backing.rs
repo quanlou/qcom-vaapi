@@ -9,7 +9,7 @@ use std::fs::OpenOptions;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 
-use crate::image::{aligned_pitch, copy_semiplanar_region};
+use crate::image::copy_semiplanar_region;
 use crate::pixel_format::DecodedFormat;
 use crate::state::{DRV_MAX_DIM, DRV_MIN_DIM, SurfaceFrame};
 use crate::v4l2::CaptureExport;
@@ -92,16 +92,21 @@ fn checked_layout(width: u32, height: u32, format: DecodedFormat) -> io::Result<
     if !range.contains(&width) || !range.contains(&height) {
         return Err(io::ErrorKind::InvalidInput.into());
     }
-    let stride = aligned_pitch(format, width);
+    // Iris linear CAPTURE geometry: 128 pixels per row, 32 luma rows and
+    // 16 chroma rows. The descriptor keeps the visible dimensions while
+    // its offsets and allocation size include hardware storage padding.
+    let stride = width.checked_add(127).ok_or(io::ErrorKind::InvalidInput)? & !127;
+    let stride = stride * format.bytes_per_sample();
+    let storage_height = height.checked_add(31).ok_or(io::ErrorKind::InvalidInput)? & !31;
     let page = u32::try_from(unsafe { getpagesize() })
         .ok()
         .filter(|p| p.is_power_of_two())
         .ok_or(io::ErrorKind::InvalidInput)?;
     let uv_offset = stride
-        .checked_mul(height)
+        .checked_mul(storage_height)
         .ok_or(io::ErrorKind::InvalidInput)?;
-    let size = height
-        .checked_add(height.div_ceil(2))
+    let size = storage_height
+        .checked_add(storage_height / 2)
         .and_then(|rows| stride.checked_mul(rows))
         .and_then(|bytes| bytes.checked_add(page - 1))
         .map(|bytes| bytes & !(page - 1))
@@ -332,6 +337,12 @@ pub(crate) struct SurfaceBacking {
     wait: Wait,
     poisoned: bool,
     imported: Option<ImportLayout>,
+    predecode_export: bool,
+}
+
+pub(crate) struct DecodeTarget {
+    pub(crate) fd: OwnedFd,
+    pub(crate) layout: CaptureExport,
 }
 
 // The mapping belongs to this allocation and is accessed only through &mut
@@ -425,6 +436,7 @@ impl SurfaceBacking {
             wait,
             poisoned: false,
             imported,
+            predecode_export: false,
         };
         // Imported buffers belong to the caller: creation must not clear them.
         if imported.is_none() {
@@ -444,41 +456,71 @@ impl SurfaceBacking {
     }
 
     pub(crate) fn copy_frame(&mut self, frame: &SurfaceFrame) -> io::Result<()> {
-        let result = self.copy_frame_inner(frame);
+        self.copy_decoded(&frame.data, frame.stride, frame.height, frame.format)
+    }
+
+    pub(crate) fn copy_decoded(
+        &mut self,
+        data: &[u8],
+        stride: u32,
+        height: u32,
+        format: DecodedFormat,
+    ) -> io::Result<()> {
+        let result = self.copy_frame_inner(data, stride, height, format);
         if result.is_err() {
             self.poisoned = true;
         }
         result
     }
 
-    fn copy_frame_inner(&mut self, frame: &SurfaceFrame) -> io::Result<()> {
+    fn copy_frame_inner(
+        &mut self,
+        data: &[u8],
+        stride: u32,
+        height: u32,
+        format: DecodedFormat,
+    ) -> io::Result<()> {
         let layout = self.layout;
         let min_stride = layout.width.div_ceil(2) * 2 * layout.format.bytes_per_sample();
-        let source_size = frame
-            .height
-            .checked_add(frame.height.div_ceil(2))
-            .and_then(|rows| rows.checked_mul(frame.stride));
+        let source_size = height
+            .checked_add(height.div_ceil(2))
+            .and_then(|rows| rows.checked_mul(stride));
         if self.poisoned
-            || frame.format != layout.format
-            || frame.height < layout.height
-            || frame.stride < min_stride
-            || source_size.is_none_or(|size| size as usize > frame.data.len())
+            || format != layout.format
+            || height < layout.height
+            || stride < min_stride
+            || source_size.is_none_or(|size| size as usize > data.len())
         {
             return Err(io::ErrorKind::InvalidData.into());
         }
         let access = CpuWrite::begin(self.fd.as_raw_fd(), self.wait, self.sync)?;
         if let Some(imported) = self.imported {
             // Preserve prefix, row padding, inter-plane gaps and tail bytes.
-            imported.copy_frame(frame, self.bytes_mut());
+            imported.copy_bytes(data, stride, height, self.bytes_mut());
             return access.finish();
         }
         let dest = self.bytes_mut();
+        if layout.width.is_multiple_of(2)
+            && stride == layout.stride
+            && stride == layout.width * layout.format.bytes_per_sample()
+        {
+            // Full-width planes are contiguous. Two bulk transfers avoid
+            // thousands of short reads from uncached GEM memory at 4K.
+            let y_len = stride as usize * layout.height as usize;
+            let uv_len = stride as usize * layout.height.div_ceil(2) as usize;
+            let src_uv = stride as usize * height as usize;
+            let dst_uv = layout.uv_offset as usize;
+            dest[..y_len].copy_from_slice(&data[..y_len]);
+            dest[dst_uv..dst_uv + uv_len].copy_from_slice(&data[src_uv..src_uv + uv_len]);
+            dest[dst_uv + uv_len..].fill(0);
+            return access.finish();
+        }
         dest.fill(0);
         let copied = copy_semiplanar_region(
             layout.format,
-            &frame.data,
-            frame.stride,
-            frame.height,
+            data,
+            stride,
+            height,
             dest,
             layout.stride,
             layout.uv_offset,
@@ -493,6 +535,57 @@ impl SurfaceBacking {
             return Err(io::ErrorKind::InvalidData.into());
         }
         Ok(())
+    }
+
+    pub(crate) fn can_download(&self) -> bool {
+        !self.poisoned && self.imported.is_none()
+    }
+
+    pub(crate) fn is_imported(&self) -> bool {
+        self.imported.is_some()
+    }
+
+    pub(crate) fn mark_predecode_export(&mut self) {
+        self.predecode_export = true;
+    }
+
+    pub(crate) fn requires_submission_sync(&self) -> bool {
+        self.predecode_export
+    }
+
+    pub(crate) fn decode_target(&self) -> io::Result<Option<DecodeTarget>> {
+        if self.poisoned {
+            return Err(io::ErrorKind::InvalidData.into());
+        }
+        if self.imported.is_some() {
+            // Caller layouts may have independent pitches, offsets and gaps.
+            // Keep their existing validated copy path until CAPTURE layout
+            // compatibility has been established for those descriptors.
+            return Ok(None);
+        }
+        (self.wait)(self.fd.as_raw_fd())?;
+        Ok(Some(DecodeTarget {
+            fd: self.fd.try_clone()?,
+            layout: self.layout,
+        }))
+    }
+
+    /// Snapshot only when a CPU image is requested. The surface owns this
+    /// allocation until reuse; the recycled firmware working slot is irrelevant.
+    pub(crate) fn download(&self) -> io::Result<SurfaceFrame> {
+        if !self.can_download() {
+            return Err(io::ErrorKind::InvalidData.into());
+        }
+        (self.wait)(self.fd.as_raw_fd())?;
+        (self.sync)(self.fd.as_raw_fd(), 1)?; // DMA_BUF_SYNC_READ
+        let bytes = unsafe { std::slice::from_raw_parts(self.addr, self.size()) }.to_vec();
+        (self.sync)(self.fd.as_raw_fd(), 1 | DMA_BUF_SYNC_END)?;
+        Ok(SurfaceFrame {
+            data: std::sync::Arc::new(bytes),
+            stride: self.layout.stride,
+            height: self.layout.uv_offset / self.layout.stride,
+            format: self.layout.format,
+        })
     }
 
     /// On success the descriptor's fd belongs to the caller. No extra fd is

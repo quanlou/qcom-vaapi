@@ -198,7 +198,7 @@ pub(crate) unsafe extern "C" fn destroy_context(
 
     // Flush before detaching. FFmpeg can destroy a context at a resolution
     // boundary while display-order surfaces from that context are still
-    // pending; publish their CPU snapshots while the CAPTURE mappings exist.
+    // pending; publish completions while the CAPTURE queue still exists.
     let ready = guard.contexts[idx]
         .as_mut()
         .and_then(|context| context.v4l2.as_mut())
@@ -208,8 +208,8 @@ pub(crate) unsafe extern "C" fn destroy_context(
 
     // A surface can outlive its decode context. Detach every owned surface
     // before dropping the V4L2 session, otherwise its cap_idx would point at
-    // an mmap region released by V4l2Session::Drop. A ready CPU snapshot is
-    // self-contained and remains readable; every other surface becomes dead.
+    // an mmap region released by V4l2Session::Drop. Ready snapshots and owned
+    // display allocations remain readable independently of that session.
     let owned_surfaces: Vec<usize> = guard
         .surfaces
         .iter()
@@ -226,7 +226,9 @@ pub(crate) unsafe extern "C" fn destroy_context(
         if let Some(surface) = guard.surfaces[surface_idx].as_mut() {
             surface.owner = VA_INVALID_ID;
             surface.cap_idx = None;
-            if surface.state != SurfaceState::Ready || surface.frame.is_none() {
+            let readable = surface.frame.is_some()
+                || surface.backing.as_ref().is_some_and(|b| b.can_download());
+            if surface.state != SurfaceState::Ready || !readable {
                 surface.state = SurfaceState::Dead;
             }
         }
@@ -502,6 +504,7 @@ mod tests {
                     vec![crate::v4l2::ReadyCapture {
                         surface,
                         failed: false,
+                        direct: false,
                         cap_idx: Some(9),
                         frame: Some(SurfaceFrame {
                             data: std::sync::Arc::new(vec![value; stride * height * 3 / 2]),
@@ -627,6 +630,7 @@ mod tests {
                     vec![crate::v4l2::ReadyCapture {
                         surface,
                         failed: false,
+                        direct: false,
                         cap_idx: Some(9),
                         frame: Some(SurfaceFrame {
                             data: std::sync::Arc::new(vec![value; stride * height * 3 / 2]),
@@ -752,6 +756,63 @@ mod tests {
         assert_eq!(frame.data.as_slice(), [1, 2, 3, 4]);
         assert_eq!(frame.stride, 2);
         assert_eq!(frame.height, 2);
+        drop(guard);
+        unsafe { drop(Box::from_raw(raw)) };
+    }
+
+    #[test]
+    fn completed_display_allocation_remains_readable_after_context_destroy() {
+        use crate::pixel_format::DecodedFormat;
+        use crate::surface_backing::SurfaceBacking;
+        let (raw, mut ctx) = driver_for_context_test();
+        let state = unsafe { &*raw };
+        let mut backing = SurfaceBacking::allocate_for_test(320, 240, DecodedFormat::Nv12).unwrap();
+        let mut data = vec![19; 320 * 240 * 3 / 2];
+        data[320 * 240..].fill(103);
+        backing
+            .copy_frame(&SurfaceFrame {
+                data: std::sync::Arc::new(data),
+                stride: 320,
+                height: 240,
+                format: DecodedFormat::Nv12,
+            })
+            .unwrap();
+        {
+            let mut guard = state.lock.lock().unwrap();
+            guard.contexts[0] = Some(context_for_test(DRV_ID_BASE_CONFIG));
+            let mut surface = surface_for_context_test(DRV_ID_BASE_CONTEXT);
+            surface.backing = Some(backing);
+            surface.state = SurfaceState::Ready;
+            surface.cap_idx = Some(0);
+            // Direct decode has no CPU snapshot at publication time.
+            guard.surfaces[0] = Some(surface);
+        }
+        assert_eq!(
+            unsafe { destroy_context(&mut ctx, DRV_ID_BASE_CONTEXT) },
+            ok()
+        );
+        let mut image: VAImage = unsafe { std::mem::zeroed() };
+        assert_eq!(
+            unsafe { crate::image::derive_image(&mut ctx, DRV_ID_BASE_SURFACE, &mut image) },
+            ok()
+        );
+        let guard = state.lock.lock().unwrap();
+        let surface = guard.surfaces[0].as_ref().unwrap();
+        assert_eq!(surface.owner, VA_INVALID_ID);
+        assert_eq!(surface.cap_idx, None);
+        assert_eq!(surface.state, SurfaceState::Ready);
+        let bytes = &guard.buffers[crate::state::buffer_index(image.buf).unwrap()]
+            .as_ref()
+            .unwrap()
+            .data;
+        for row in 0..240 {
+            let offset = row * image.pitches[0] as usize;
+            assert!(bytes[offset..offset + 320].iter().all(|b| *b == 19));
+        }
+        for row in 0..120 {
+            let offset = image.offsets[1] as usize + row * image.pitches[1] as usize;
+            assert!(bytes[offset..offset + 320].iter().all(|b| *b == 103));
+        }
         drop(guard);
         unsafe { drop(Box::from_raw(raw)) };
     }

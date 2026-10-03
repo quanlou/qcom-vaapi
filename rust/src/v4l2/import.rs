@@ -1,5 +1,5 @@
-//! External CAPTURE storage. Iris determines the completed slot; this
-//! backend does not assign an input picture to a predetermined VA surface BO.
+//! External CAPTURE storage. Direct mode imports the one chosen surface;
+//! compatibility mode allocates a working pool for detached publication.
 
 use super::{V4l2Session, debug_enabled};
 use crate::bindings::*;
@@ -31,6 +31,9 @@ fn capture_size(pix: &v4l2_pix_format_mplane) -> Result<usize, ()> {
 
 impl V4l2Session {
     pub(super) fn initialize_imported_capture(&mut self) -> Result<(), ()> {
+        if self.direct_target.is_some() {
+            return self.initialize_direct_capture();
+        }
         let fd = self.capture_drm_fd.as_ref().ok_or(())?.as_raw_fd();
         self.initialize_imported_capture_with(|size| {
             crate::surface_backing::allocate_capture_drm(size, fd).map_err(|_| ())

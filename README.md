@@ -20,9 +20,11 @@ Chrome; those historical results do not qualify the new binary.
 | AV1 | Experimental Profile 0, 8-bit, no film grain |
 
 CPU image access and DRM PRIME export are supported. Exported surfaces retain
-their own backing storage; this does not establish an end-to-end zero-copy path.
-Firefox, 10-bit AV1, other chips and broad suspend/resume reliability remain
-unqualified.
+their own backing storage. Current source decodes H.264, HEVC and VP9 directly
+into driver-owned surface DMA-BUFs on Iris with decode-order controls; browser
+export does not copy decoded pixels. This RC7 development source is newer than
+the tagged RC6 binary. Firefox 4K60, 10-bit AV1, other chips and broad
+suspend/resume reliability remain unqualified.
 
 ## Install
 
@@ -147,11 +149,22 @@ switch is required. Decoding requires an MSM render-node display and Iris DMABUF
 support, and fails if allocation or import cannot be completed.
 Buffers use the decoder's negotiated padded storage geometry. The render fd
 comes from libva, so the backend does not open an extra render device in a
-browser sandbox. Imported storage is owned across queue growth and session
-recovery, with DMA-BUF CPU access synchronization and fence waits before reuse.
-This enables direct hardware decoding into GPU allocations. Frame snapshots
-and stable VA surface publication copies remain; this is not yet an end-to-end
-zero-copy browser path.
+browser sandbox.
+
+For H.264, HEVC and VP9 on kernels with decode-order controls, the driver queues
+only the current VA surface's DMA-BUF on CAPTURE. After its timestamp-checked
+completion, it binds the next surface's allocation to the same queue slot.
+Iris therefore writes into the allocation exported to Chrome or Firefox,
+without a decoded-pixel snapshot or publication copy. GPU importer fences are
+waited before reuse. Chrome's pre-decode exports complete during `EndPicture`;
+post-decode exporters and CPU clients synchronize when reading the surface.
+VP9 hidden references are exposed using a standard `show_existing_frame`
+command without altering the original frame bitstream.
+
+AV1, caller-imported layouts and kernels without decode-order controls retain
+the compatibility copy path. CPU image downloads also copy by definition.
+See [the direct-buffer validation report](direct-buffer-validation-20261003.md)
+for measured results and browser limitations.
 
 ## Learn more
 

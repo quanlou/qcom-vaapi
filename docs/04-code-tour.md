@@ -28,6 +28,7 @@ another tab — the concepts land here.*
 | `rust/src/v4l2/abi.rs` | Raw V4L2 ioctl numbers, libc declarations, polling ABI, and kernel-bound helpers |
 | `rust/src/v4l2/queue.rs` | Typed OUTPUT/CAPTURE queue and buffer bookkeeping used by the session orchestrator |
 | `rust/src/v4l2/capture.rs` | CAPTURE queue mode selection: queue-all CPU-copy behavior vs stable pre-decode PRIME reservations |
+| `rust/src/v4l2/direct.rs` | One chosen DMA-BUF target per completion, with asynchronous target ordering and geometry validation |
 | `rust/src/v4l2/debug.rs` | Read-only queue/session diagnostics and formatting tests used on timeout paths |
 | `rust/src/v4l2/submit.rs` | OUTPUT pacing, QBUF construction, replay-compatible submission, and explicit decoder drain |
 | `rust/src/v4l2/poll.rs` | Readiness polling, DQBUF/event handling, CAPTURE lookup, and export lookup |
@@ -100,7 +101,13 @@ Ready --> [*] : destroy_surfaces
 @enduml
 ```
 
-Two subtleties encoded in that diagram:
+The diagram above describes the compatibility working-pool path. In direct
+mode, every VA surface owns its display allocation. CAPTURE slot zero imports
+only the current target's DMA-BUF; its completion binds the next target in
+decode order. Reusing or destroying an older VA surface must never requeue the
+slot, because that index may already refer to another surface's allocation.
+
+Two subtleties of the compatibility path:
 
 1. **Surface reuse feeds the decoder.** FFmpeg cycles through ~20
    surfaces. When a surface that already holds a decoded picture is used
@@ -112,15 +119,13 @@ Two subtleties encoded in that diagram:
 2. **`Dead` distinguishes "never decoded" from "not ready yet"**, which
    `vaQuerySurfaceError` reports to the app.
 
-Surfaces additionally track dmabuf-export state (`exported`,
-`export_count` in `state.rs`): the zero-copy path hands a CAPTURE
-buffer's dmabuf to an external process, so the buffer must not be
-requeued to the decoder until every export is released (roadmap
-phase 3, [chapter 6](06-roadmap.md#3-the-phases)).
-
-The mapping from surface → pixels is `surf.cap_idx` — an *index into the
-V4L2 CAPTURE queue's buffers*, not a pointer. Pixels never move during
-decode; only the CPU-copy output path (below) copies them.
+Surfaces track export state and own stable backing allocations. Client fds
+retain those allocations even after surface destruction. Reuse may change
+contents under VA-API's normal surface lifetime rules. Direct output has no
+dequeue snapshot or publication copy; CPU images download the surface-owned
+allocation only when requested. Ready backing storage survives context
+destruction. `surf.cap_idx` is working-queue bookkeeping, not the identity of
+a direct surface's pixels.
 
 ## 4. The submission path: `begin → render → end`
 
@@ -274,9 +279,13 @@ poll(fd) →
                    → ReadyCapture { surface, cap_idx }
 ```
 
-`submit_frame` also pumps under backpressure: it refuses to let more
-than 2 OUTPUT buffers sit queued and waits for free OUTPUT buffers by
-pumping, so even an app that never syncs cannot wedge the device.
+`submit_frame` pumps under backpressure. Compatibility mode limits queued
+OUTPUT to two buffers; direct mode can use the four allocated slots so a VP9
+hidden input, synthetic reference export and visible input can be submitted
+without waiting inside the browser's packet submission. Only one CAPTURE
+target is queued, and each completion validates its surface owner before the
+next allocation is bound. Pre-exported surfaces also wait at `EndPicture`
+because Iris does not attach a decode completion fence to the DMA-BUF.
 
 ### Draining (end of stream)
 

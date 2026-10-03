@@ -139,7 +139,7 @@ impl V4l2Session {
         Ok(())
     }
 
-    fn configure_decode_order(&self) -> Result<(), ()> {
+    fn configure_decode_order(&mut self) -> Result<(), ()> {
         // VA synchronizes in decode order. Stateful display-order output can
         // withhold a reference picture until the client submits its B frames,
         // while that same client waits for the picture before submitting.
@@ -188,6 +188,7 @@ impl V4l2Session {
         if debug_enabled() {
             eprintln!("msm_drv_video_rs: decode-order output requested via display-delay controls");
         }
+        self.decode_order = true;
         Ok(())
     }
 
@@ -408,7 +409,12 @@ impl V4l2Session {
 
     pub(super) fn qbuf_capture(&mut self, idx: usize) -> Result<(), ()> {
         let b = self.cap.buffers.get_mut(idx).ok_or(())?;
-        if b.state == BufferState::Queued || b.num_planes == 0 || b.len[0] == 0 {
+        if matches!(
+            b.state,
+            BufferState::Queued | BufferState::Publishing | BufferState::DirectComplete
+        ) || b.num_planes == 0
+            || b.len[0] == 0
+        {
             return Err(());
         }
         for p in 0..b.num_planes {
