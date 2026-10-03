@@ -4,13 +4,13 @@ Hardware video decoding for **Snapdragon X Elite (X1E80100)** on Linux.
 This Rust VA-API driver connects apps to Qualcomm's Iris decoder through V4L2.
 Other Qualcomm chips are untested.
 
-## Current state — 0.1.1-rc.5
+## Current state — 0.1.1-rc.6
 
-**Experimental ARM64 release.** Chrome hardware playback of 4K AV1 is working
-on the tested Dell XPS 13 9345. The system package enables AV1 and includes its
-FFmpeg-based companion library. Playback, seeking, frame checks and session
-cleanup passed on the tested kernel. Live YouTube playback also used
-`VaapiVideoDecoder`; some uneven frame timing remains.
+**Experimental ARM64 release.** RC6 fixes internal handle growth when browsers
+export a decoded surface repeatedly. The required decode/export matrix and
+session churn passed on the tested Dell XPS 13 9345. Sustained Firefox and Chrome
+playback on this build remains unqualified. RC5 previously played 4K AV1 in
+Chrome; those historical results do not qualify the new binary.
 
 | Codec | Support |
 | --- | --- |
@@ -26,10 +26,10 @@ unqualified.
 
 ## Install
 
-Download the `.deb` from [the rc.5 release](https://github.com/quanlou/qcom-vaapi/releases/tag/v0.1.1-rc.5), then:
+Download the `.deb` from [the rc.6 release](https://github.com/quanlou/qcom-vaapi/releases/tag/v0.1.1-rc.6), then:
 
 ```sh
-sudo apt install ./qcom-vaapi_0.1.1.rc.5_arm64.deb
+sudo apt install ./qcom-vaapi_0.1.1.rc.6_arm64.deb
 ```
 
 **Requirements:** ARM64, X1E80100, `libc6 >= 2.44`, `libva2 >= 2.24`, and a
@@ -38,7 +38,7 @@ with patched `7.3.0-15-qcom-x1e` modules. Older Ubuntu releases cannot install
 it unchanged. The package contains user-space libraries only; it does not
 install the required kernel fixes or firmware.
 
-See [release details](docs/releases/0.1.1-rc.5.md) for the tested kernel,
+See [release details](docs/releases/0.1.1-rc.6.md) for the tested kernel,
 limitations, checksums and source archives. The included `.deb` is an early
 hardware-specific build, not a general Qualcomm driver package.
 
@@ -48,7 +48,7 @@ Restart video apps after installing, then check:
 vainfo
 ```
 
-The vendor label should say `qcom-vaapi 0.1.1-rc.5`, with
+The vendor label should say `qcom-vaapi 0.1.1-rc.6`, with
 `VAProfileAV1Profile0 : VAEntrypointVLD` listed. To remove:
 
 ```sh
@@ -103,19 +103,19 @@ requires hardware qualification there.
 
 ## Validation
 
-The rc.5 decode source passed:
+The exact RC6 driver passed:
 
-- 268 host tests; formatting and strict lint checks.
+- 270 host tests (4 ignored); formatting and strict lint checks.
 - H.264 frame parity at 1, 30 and 300 frames; HEVC, Main10 and VP9 parity.
 - GL/export checks, resolution changes, long playback and all 7 session churn cases.
-- All 510 frames of a 4K AV1 replay with exact pixels and frame order.
-- A 55-second Chrome 4K AV1 test with seeking and zero measured dropped frames.
+- NV12/P010 regressions covering 1,024 surface reuse/export cycles and client
+  descriptor lifetime after surface destruction.
 
-The traced replay used 509 MiB peak across the replay and monitoring processes.
-That is a replay measurement, not Chrome memory usage or a general AV1 budget.
-The published binary has the corrected rc.5 label; its label-only rebuild passed
-host checks. Hardware and browser results belong to the preceding binary with
-the same decode source. [Release details](docs/releases/0.1.1-rc.5.md) record both hashes.
+Sustained Firefox/Chrome playback and a new exact 4K AV1 replay have not passed
+on RC6. Installation authentication did not complete, and the replay preflight
+found the decoder busy. [Release details](docs/releases/0.1.1-rc.6.md) record the
+precise scope and hashes. Historical [RC5 results](docs/releases/0.1.1-rc.5.md)
+remain available separately.
 
 For local verification, close video apps first and supply the documented fixtures:
 

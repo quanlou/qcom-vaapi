@@ -1,10 +1,10 @@
 //! Surface export bookkeeping.
 //!
 //! `vaExportSurfaceHandle` gives the client a dma-buf fd owned by the client.
-//! The driver also keeps a dup of that fd in the surface so the exported
-//! dma-buf object stays alive until the VA surface is destroyed or reused. This
-//! module owns that fd accounting; DRM PRIME descriptor layout stays in
-//! `va_drm.rs`.
+//! The driver keeps one internal dup per surface-owned backing, independent of
+//! how many times the client exports it. Client handles independently retain
+//! the dma-buf after surface destruction. This module owns that fd accounting;
+//! DRM PRIME descriptor layout stays in `va_drm.rs`.
 
 use std::ffi::{c_int, c_void};
 use std::os::fd::{BorrowedFd, OwnedFd};
@@ -235,19 +235,29 @@ fn export_ready_surface_with_operations(
     // Surface-owned allocation permits export before BeginPicture even when
     // two identical decode contexts coexist. No decoder ownership is guessed.
     let desc = backing.descriptor(layout).map_err(|_| failed())?;
-    let tracked = match duplicate(desc.objects[0].fd) {
-        Ok(fd) => fd,
-        Err(()) => {
-            close_export_fd(desc.objects[0].fd);
-            return Err(failed());
+    let tracked = if newly_allocated || surface.export_fds.is_empty() {
+        match duplicate(desc.objects[0].fd) {
+            Ok(fd) => Some(fd),
+            Err(()) => {
+                close_export_fd(desc.objects[0].fd);
+                return Err(failed());
+            }
         }
+    } else {
+        // Every descriptor refers to the same surface-owned allocation. One
+        // internal handle retains it; keeping a dup for every client request
+        // grows without bound in clients which export each decoded frame.
+        None
     };
     if let Some(backing) = new_backing {
         surface.backing = Some(backing);
+        surface.export_fds.clear();
     }
     surface.exported = true;
     surface.export_count = surface.export_count.saturating_add(1);
-    surface.export_fds.push(tracked);
+    if let Some(tracked) = tracked {
+        surface.export_fds.push(tracked);
+    }
     Ok(desc)
 }
 
@@ -407,7 +417,103 @@ mod tests {
             std::fs::File::from(second).metadata().unwrap().ino()
         );
         assert_eq!(repeated.num_layers, 2);
-        assert_eq!(guard.surfaces[0].as_ref().unwrap().export_fds.len(), 2);
+        assert_eq!(guard.surfaces[0].as_ref().unwrap().export_fds.len(), 1);
+    }
+
+    #[test]
+    fn repeated_frame_exports_are_bounded_and_clients_outlive_the_surface() {
+        use crate::pixel_format::DecodedFormat;
+        use crate::state::SurfaceFrame;
+        use crate::v4l2::ReadyCapture;
+        use std::os::unix::fs::{FileExt, MetadataExt};
+        use std::sync::Arc;
+
+        for format in [DecodedFormat::Nv12, DecodedFormat::P010] {
+            let mut guard = state_with_empty_surfaces();
+            let mut surface = surface_with(SurfaceState::Empty, None);
+            surface.format = format;
+            guard.surfaces[0] = Some(surface);
+            let first = export_ready_surface_for_test(
+                &mut guard,
+                DRV_ID_BASE_SURFACE,
+                DrmPrimeLayout::Composed,
+            )
+            .unwrap();
+            let first = std::fs::File::from(unsafe { OwnedFd::from_raw_fd(first.objects[0].fd) });
+            let inode = first.metadata().unwrap().ino();
+            let mut last = None;
+
+            for sequence in 0..1024 {
+                crate::surface::release_surface_capture(&mut guard, 0);
+                guard.surfaces[0].as_mut().unwrap().state = SurfaceState::Pending;
+                let stride = 64 * format.bytes_per_sample();
+                crate::sync::apply_ready_captures(
+                    &mut guard,
+                    VA_INVALID_ID,
+                    vec![ReadyCapture {
+                        failed: false,
+                        surface: DRV_ID_BASE_SURFACE,
+                        cap_idx: Some(0),
+                        frame: Some(SurfaceFrame {
+                            data: Arc::new(vec![(sequence % 251) as u8; (stride * 96) as usize]),
+                            stride,
+                            height: 64,
+                            format,
+                        }),
+                    }],
+                );
+                let layout = if sequence % 2 == 0 {
+                    DrmPrimeLayout::Separate
+                } else {
+                    DrmPrimeLayout::Composed
+                };
+                let desc =
+                    export_ready_surface_for_test(&mut guard, DRV_ID_BASE_SURFACE, layout).unwrap();
+                let client =
+                    std::fs::File::from(unsafe { OwnedFd::from_raw_fd(desc.objects[0].fd) });
+                assert_eq!(client.metadata().unwrap().ino(), inode);
+                assert_eq!(guard.surfaces[0].as_ref().unwrap().export_fds.len(), 1);
+                let mut pixel = [0];
+                first.read_exact_at(&mut pixel, 0).unwrap();
+                assert_eq!(pixel[0], (sequence % 251) as u8);
+                last = Some(client);
+            }
+            assert_eq!(guard.surfaces[0].as_ref().unwrap().export_count, 1025);
+            // Driver teardown closes its handles and mapping. The client's
+            // handles independently retain the last published storage.
+            drop(guard);
+            for client in [first, last.unwrap()] {
+                let mut pixel = [0];
+                client.read_exact_at(&mut pixel, 0).unwrap();
+                assert_eq!(pixel[0], (1023 % 251) as u8);
+                assert_eq!(client.metadata().unwrap().ino(), inode);
+            }
+        }
+    }
+
+    #[test]
+    fn repeated_export_needs_no_new_internal_duplicate_or_allocation() {
+        let mut guard = state_with_empty_surfaces();
+        guard.surfaces[0] = Some(surface_with(SurfaceState::Empty, None));
+        let first = export_ready_surface_for_test(
+            &mut guard,
+            DRV_ID_BASE_SURFACE,
+            DrmPrimeLayout::Separate,
+        )
+        .unwrap();
+        let first = unsafe { OwnedFd::from_raw_fd(first.objects[0].fd) };
+        drop(first);
+        let repeated = export_ready_surface_with_operations(
+            &mut guard,
+            DRV_ID_BASE_SURFACE,
+            DrmPrimeLayout::Composed,
+            0,
+            |_, _, _| panic!("existing storage must be reused"),
+            |_| panic!("one internal duplicate already retains the storage"),
+        )
+        .unwrap();
+        let _client = unsafe { OwnedFd::from_raw_fd(repeated.objects[0].fd) };
+        assert_eq!(guard.surfaces[0].as_ref().unwrap().export_fds.len(), 1);
     }
 
     #[test]

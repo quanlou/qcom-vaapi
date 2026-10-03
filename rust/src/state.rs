@@ -91,11 +91,11 @@ pub(crate) struct Surface {
     pub(crate) backing: Option<crate::surface_backing::SurfaceBacking>,
     pub(crate) exported: bool,
     pub(crate) export_count: u64,
-    /// Owned dup() of every fd handed out by vaExportSurfaceHandle. The
-    /// descriptor fd belongs to the client; our dup keeps the underlying
-    /// dma-buf alive until the surface is destroyed, and
-    /// gives leak-safe accounting. Content may legally be overwritten from the
-    /// moment the surface is re-used (VA-API export contract).
+    /// Driver-owned handles retaining exported storage. Standalone PRIME
+    /// backing keeps one dup regardless of the number of client exports.
+    /// Descriptor fds belong to clients and remain valid after this surface
+    /// is destroyed. Content may legally be overwritten once the surface is
+    /// reused (VA-API export contract).
     pub(crate) export_fds: Vec<OwnedFd>,
 }
 
