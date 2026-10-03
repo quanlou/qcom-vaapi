@@ -20,7 +20,7 @@ short and update it whenever a task starts, finishes, or gets blocked.
   before marking it done.
 
 ## Active task
-Root Chrome import host candidate frozen/tested in isolated checkout; candidate69fab07e UNINSTALLED/HARDWARE UNQUALIFIED. Required matrix/churn and playback remain user-deferred. Main/concurrent sources preserved; no decoder/BPF/lease/privilege/install/publication/message operations.
+Root Chrome caller-buffer import integrated into main with DMA-BUF CAPTURE; combined282 host tests/4 ignored plus stress/lint/build PASS. Hardware qualification and playback deferred; no root installation/device operations. Frozen integration evidence /home/mq/.cache/libva-v4l2-qualification/resume-20261002/chrome-prime-import-main-integration.i8vblxex.
 
 RELEASE ASSET BRANCH CLEANUP COMPLETE: userrequesteddeleteallholding
 branches. Deletedremote +matchinglocal codex/release-assets-v0.1.1-rc.5/.6,
@@ -1992,6 +1992,13 @@ physical-memory claims. Preserve all user changes/failures. All runners exited,
 refcnt0; stay quiet while operator pending unless meaningful new progress.
 
 ## Completed recently
+
+- Root human-requested source integration of32fcf95 into mainf0ec362: combined
+  cargo test --locked --offline --all-features --lib282 PASS/4 ignored,
+  verify-host-stress4/286 PASS/4 ignored, fmt/diff/strictClippy/release PASS.
+  Only progress-note conflict resolved preserving main evidence; source merge
+  retained both backing allocation and caller-buffer import. Required hardware
+  matrix/churn NOT RUN under user playback deferral; no root installation.
 
 - Human requested commit all (2026-10-03): Chrome caller-buffer import candidate
   committed as32fcf95 on codex/chrome-prime-import in the isolated checkout.

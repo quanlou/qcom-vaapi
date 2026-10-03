@@ -19,6 +19,7 @@ mod state;
 mod surface;
 mod surface_backing;
 mod surface_export;
+mod surface_import;
 mod sync;
 mod v4l2;
 mod va_drm;

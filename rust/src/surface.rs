@@ -82,6 +82,14 @@ fn validate_surface_creation_attributes(
         if attribute.flags & VA_SURFACE_ATTRIB_SETTABLE == 0 {
             continue;
         }
+        if attribute.type_ == VASurfaceAttribType::VASurfaceAttribExternalBufferDescriptor {
+            if attribute.value.type_ != VAGenericValueType::VAGenericValueTypePointer
+                || unsafe { attribute.value.value.p }.is_null()
+            {
+                return err(VA_STATUS_ERROR_INVALID_PARAMETER);
+            }
+            continue;
+        }
         if attribute.type_ == VASurfaceAttribType::VASurfaceAttribDRMFormatModifiers {
             if attribute.value.type_ != VAGenericValueType::VAGenericValueTypePointer
                 || unsafe { attribute.value.value.p }.is_null()
@@ -104,7 +112,9 @@ fn validate_surface_creation_attributes(
                 err(VA_STATUS_ERROR_INVALID_PARAMETER)
             }
             VASurfaceAttribType::VASurfaceAttribMemoryType
-                if value == VA_SURFACE_ATTRIB_MEM_TYPE_VA =>
+                if value == VA_SURFACE_ATTRIB_MEM_TYPE_VA
+                    || value == crate::va_drm::VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME
+                    || value == crate::va_drm::VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2 =>
             {
                 ok()
             }
@@ -192,6 +202,32 @@ pub(crate) unsafe extern "C" fn create_surfaces2(
     let Some(state) = (unsafe { state_from_ctx(ctx) }) else {
         return err(VA_STATUS_ERROR_INVALID_DISPLAY);
     };
+    if surfaces.is_null() || num_surfaces == 0 {
+        return err(VA_STATUS_ERROR_INVALID_PARAMETER);
+    }
+    if num_surfaces as usize > DRV_MAX_SURFACES {
+        return err(VA_STATUS_ERROR_MAX_NUM_EXCEEDED);
+    }
+    if !(DRV_MIN_DIM as u32..=DRV_MAX_DIM as u32).contains(&width)
+        || !(DRV_MIN_DIM as u32..=DRV_MAX_DIM as u32).contains(&height)
+    {
+        return err(VA_STATUS_ERROR_INVALID_PARAMETER);
+    }
+    match unsafe {
+        crate::surface_import::parse_attributes(
+            decoded_format,
+            width,
+            height,
+            num_surfaces,
+            attributes,
+        )
+    } {
+        Ok(Some(imports)) => {
+            return crate::surface_import::create_imported_surfaces(state, imports, surfaces);
+        }
+        Ok(None) => {}
+        Err(status) => return status,
+    }
     create_surfaces_common(
         state,
         width as i32,
@@ -371,6 +407,8 @@ mod tests {
         let mut memory = attr(VASurfaceAttribType::VASurfaceAttribMemoryType);
         memory.flags = VA_SURFACE_ATTRIB_SETTABLE;
         memory.value.value.i = VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2 as i32;
+        assert_eq!(validate_surface_creation_attributes(fmt, &[memory]), ok());
+        memory.value.value.i = VA_SURFACE_ATTRIB_MEM_TYPE_USER_PTR as i32;
         assert_eq!(
             validate_surface_creation_attributes(fmt, &[memory]),
             VA_STATUS_ERROR_UNSUPPORTED_MEMORY_TYPE as VAStatus
@@ -390,12 +428,12 @@ mod tests {
             ok()
         );
 
-        // An attribute we genuinely cannot honor is still rejected.
+        // External imports require a non-null pointer descriptor.
         let mut external = attr(VASurfaceAttribType::VASurfaceAttribExternalBufferDescriptor);
         external.flags = VA_SURFACE_ATTRIB_SETTABLE;
         assert_eq!(
             validate_surface_creation_attributes(fmt, &[external]),
-            VA_STATUS_ERROR_ATTR_NOT_SUPPORTED as VAStatus
+            VA_STATUS_ERROR_INVALID_PARAMETER as VAStatus
         );
     }
 

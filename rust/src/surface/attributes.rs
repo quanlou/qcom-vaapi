@@ -87,7 +87,7 @@ fn fill_surface_attr(a: &mut VASurfaceAttrib, mode: SurfaceAttrMode, format: Dec
         }
         VASurfaceAttribType::VASurfaceAttribMemoryType => set_surface_attr_value(
             a,
-            VA_SURFACE_ATTRIB_GETTABLE,
+            VA_SURFACE_ATTRIB_GETTABLE | VA_SURFACE_ATTRIB_SETTABLE,
             exported_surface_memory_types(VA_SURFACE_ATTRIB_MEM_TYPE_VA) as i32,
         ),
         VASurfaceAttribType::VASurfaceAttribMinWidth => {

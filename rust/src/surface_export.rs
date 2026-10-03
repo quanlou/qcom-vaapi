@@ -135,7 +135,7 @@ fn close_export_fd(fd: c_int) {
 
 // One GiB bounds all standalone PRIME storage owned by a display, independent
 // of the existing per-session CAPTURE and two-context budgets.
-const MAX_EXPORT_BACKING_BYTES: usize = 1024 * 1024 * 1024;
+pub(crate) const MAX_EXPORT_BACKING_BYTES: usize = 1024 * 1024 * 1024;
 
 pub(crate) fn export_ready_surface(
     guard: &mut DriverState,

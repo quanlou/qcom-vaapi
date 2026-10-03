@@ -1,3 +1,21 @@
+ROOT HUMAN-REQUESTED MAIN INTEGRATION / HOST CHECKS PASS (2026-10-03):
+Chrome caller-buffer import commit32fcf95 merged with mainf0ec362 DMA-BUF
+capture. Combined282 all-feature host tests/4 ignored,4 stress and286 parallel
+host tests/4 ignored, fmt/diff/strictClippy/system-av1 release PASS.
+Evidence /home/mq/.cache/libva-v4l2-qualification/resume-20261002/chrome-prime-import-main-integration.i8vblxex. Driver SHA256
+7ef6d45430915c6a4eee5f495970edaba4785624de050ad134860034eaffb6cc.
+Only PROGRESS conflict: preserve main historical entries and duplicate existing
+branch notes; source surface_backing auto-merge retains both allocation/import
+paths. Conflict and resolution preserved. Linear NV12/P010 single-storage
+PRIME/PRIME2 supported; tiling/nonzero modifiers/distinct storage unsupported.
+Actual failed Chrome descriptor and separate decode error remain unobserved/
+unresolved. Required hardware matrix/churn/browser/exact510/traced-memory
+NOT RUN by root under playback deferral; no hardware qualification transfer.
+Separate owner handles its own installation; this merge was not installed by
+root. ZERO root decoder/BPF/ptrace/lease/privilege/install/publication/messages.
+Strict120s/512MiB and browser gates unchanged. Automation PAUSED preserved;
+expanded qualification remains incomplete. Historical evidence below retained.
+
 ROOT HUMAN-AUTHORIZED ISOLATED CHROME IMPORT HOST CANDIDATE / PLAYBACK DEFERRED (2026-10-03):
 Human continue authorized the host-only fix in isolated checkout
 /home/mq/.codex/worktrees/chrome-prime-import/libva-v4l2 at ca519631.
