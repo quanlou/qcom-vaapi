@@ -101,7 +101,8 @@ pub(super) struct PollFd {
 }
 
 unsafe extern "C" {
-    pub(super) fn open(pathname: *const c_char, flags: c_int, mode: c_int) -> c_int;
+    // POSIX open has an optional mode argument; match libc's variadic ABI.
+    pub(super) fn open(pathname: *const c_char, flags: c_int, ...) -> c_int;
     pub(super) fn close(fd: c_int) -> c_int;
     fn ioctl(fd: c_int, request: c_ulong, ...) -> c_int;
     pub(super) fn mmap(
