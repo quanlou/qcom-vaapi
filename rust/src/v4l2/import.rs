@@ -1,19 +1,9 @@
-//! Opt-in external CAPTURE storage. Iris determines the completed slot; this
+//! External CAPTURE storage. Iris determines the completed slot; this
 //! backend does not assign an input picture to a predetermined VA surface BO.
 
 use super::{V4l2Session, debug_enabled};
 use crate::bindings::*;
-use std::ffi::OsStr;
 use std::os::fd::{AsRawFd, OwnedFd};
-
-pub(super) fn capture_memory(value: Option<&OsStr>) -> Result<u32, ()> {
-    match value {
-        None => Ok(v4l2_memory::V4L2_MEMORY_MMAP as u32),
-        Some(v) if v == "0" => Ok(v4l2_memory::V4L2_MEMORY_MMAP as u32),
-        Some(v) if v == "1" => Ok(v4l2_memory::V4L2_MEMORY_DMABUF as u32),
-        _ => Err(()),
-    }
-}
 
 /// Validate the negotiated storage geometry, not the visible VA dimensions.
 /// In particular, Iris puts chroma after its padded luma storage height.
@@ -104,16 +94,18 @@ mod tests {
     }
 
     #[test]
-    fn import_requires_explicit_opt_in() {
-        let mmap = v4l2_memory::V4L2_MEMORY_MMAP as u32;
-        assert_eq!(capture_memory(None), Ok(mmap));
-        assert_eq!(capture_memory(Some(OsStr::new("0"))), Ok(mmap));
-        assert_eq!(
-            capture_memory(Some(OsStr::new("1"))),
-            Ok(v4l2_memory::V4L2_MEMORY_DMABUF as u32)
-        );
-        for value in ["", "true", "2"] {
-            assert!(capture_memory(Some(OsStr::new(value))).is_err());
+    fn capture_requires_display_drm_fd_before_opening_decoder() {
+        for fd in [None, Some(-1)] {
+            assert!(
+                V4l2Session::open_and_setup(
+                    3840,
+                    2160,
+                    super::super::V4L2_PIX_FMT_H264,
+                    DecodedFormat::Nv12.v4l2_fourcc(),
+                    fd,
+                )
+                .is_err()
+            );
         }
     }
 

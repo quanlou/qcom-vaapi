@@ -134,7 +134,6 @@ count as passes. GitHub Actions runs the hardware-free checks.
 | --- | --- |
 | `V4L2_VA_DEBUG=1` | Driver logs |
 | `V4L2_VA_DEVICE=/dev/video0` | Override decoder discovery |
-| `V4L2_VA_CAPTURE_DMABUF=1` | Experimental CAPTURE import using externally allocated MSM GPU buffers |
 | `V4L2_VA_EXPERIMENTAL_AV1=0` | Disable AV1 in the system variant |
 | `V4L2_VA_AV1_COMPLETE_LIBRARY=/path/to/library.so` | Override the AV1 companion |
 | `V4L2_VA_STRICT=1` | Fail verification on missing or skipped checks |
@@ -143,9 +142,9 @@ count as passes. GitHub Actions runs the hardware-free checks.
 For AV1 in a default source build, set both `V4L2_VA_EXPERIMENTAL_AV1=1` and
 `V4L2_VA_AV1_CBS_TRANSPORT=1`, and provide the companion library.
 
-The CAPTURE import backend is opt-in; unset `V4L2_VA_CAPTURE_DMABUF` or set it
-to `0` for the default MMAP backend. It requires an MSM render-node display
-and Iris DMABUF support, and fails if allocation or import cannot be completed.
+CAPTURE imports externally allocated MSM GPU DMA-BUFs by default. No environment
+switch is required. Decoding requires an MSM render-node display and Iris DMABUF
+support, and fails if allocation or import cannot be completed.
 Buffers use the decoder's negotiated padded storage geometry. The render fd
 comes from libva, so the backend does not open an extra render device in a
 browser sandbox. Imported storage is owned across queue growth and session

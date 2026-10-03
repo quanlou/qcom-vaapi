@@ -184,17 +184,12 @@ impl V4l2Session {
         capture_fourcc: u32,
         drm_fd: Option<RawFd>,
     ) -> Result<Self, ()> {
-        let memory = import::capture_memory(std::env::var_os("V4L2_VA_CAPTURE_DMABUF").as_deref())?;
-        let capture_drm_fd = if memory == v4l2_memory::V4L2_MEMORY_DMABUF as u32 {
-            let fd = drm_fd.filter(|fd| *fd >= 0).ok_or(())?;
-            Some(
-                unsafe { BorrowedFd::borrow_raw(fd) }
-                    .try_clone_to_owned()
-                    .map_err(|_| ())?,
-            )
-        } else {
-            None
-        };
+        let fd = drm_fd.filter(|fd| *fd >= 0).ok_or(())?;
+        let capture_drm_fd = Some(
+            unsafe { BorrowedFd::borrow_raw(fd) }
+                .try_clone_to_owned()
+                .map_err(|_| ())?,
+        );
         let devnode = decoder_device();
         let c_path = CString::new(devnode.as_str()).map_err(|_| ())?;
         let fd = unsafe { open(c_path.as_ptr(), O_RDWR | O_NONBLOCK | O_CLOEXEC as c_int, 0) };
@@ -237,7 +232,7 @@ impl V4l2Session {
             capture_metadata_ready: false,
         };
 
-        this.cap.memory = memory;
+        this.cap.memory = v4l2_memory::V4L2_MEMORY_DMABUF as u32;
 
         if this.query_cap().is_err()
             || this.subscribe_events().is_err()
