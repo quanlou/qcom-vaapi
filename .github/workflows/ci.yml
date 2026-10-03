@@ -6,13 +6,16 @@ permissions:
   contents: read
   checks: write
 
+env:
+  RUST_TOOLCHAIN: "1.92.0"
+
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
-        run: rustup update stable && rustup default stable
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component rustfmt --component clippy && rustup default "$RUST_TOOLCHAIN"
       - name: Formatting
         run: cargo fmt --manifest-path rust/Cargo.toml -- --check
       - name: Unit tests
@@ -21,11 +24,11 @@ jobs:
       - name: Defensive and concurrent stress
         run: ./tools/verify-host-stress.sh 2>&1 | tee host-stress.log
       - name: Lints
-        run: cargo clippy --locked --manifest-path rust/Cargo.toml --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --manifest-path rust/Cargo.toml --all-targets --all-features -- -D warnings 2>&1 | tee rust-lints.log
       - name: Release build
-        run: cargo build --locked --manifest-path rust/Cargo.toml --release --all-features
+        run: cargo build --locked --manifest-path rust/Cargo.toml --release --all-features 2>&1 | tee release-build.log
       - name: Verification regressions
-        run: python3 -m unittest discover -s tools/tests -v
+        run: python3 -m unittest discover -s tools/tests -v 2>&1 | tee verifier-tests.log
       - name: Shell syntax
         run: for script in tools/*.sh; do bash -n "$script"; done
       - name: Report Rust check failure
@@ -34,7 +37,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const log = ['rust-tests.log', 'host-stress.log'].filter(name => fs.existsSync(name))
+            const log = ['rust-tests.log', 'host-stress.log', 'rust-lints.log', 'release-build.log', 'verifier-tests.log'].filter(name => fs.existsSync(name))
               .map(name => `=== ${name} ===\n${fs.readFileSync(name, 'utf8')}`).join('\n').slice(-50000);
             await github.rest.checks.create({
               owner: context.repo.owner, repo: context.repo.repo, head_sha: context.sha,
