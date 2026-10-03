@@ -16,6 +16,7 @@ use crate::sync::apply_ready_captures;
 use crate::v4l2::V4l2Session;
 use crate::{err, ok, state_from_ctx};
 use std::ffi::c_int;
+use std::os::fd::{AsRawFd, RawFd};
 use std::slice;
 
 // Permit one decoder replacement or second player while retaining a bounded
@@ -41,8 +42,9 @@ pub(crate) unsafe extern "C" fn create_context(
             render_targets,
             num_render_targets,
             context,
-            |width, height, coded_fourcc, capture_fourcc| {
-                V4l2Session::open_and_setup(width, height, coded_fourcc, capture_fourcc).map(Some)
+            |width, height, coded_fourcc, capture_fourcc, drm_fd| {
+                V4l2Session::open_and_setup(width, height, coded_fourcc, capture_fourcc, drm_fd)
+                    .map(Some)
             },
         )
     }
@@ -59,7 +61,7 @@ unsafe fn create_context_with_setup(
     render_targets: *mut VASurfaceID,
     num_render_targets: c_int,
     context: *mut VAContextID,
-    setup: impl FnOnce(i32, i32, u32, u32) -> Result<Option<V4l2Session>, ()>,
+    setup: impl FnOnce(i32, i32, u32, u32, Option<RawFd>) -> Result<Option<V4l2Session>, ()>,
 ) -> VAStatus {
     if context.is_null()
         || num_render_targets < 0
@@ -131,6 +133,7 @@ unsafe fn create_context_with_setup(
         picture_height,
         codec.fourcc(),
         cfg.format.v4l2_fourcc(),
+        guard.drm_fd.as_ref().map(AsRawFd::as_raw_fd),
     ) else {
         return err(VA_STATUS_ERROR_OPERATION_FAILED);
     };
@@ -278,7 +281,7 @@ mod tests {
                         std::ptr::null_mut(),
                         0,
                         output,
-                        |_, _, _, _| {
+                        |_, _, _, _, _| {
                             setups.set(setups.get() + 1);
                             Ok(None)
                         },
@@ -337,7 +340,7 @@ mod tests {
                     &mut target,
                     1,
                     &mut output,
-                    |_, _, _, _| panic!("budget must be checked before opening a session"),
+                    |_, _, _, _, _| panic!("budget must be checked before opening a session"),
                 )
             },
             err(VA_STATUS_ERROR_MAX_NUM_EXCEEDED)
@@ -357,7 +360,7 @@ mod tests {
                     &mut target,
                     1,
                     &mut output,
-                    |_, _, _, _| Err(()),
+                    |_, _, _, _, _| Err(()),
                 )
             },
             err(VA_STATUS_ERROR_OPERATION_FAILED)
@@ -392,7 +395,7 @@ mod tests {
                     &mut target,
                     1,
                     &mut output,
-                    |_, _, _, _| panic!("foreign surface must be rejected before setup"),
+                    |_, _, _, _, _| panic!("foreign surface must be rejected before setup"),
                 )
             },
             err(VA_STATUS_ERROR_SURFACE_BUSY)
@@ -458,7 +461,7 @@ mod tests {
                         std::ptr::null_mut(),
                         0,
                         &mut context,
-                        |_, _, _, _| Ok(None),
+                        |_, _, _, _, _| Ok(None),
                     )
                 },
                 ok()
@@ -583,7 +586,7 @@ mod tests {
                         std::ptr::null_mut(),
                         0,
                         &mut context,
-                        |_, _, _, _| Ok(None),
+                        |_, _, _, _, _| Ok(None),
                     )
                 },
                 ok()

@@ -38,7 +38,7 @@ impl V4l2Session {
         if fd >= 0 {
             let mut req: v4l2_requestbuffers = zeroed();
             req.type_ = q.type_;
-            req.memory = v4l2_memory::V4L2_MEMORY_MMAP as u32;
+            req.memory = q.memory;
             req.count = 0;
             let _ = xioctl(fd, VIDIOC_REQBUFS, &mut req as *mut _ as *mut c_void);
         }

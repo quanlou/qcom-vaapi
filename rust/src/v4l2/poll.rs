@@ -290,8 +290,13 @@ impl V4l2Session {
         if b.addr[0].is_null() || required > b.len[0] {
             return None;
         }
+        let read = super::dmabuf::CpuReadAccess::begin(
+            b.import_fd.as_ref().map(std::os::fd::AsRawFd::as_raw_fd),
+        )
+        .ok()?;
         let bytes =
             unsafe { std::slice::from_raw_parts(b.addr[0] as *const u8, b.len[0]) }.to_vec();
+        read.finish().ok()?;
         Some((bytes, stride, height))
     }
 
@@ -306,6 +311,15 @@ impl V4l2Session {
         }
         self.map_buffer(false, from_live)?;
         self.map_buffer(false, to_live)?;
+        let read = super::dmabuf::CpuReadAccess::begin(
+            self.cap
+                .buffers
+                .get(from_live)
+                .ok_or(())?
+                .import_fd
+                .as_ref()
+                .map(std::os::fd::AsRawFd::as_raw_fd),
+        )?;
         let (src, len) = match self.cap.buffers.get(from_live) {
             Some(b) if !b.addr[0].is_null() => (b.addr[0], b.len[0]),
             _ => return Err(()),
@@ -319,12 +333,11 @@ impl V4l2Session {
         if len > dst.len[0] {
             return Err(());
         }
-        use std::os::fd::AsRawFd;
-        let access =
-            super::dmabuf::CpuWriteAccess::begin(dst.sync_fd.as_ref().map(AsRawFd::as_raw_fd))?;
+        let access = super::dmabuf::CpuWriteAccess::begin(dst.cpu_sync_fd())?;
         let bytes = len;
         unsafe { ptr::copy_nonoverlapping(src as *const u8, dst.addr[0] as *mut u8, bytes) };
         access.finish()?;
+        read.finish()?;
         dst.planes[0].bytesused = bytes as u32;
         if debug_enabled() {
             eprintln!(
@@ -362,7 +375,11 @@ impl V4l2Session {
         exp.index = live_idx as u32;
         exp.plane = 0;
         exp.flags = O_CLOEXEC;
-        if xioctl(self.fd, VIDIOC_EXPBUF, &mut exp as *mut _ as *mut c_void).is_err() || exp.fd < 0
+        if let Some(fd) = b.import_fd.as_ref() {
+            use std::os::fd::IntoRawFd;
+            exp.fd = fd.try_clone().ok()?.into_raw_fd();
+        } else if xioctl(self.fd, VIDIOC_EXPBUF, &mut exp as *mut _ as *mut c_void).is_err()
+            || exp.fd < 0
         {
             return None;
         }
@@ -555,7 +572,7 @@ impl V4l2Session {
         let mut planes: [v4l2_plane; VIDEO_MAX_PLANES_USIZE] = [zeroed(); VIDEO_MAX_PLANES_USIZE];
         let mut buf: v4l2_buffer = zeroed();
         buf.type_ = self.cap.type_;
-        buf.memory = v4l2_memory::V4L2_MEMORY_MMAP as u32;
+        buf.memory = self.cap.memory;
         buf.length = VIDEO_MAX_PLANES;
         buf.m.planes = planes.as_mut_ptr();
         if xioctl(self.fd, VIDIOC_DQBUF, &mut buf as *mut _ as *mut c_void).is_err() {
@@ -982,6 +999,7 @@ mod tests {
     fn session_with_backed_capture(fd: i32) -> (V4l2Session, Vec<Vec<u8>>) {
         let mut session = V4l2Session {
             fd,
+            capture_drm_fd: None,
             devnode: "/dev/null".to_string(),
             coded_fourcc: V4L2_PIX_FMT_H264,
             capture_fourcc: crate::pixel_format::DecodedFormat::Nv12.v4l2_fourcc(),

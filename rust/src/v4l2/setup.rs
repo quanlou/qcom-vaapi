@@ -377,7 +377,7 @@ impl V4l2Session {
         }
         let mut create: v4l2_create_buffers = zeroed();
         create.count = count;
-        create.memory = v4l2_memory::V4L2_MEMORY_MMAP as u32;
+        create.memory = self.cap.memory;
         create.format = self.cap.fmt;
         xioctl(
             self.fd,
@@ -416,7 +416,13 @@ impl V4l2Session {
         }
         let mut buf: v4l2_buffer = zeroed();
         buf.type_ = self.cap.type_;
-        buf.memory = v4l2_memory::V4L2_MEMORY_MMAP as u32;
+        buf.memory = self.cap.memory;
+        if let Some(fd) = b.import_fd.as_ref() {
+            use std::os::fd::AsRawFd;
+            super::dmabuf::wait_writable(fd.as_raw_fd())?;
+            b.planes[0].m.fd = fd.as_raw_fd();
+            b.planes[0].length = b.len[0] as u32;
+        }
         buf.index = idx as u32;
         buf.length = b.num_planes as u32;
         buf.m.planes = b.planes.as_mut_ptr();

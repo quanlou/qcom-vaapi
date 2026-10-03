@@ -142,7 +142,9 @@ impl V4l2Session {
             let _ = unsafe { super::close(old_fd) };
         }
         self.out = V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE as u32);
+        let capture_memory = self.cap.memory;
         self.cap = V4l2Queue::new(v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE as u32);
+        self.cap.memory = capture_memory;
         self.out_order.clear();
         self.fifo.clear();
         self.eos = false;

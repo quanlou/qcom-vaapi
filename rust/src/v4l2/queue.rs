@@ -1,7 +1,7 @@
 use super::{VIDEO_MAX_PLANES_USIZE, zeroed};
 use crate::bindings::*;
 use std::ffi::c_void;
-use std::os::fd::OwnedFd;
+use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::ptr;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -35,6 +35,9 @@ pub(super) struct V4l2Buffer {
     /// One CLOEXEC handle for cache maintenance and waiting for importer
     /// fences when CPU copies refresh this stable allocation.
     pub(super) sync_fd: Option<OwnedFd>,
+    /// Externally allocated storage imported by CAPTURE. This owner follows
+    /// the slot into legacy pools when the decoder session is rebuilt.
+    pub(super) import_fd: Option<OwnedFd>,
 }
 
 impl V4l2Buffer {
@@ -48,12 +51,21 @@ impl V4l2Buffer {
             planes: [zeroed(); VIDEO_MAX_PLANES_USIZE],
             export_refs: 0,
             sync_fd: None,
+            import_fd: None,
         }
+    }
+
+    pub(super) fn cpu_sync_fd(&self) -> Option<RawFd> {
+        self.import_fd
+            .as_ref()
+            .or(self.sync_fd.as_ref())
+            .map(AsRawFd::as_raw_fd)
     }
 }
 
 pub(super) struct V4l2Queue {
     pub(super) type_: u32,
+    pub(super) memory: u32,
     pub(super) fmt: v4l2_format,
     pub(super) fourcc: u32,
     pub(super) width: u32,
@@ -66,6 +78,7 @@ impl V4l2Queue {
     pub(super) fn new(type_: u32) -> Self {
         Self {
             type_,
+            memory: v4l2_memory::V4L2_MEMORY_MMAP as u32,
             fmt: zeroed(),
             fourcc: 0,
             width: 0,

@@ -1,12 +1,14 @@
 use crate::bindings::*;
 use std::collections::VecDeque;
 use std::ffi::{CString, c_int, c_void};
+use std::os::fd::{AsRawFd, BorrowedFd, OwnedFd, RawFd};
 use std::ptr;
 
 mod abi;
 mod capture;
 mod debug;
 mod dmabuf;
+mod import;
 mod poll;
 mod queue;
 mod recovery;
@@ -110,6 +112,7 @@ struct LegacyPool {
 
 pub(crate) struct V4l2Session {
     fd: c_int,
+    capture_drm_fd: Option<OwnedFd>,
     devnode: String,
     /// Compressed format selected for OUTPUT. Queue objects are rebuilt after
     /// a firmware abort, so this must outlive any one queue incarnation.
@@ -179,7 +182,19 @@ impl V4l2Session {
         height: i32,
         coded_fourcc: u32,
         capture_fourcc: u32,
+        drm_fd: Option<RawFd>,
     ) -> Result<Self, ()> {
+        let memory = import::capture_memory(std::env::var_os("V4L2_VA_CAPTURE_DMABUF").as_deref())?;
+        let capture_drm_fd = if memory == v4l2_memory::V4L2_MEMORY_DMABUF as u32 {
+            let fd = drm_fd.filter(|fd| *fd >= 0).ok_or(())?;
+            Some(
+                unsafe { BorrowedFd::borrow_raw(fd) }
+                    .try_clone_to_owned()
+                    .map_err(|_| ())?,
+            )
+        } else {
+            None
+        };
         let devnode = decoder_device();
         let c_path = CString::new(devnode.as_str()).map_err(|_| ())?;
         let fd = unsafe { open(c_path.as_ptr(), O_RDWR | O_NONBLOCK | O_CLOEXEC as c_int, 0) };
@@ -189,6 +204,7 @@ impl V4l2Session {
 
         let mut this = Self {
             fd,
+            capture_drm_fd,
             devnode,
             coded_fourcc,
             capture_fourcc,
@@ -220,6 +236,8 @@ impl V4l2Session {
             next_submission_timestamp: 0,
             capture_metadata_ready: false,
         };
+
+        this.cap.memory = memory;
 
         if this.query_cap().is_err()
             || this.subscribe_events().is_err()
@@ -303,7 +321,11 @@ impl V4l2Session {
     fn reqbufs(&self, type_: u32, count: u32) -> Result<u32, ()> {
         let mut req: v4l2_requestbuffers = zeroed();
         req.type_ = type_;
-        req.memory = v4l2_memory::V4L2_MEMORY_MMAP as u32;
+        req.memory = if type_ == self.cap.type_ {
+            self.cap.memory
+        } else {
+            self.out.memory
+        };
         req.count = count;
         if xioctl(self.fd, VIDIOC_REQBUFS, &mut req as *mut _ as *mut c_void).is_err() {
             if debug_enabled() {
@@ -316,10 +338,18 @@ impl V4l2Session {
             }
             return Err(());
         }
+        if req.memory == v4l2_memory::V4L2_MEMORY_DMABUF as u32
+            && req.capabilities & V4L2_BUF_CAP_SUPPORTS_DMABUF == 0
+        {
+            return Err(());
+        }
         Ok(req.count)
     }
 
     fn mmap_queue(&mut self, output: bool) -> Result<(), ()> {
+        if !output && self.cap.memory == v4l2_memory::V4L2_MEMORY_DMABUF as u32 {
+            return self.initialize_imported_capture();
+        }
         let q = if output { &mut self.out } else { &mut self.cap };
         for (i, b) in q.buffers.iter_mut().enumerate() {
             // CREATE_BUFS appends a tail. Never reset an existing mapping,
@@ -330,7 +360,7 @@ impl V4l2Session {
             let mut buf: v4l2_buffer = zeroed();
             b.planes = [zeroed(); VIDEO_MAX_PLANES_USIZE];
             buf.type_ = q.type_;
-            buf.memory = v4l2_memory::V4L2_MEMORY_MMAP as u32;
+            buf.memory = q.memory;
             buf.index = i as u32;
             buf.length = VIDEO_MAX_PLANES;
             buf.m.planes = b.planes.as_mut_ptr();
@@ -361,14 +391,18 @@ impl V4l2Session {
             if !b.addr[p].is_null() {
                 continue;
             }
-            let offset = unsafe { b.planes[p].m.mem_offset } as isize;
+            let (map_fd, offset) = if let Some(fd) = b.import_fd.as_ref() {
+                (fd.as_raw_fd(), 0)
+            } else {
+                (self.fd, unsafe { b.planes[p].m.mem_offset } as isize)
+            };
             let addr = unsafe {
                 mmap(
                     ptr::null_mut(),
                     b.len[p],
                     PROT_READ | PROT_WRITE,
                     MAP_SHARED,
-                    self.fd,
+                    map_fd,
                     offset,
                 )
             };
@@ -488,6 +522,7 @@ mod tests {
     fn session_with_mapped_planes(fd: c_int) -> V4l2Session {
         let mut s = V4l2Session {
             fd,
+            capture_drm_fd: None,
             devnode: "/dev/null".to_string(),
             coded_fourcc: V4L2_PIX_FMT_H264,
             capture_fourcc: crate::pixel_format::DecodedFormat::Nv12.v4l2_fourcc(),

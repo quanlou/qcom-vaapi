@@ -261,6 +261,13 @@ impl Drop for GemHandle {
     }
 }
 
+pub(crate) fn allocate_capture_drm(size: usize, fd: RawFd) -> io::Result<OwnedFd> {
+    if size == 0 || size > MAX_ALLOCATION as usize {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
+    allocate_drm(size, fd, retry_ioctl)
+}
+
 fn allocate_drm(size: usize, fd: RawFd, ioctl: Ioctl) -> io::Result<OwnedFd> {
     // Driver-private ioctl numbers overlap across vendors. A forced VA driver
     // selection must never issue MSM GEM_NEW against another GPU driver.

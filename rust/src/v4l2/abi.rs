@@ -90,6 +90,7 @@ pub(super) const VIDIOC_SUBSCRIBE_EVENT: c_ulong =
 pub(super) const VIDIOC_DECODER_CMD: c_ulong = iowr::<v4l2_decoder_cmd>(b'V' as c_ulong, 96);
 
 pub(super) const DMA_BUF_IOCTL_SYNC: c_ulong = iow::<u64>(b'b' as c_ulong, 0);
+pub(super) const DMA_BUF_SYNC_READ: u64 = 1;
 pub(super) const DMA_BUF_SYNC_WRITE: u64 = 2;
 pub(super) const DMA_BUF_SYNC_END: u64 = 4;
 

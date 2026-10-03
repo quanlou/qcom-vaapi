@@ -143,10 +143,7 @@ impl V4l2Session {
                 self.release_capture_reservation(reserved);
                 return None;
             }
-            use std::os::fd::AsRawFd;
-            let Ok(access) = super::dmabuf::CpuWriteAccess::begin(
-                buffer.sync_fd.as_ref().map(AsRawFd::as_raw_fd),
-            ) else {
+            let Ok(access) = super::dmabuf::CpuWriteAccess::begin(buffer.cpu_sync_fd()) else {
                 self.release_capture_reservation(reserved);
                 return None;
             };
@@ -317,6 +314,7 @@ mod tests {
     fn session_with_unmapped_capture(fd: i32) -> V4l2Session {
         let mut session = V4l2Session {
             fd,
+            capture_drm_fd: None,
             devnode: "/dev/null".to_string(),
             coded_fourcc: super::super::V4L2_PIX_FMT_H264,
             capture_fourcc: crate::pixel_format::DecodedFormat::Nv12.v4l2_fourcc(),

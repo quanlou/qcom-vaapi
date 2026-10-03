@@ -649,6 +649,7 @@ pub(super) mod tests {
     pub(crate) fn streaming_session_with_pending_fifo(fd: i32) -> V4l2Session {
         let mut session = V4l2Session {
             fd,
+            capture_drm_fd: None,
             devnode: "/dev/null".to_string(),
             coded_fourcc: super::super::V4L2_PIX_FMT_H264,
             capture_fourcc: crate::pixel_format::DecodedFormat::Nv12.v4l2_fourcc(),
