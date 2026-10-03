@@ -1,0 +1,15 @@
+{
+  "tag": "v0.1.1-rc.5",
+  "release_id": 402388261,
+  "source_commit": "7333271514ed52652563c6ae9eece3dfb664f7ed",
+  "notes": "packaging/releases/v0.1.1-rc.5.md",
+  "original_checksum_sha256": "cf1282fc2de3c83628ac955c1a230517ac12805aee92eaec22a815887cc856c9",
+  "assets": {
+    "ffmpeg-companion-build-inputs.tar.xz": "94b3282424ee151525c1e587e59105f4755ea0e1b06a84228973d49eefadc138",
+    "ffmpeg-companion-source.tar.xz": "58d038fccfec3634127eb04cb8e2dd78792ad52995b9f58c8917929f6e056ade",
+    "qcom-vaapi_0.1.1-rc.5-driver-source.tar.xz": "954742a0afbe9f50db4b8238dfd57a0ccbe4b4ab8f7ba667113253af726c2de9",
+    "qcom-vaapi_0.1.1.rc.5_arm64.deb": "c8ba97b10504304eabc0dc8b5a078cac68b1bd9ee0584095d5c657df13204ea3",
+    "qualification.json": "e53cab6dae517a9f684fde403e6d413a1ab86003f8c42bfe06c35c666949a122",
+    "qcom-vaapi_0.1.1-rc.5-source.tar.xz": "9aa9461a223c02d253ca62f2b9d59f61da9fad6a128654b5ebff411d5681b16f"
+  }
+}

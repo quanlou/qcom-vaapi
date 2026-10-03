@@ -4,6 +4,10 @@ on:
   push:
     tags:
       - 'v*-rc.*'
+    branches:
+      - main
+    paths:
+      - 'packaging/releases/*-maintenance.json'
 
 permissions:
   contents: write
@@ -14,6 +18,7 @@ concurrency:
 
 jobs:
   publish:
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,6 +65,12 @@ jobs:
                   raise SystemExit(f'Asset checksum mismatch: {name}')
           PY
           git archive --format=tar HEAD | xz > "release-assets/$SOURCE_ARCHIVE"
+          python3 - <<'PY'
+          from pathlib import Path
+          for path in Path('release-assets').iterdir():
+              if path.is_file() and '~' in path.name:
+                  path.rename(path.with_name(path.name.replace('~', '.')))
+          PY
           cd release-assets
           sha256sum *.deb *.tar.xz qualification.json > SHA256SUMS
       - name: Publish prerelease and upload assets
@@ -85,7 +96,7 @@ jobs:
                 draft: true, prerelease: true, make_latest: 'false'
               })).data;
             }
-            const names = [...Object.keys(manifest.assets), manifest.source_archive, 'SHA256SUMS'];
+            const names = [...Object.keys(manifest.assets).map(name => name.replace(/~/g, '.')), manifest.source_archive, 'SHA256SUMS'];
             const existing = (await github.rest.repos.listReleaseAssets({...params, release_id: release.id})).data;
             const crypto = require('crypto');
             for (const name of names) {
@@ -106,3 +117,49 @@ jobs:
             await github.rest.repos.updateRelease({...params, release_id: release.id, draft: false,
               prerelease: true, make_latest: 'false'});
             core.summary.addLink('Published release', release.html_url).write();
+
+  maintain:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Align published checksums and installation notes
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const crypto = require('crypto');
+            const manifest = JSON.parse(fs.readFileSync('packaging/releases/v0.1.1-rc.5-maintenance.json', 'utf8'));
+            const params = {owner: context.repo.owner, repo: context.repo.repo};
+            const release = (await github.rest.repos.getReleaseByTag({...params, tag: manifest.tag})).data;
+            if (release.id !== manifest.release_id || release.target_commitish !== manifest.source_commit) {
+              throw new Error('Published release identity changed');
+            }
+            const assets = (await github.rest.repos.listReleaseAssets({...params, release_id: release.id})).data;
+            const names = Object.keys(manifest.assets).sort();
+            if (assets.filter(asset => asset.name !== 'SHA256SUMS').length !== names.length) {
+              throw new Error('Published asset inventory changed');
+            }
+            for (const name of names) {
+              const asset = assets.find(asset => asset.name === name);
+              if (!asset || asset.digest !== `sha256:${manifest.assets[name]}`) {
+                throw new Error(`Published asset changed: ${name}`);
+              }
+            }
+            const data = Buffer.from(names.map(name => `${manifest.assets[name]}  ${name}\n`).join(''));
+            const hash = crypto.createHash('sha256').update(data).digest('hex');
+            const previous = assets.find(asset => asset.name === 'SHA256SUMS');
+            if (previous && previous.digest !== `sha256:${hash}`) {
+              if (previous.digest !== `sha256:${manifest.original_checksum_sha256}`) {
+                throw new Error('Checksum asset changed; refusing replacement');
+              }
+              await github.rest.repos.deleteReleaseAsset({...params, asset_id: previous.id});
+            }
+            if (!previous || previous.digest !== `sha256:${hash}`) {
+              await github.rest.repos.uploadReleaseAsset({...params, release_id: release.id,
+                name: 'SHA256SUMS', data,
+                headers: {'content-type': 'application/octet-stream', 'content-length': data.length}});
+            }
+            await github.rest.repos.updateRelease({...params, release_id: release.id,
+              body: fs.readFileSync(manifest.notes, 'utf8'), prerelease: true, make_latest: 'false'});
+            core.summary.addLink('Verified release', release.html_url).write();

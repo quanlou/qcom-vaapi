@@ -29,7 +29,7 @@ unqualified.
 Download the `.deb` from [the rc.5 release](https://github.com/quanlou/qcom-vaapi/releases/tag/v0.1.1-rc.5), then:
 
 ```sh
-sudo apt install ./qcom-vaapi_0.1.1~rc.5_arm64.deb
+sudo apt install ./qcom-vaapi_0.1.1.rc.5_arm64.deb
 ```
 
 **Requirements:** ARM64, X1E80100, `libc6 >= 2.44`, `libva2 >= 2.24`, and a

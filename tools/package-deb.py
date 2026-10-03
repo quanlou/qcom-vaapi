@@ -33,7 +33,9 @@ def main():
     if subprocess.check_output(['dpkg', '--print-architecture'], text=True).strip() != 'arm64':
         parser.error('build this package on ARM64 so dependency detection uses the target libraries')
     args.output.mkdir(parents=True, exist_ok=True)
-    output = args.output.resolve() / f'qcom-vaapi_{deb_version}_arm64.deb'
+    # GitHub normalizes '~' in uploaded filenames; retain it in package metadata.
+    asset_version = deb_version.replace('~', '.')
+    output = args.output.resolve() / f'qcom-vaapi_{asset_version}_arm64.deb'
     if output.exists():
         parser.error(f'refusing to overwrite {output}')
     with tempfile.TemporaryDirectory(prefix='qcom-vaapi-deb-') as scratch:
