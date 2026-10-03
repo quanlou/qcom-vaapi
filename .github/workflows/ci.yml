@@ -18,20 +18,8 @@ jobs:
       - name: Unit tests
         id: unit_tests
         run: cargo test --locked --manifest-path rust/Cargo.toml 2>&1 | tee rust-tests.log
-      - name: Report test failure
-        if: failure() && steps.unit_tests.outcome == 'failure'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const log = fs.readFileSync('rust-tests.log', 'utf8').slice(-30000);
-            await github.rest.checks.create({
-              owner: context.repo.owner, repo: context.repo.repo, head_sha: context.sha,
-              name: 'Rust test diagnostics', status: 'completed', conclusion: 'failure',
-              output: {title: 'Rust host checks failed', summary: `Build/test output:\n\n\`\`\`text\n${log}\n\`\`\``}
-            });
       - name: Defensive and concurrent stress
-        run: ./tools/verify-host-stress.sh
+        run: ./tools/verify-host-stress.sh 2>&1 | tee host-stress.log
       - name: Lints
         run: cargo clippy --locked --manifest-path rust/Cargo.toml --all-targets --all-features -- -D warnings
       - name: Release build
@@ -40,3 +28,16 @@ jobs:
         run: python3 -m unittest discover -s tools/tests -v
       - name: Shell syntax
         run: for script in tools/*.sh; do bash -n "$script"; done
+      - name: Report Rust check failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const log = ['rust-tests.log', 'host-stress.log'].filter(name => fs.existsSync(name))
+              .map(name => `=== ${name} ===\n${fs.readFileSync(name, 'utf8')}`).join('\n').slice(-50000);
+            await github.rest.checks.create({
+              owner: context.repo.owner, repo: context.repo.repo, head_sha: context.sha,
+              name: 'Rust test diagnostics', status: 'completed', conclusion: 'failure',
+              output: {title: 'Rust host checks failed', summary: `Build/test output:\n\n\`\`\`text\n${log}\n\`\`\``}
+            });
