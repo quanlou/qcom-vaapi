@@ -54,6 +54,19 @@ def main():
                                (companion, libraries / 'libiris_av1_complete.so')]:
             shutil.copyfile(source, target)
             target.chmod(0o755)
+        helper = package / 'usr/libexec/qcom-vaapi'
+        helper.mkdir(parents=True)
+        shutil.copyfile(ROOT / 'tools/playback-power-profile.py', helper / 'playback-power-profile.py')
+        units = package / 'usr/lib/systemd/system'
+        units.mkdir(parents=True)
+        shutil.copyfile(ROOT / 'packaging/qcom-vaapi-playback-power.service',
+                        units / 'qcom-vaapi-playback-power.service')
+        kernel_docs = docs / 'kernel'
+        kernel_docs.mkdir()
+        for patch in (ROOT / 'kernel').glob('*.patch'):
+            shutil.copyfile(patch, kernel_docs / patch.name)
+        shutil.copyfile(ROOT / 'kernel/README.md', kernel_docs / 'README.md')
+        shutil.copyfile(ROOT / 'kernel/LICENSE-GPL-2.0-only', kernel_docs / 'LICENSE-GPL-2.0-only')
         shutil.copyfile(ROOT / 'LICENSE', docs / 'LICENSE.driver-MIT')
         shutil.copyfile(ROOT / 'producers/LICENSE-GPL-2.0-or-later', docs / 'LICENSE.producer-patches')
         for name in ['COPYING.GPLv2', 'COPYING.GPLv3', 'COPYING.LGPLv2.1', 'COPYING.LGPLv3', 'LICENSE.md']:
@@ -85,7 +98,7 @@ def main():
         (metadata / 'control').write_text(
             f'Package: qcom-vaapi\nVersion: {deb_version}\nArchitecture: arm64\n'
             'Maintainer: qcom-vaapi contributors\nSection: video\nPriority: optional\n'
-            f'Depends: {dependencies}\n'
+            f'Depends: {dependencies}, python3\n'
             'Description: Qualcomm Iris VA-API driver with experimental AV1\n'
             ' H.264, HEVC, VP9 and experimental 8-bit AV1 on Snapdragon X Elite X1E80100.\n'
             ' Includes the AV1 CBS companion; compatible Iris kernel and firmware required.\n')

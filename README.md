@@ -22,8 +22,12 @@ Chrome; those historical results do not qualify the new binary.
 CPU image access and DRM PRIME export are supported. Exported surfaces retain
 their own backing storage. Current source decodes H.264, HEVC and VP9 directly
 into driver-owned surface DMA-BUFs on Iris with decode-order controls; browser
-export does not copy decoded pixels. This RC7 development source is newer than
-the tagged RC6 binary. Firefox 4K60, 10-bit AV1, other chips and broad
+export does not copy decoded pixels. The RC8 development source adds optional
+decode timing diagnostics and is newer than the tagged RC6 binary. Its package
+also ships a disabled GPU power helper and experimental kernel patches as
+documentation. The patches are not activated by installation; warm reopen and
+kernel memory corruption remain unresolved in candidate testing. See the
+[RC8 development notes](docs/releases/0.1.1-rc.8.md). Firefox 4K60, 10-bit AV1, other chips and broad
 suspend/resume reliability remain unqualified.
 
 ## Install

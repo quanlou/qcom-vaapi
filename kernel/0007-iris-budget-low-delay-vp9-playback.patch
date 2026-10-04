@@ -1,0 +1,53 @@
+media: iris: budget bandwidth and latency for low-delay VP9 playback
+
+Use the measured input rate for the interconnect vote instead of an
+unconditional 30 fps. For explicitly selected decode-order VP9, make a
+conservative single-picture clock budget. These clients serialize selected
+linear outputs, so a four-picture throughput estimate leaves too little
+latency headroom. This changes the clock estimate, not the firmware pipe
+configuration. The vote still scales with resolution and input rate.
+
+Requires 0004's DISPLAY_DELAY controls. This is an experimental downstream
+policy for X1E80100, not a claim that the hardware has only one decoder pipe.
+Other codecs and default display-order VP9 retain their clock calculation.
+
+--- a/drivers/media/platform/qcom/iris/iris_power.c
++++ b/drivers/media/platform/qcom/iris/iris_power.c
+@@ -68,7 +68,7 @@
+ 
+ 	vote_data->width = inp_f->fmt.pix_mp.width;
+ 	vote_data->height = inp_f->fmt.pix_mp.height;
+-	vote_data->fps = DEFAULT_FPS;
++	vote_data->fps = inst->frame_rate;
+ 
+ 	inst->power.icc_bw = iris_calc_bw(inst, vote_data);
+ 
+--- a/drivers/media/platform/qcom/iris/iris_vpu_common.c
++++ b/drivers/media/platform/qcom/iris/iris_vpu_common.c
+@@ -429,6 +429,7 @@
+ 	u64 fw_cycles, fw_vpp_cycles;
+ 	u64 vsp_cycles, vpp_cycles;
+ 	u32 fps = inst->frame_rate;
++	u32 pipes = inst->fw_caps[PIPE].value;
+ 
+ 	width = max(inp_f->fmt.pix_mp.width, inst->crop.width);
+ 	height = max(inp_f->fmt.pix_mp.height, inst->crop.height);
+@@ -439,7 +440,17 @@
+ 	fw_cycles = fps * caps->mb_cycles_fw;
+ 	fw_vpp_cycles = fps * caps->mb_cycles_fw_vpp;
+ 
+-	vpp_cycles = mult_frac(mbs_per_second, caps->mb_cycles_vpp, (u32)inst->fw_caps[PIPE].value);
++	/* Low-delay VP9 clients wait for each selected linear output. Budget
++	 * its latency without assuming four independent pictures in flight;
++	 * a throughput-only vote can underclock this serialized path.
++	 * Keep the negotiated firmware pipe configuration unchanged.
++	 */
++	if (inst->domain == DECODER && inst->codec == V4L2_PIX_FMT_VP9 &&
++	    inst->fw_caps[DISPLAY_DELAY_ENABLE].value &&
++	    !inst->fw_caps[DISPLAY_DELAY].value)
++		pipes = 1;
++
++	vpp_cycles = mult_frac(mbs_per_second, caps->mb_cycles_vpp, pipes);
+ 	/* 21 / 20 is minimum overhead factor */
+ 	vpp_cycles += max(div_u64(vpp_cycles, 20), fw_vpp_cycles);
+ 

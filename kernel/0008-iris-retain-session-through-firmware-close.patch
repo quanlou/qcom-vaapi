@@ -1,0 +1,194 @@
+Subject: [PATCH] media: iris: retain sessions and queues through firmware close
+SPDX-License-Identifier: GPL-2.0-only
+
+The firmware response lookup drops core->lock before taking inst->lock.
+Pin the instance until each response handler finishes, and ignore handlers
+which acquire the lock after close removed the session. Stop queues before
+SESSION_CLOSE, but retain their context until the close exchange completes.
+This also prevents BUFFER responses accessing a previously freed m2m_ctx.
+
+The reference-count approach follows the upstream proposal by Dmitry Baryshkov:
+https://lore.kernel.org/all/20260731-iris-fixes-v2-5-94c002016a09@oss.qualcomm.com/
+The queue ordering and closed-session guard extend that proposal.
+This is a candidate lifetime fix; it does not prove the cause of an observed
+DMA page-array crash or firmware stability on EL2.
+
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
+@@ -630,8 +630,10 @@
+ 		inst = iris_get_instance(core, pkt->shdr.session_id);
+ 		if (inst) {
+ 			mutex_lock(&inst->lock);
+-			iris_hfi_gen1_session_event_notify(inst, hdr);
++			if (!inst->closed)
++				iris_hfi_gen1_session_event_notify(inst, hdr);
+ 			mutex_unlock(&inst->lock);
++			iris_inst_put(inst);
+ 		} else {
+ 			iris_hfi_gen1_sys_event_notify(core, hdr);
+ 		}
+@@ -648,6 +650,8 @@
+ 		}
+ 
+ 		mutex_lock(&inst->lock);
++		if (inst->closed)
++			goto unlock;
+ 		if (hdr->pkt_type == HFI_MSG_SESSION_EMPTY_BUFFER) {
+ 			iris_hfi_gen1_session_etb_done(inst, hdr);
+ 		} else if (hdr->pkt_type == HFI_MSG_SESSION_FILL_BUFFER) {
+@@ -666,7 +670,9 @@
+ 				complete(&inst->completion);
+ 			}
+ 		}
++unlock:
+ 		mutex_unlock(&inst->lock);
++		iris_inst_put(inst);
+ 
+ 		break;
+ 	}
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
+@@ -933,6 +933,10 @@
+ 		return -EINVAL;
+ 
+ 	mutex_lock(&inst->lock);
++	if (inst->closed) {
++		ret = -EINVAL;
++		goto unlock;
++	}
+ 	inst_hfi_gen2 = to_iris_inst_hfi_gen2(inst);
+ 	memset(&inst_hfi_gen2->hfi_frame_info, 0, sizeof(struct iris_hfi_frame_info));
+ 
+@@ -968,7 +972,9 @@
+ 	if (dequeue)
+ 		iris_hfi_gen2_handle_dequeue_buffers(inst);
+ 
++unlock:
+ 	mutex_unlock(&inst->lock);
++	iris_inst_put(inst);
+ 
+ 	return ret;
+ }
+--- a/drivers/media/platform/qcom/iris/iris_instance.h
++++ b/drivers/media/platform/qcom/iris/iris_instance.h
+@@ -6,6 +6,7 @@
+ #ifndef __IRIS_INSTANCE_H__
+ #define __IRIS_INSTANCE_H__
+ 
++#include <linux/kref.h>
+ #include <media/v4l2-ctrls.h>
+ 
+ #include "iris_buffer.h"
+@@ -35,6 +36,8 @@
+  * struct iris_inst - holds per video instance parameters
+  *
+  * @list: used for attach an instance to the core
++ * @kref: references held by the file and firmware response handlers
++ * @closed: teardown completed, protected by lock
+  * @core: pointer to core structure
+  * @session_id: id of current video session
+  * @hfi_session_ops: iris HFI session ops
+@@ -82,6 +85,8 @@
+ 
+ struct iris_inst {
+ 	struct list_head		list;
++	struct kref			kref;
++	bool				closed;
+ 	struct iris_core		*core;
+ 	u32				session_id;
+ 	const struct iris_hfi_session_ops	*hfi_session_ops;
+--- a/drivers/media/platform/qcom/iris/iris_utils.c
++++ b/drivers/media/platform/qcom/iris/iris_utils.c
+@@ -92,6 +92,7 @@
+ 	mutex_lock(&core->lock);
+ 	list_for_each_entry(inst, &core->instances, list) {
+ 		if (inst->session_id == session_id) {
++			kref_get(&inst->kref);
+ 			mutex_unlock(&core->lock);
+ 			return inst;
+ 		}
+--- a/drivers/media/platform/qcom/iris/iris_utils.h
++++ b/drivers/media/platform/qcom/iris/iris_utils.h
+@@ -47,7 +47,9 @@
+ bool iris_split_mode_enabled(struct iris_inst *inst);
+ bool iris_fmt_is_8bit(u32 pixelformat);
+ bool iris_fmt_is_10bit(u32 pixelformat);
++/* Returned instances must be released with iris_inst_put(). */
+ struct iris_inst *iris_get_instance(struct iris_core *core, u32 session_id);
++void iris_inst_put(struct iris_inst *inst);
+ void iris_helper_buffers_done(struct iris_inst *inst, unsigned int type,
+ 			      enum vb2_buffer_state state);
+ int iris_wait_for_session_response(struct iris_inst *inst, bool is_flush);
+--- a/drivers/media/platform/qcom/iris/iris_vidc.c
++++ b/drivers/media/platform/qcom/iris/iris_vidc.c
+@@ -38,6 +38,22 @@
+ 	v4l2_fh_del(&inst->fh, filp);
+ 	inst->fh.ctrl_handler = NULL;
+ 	v4l2_fh_exit(&inst->fh);
++}
++
++static void iris_inst_release(struct kref *kref)
++{
++	struct iris_inst *inst = container_of(kref, struct iris_inst, kref);
++
++	mutex_destroy(&inst->ctx_q_lock);
++	mutex_destroy(&inst->lock);
++	kfree(inst->fmt_src);
++	kfree(inst->fmt_dst);
++	kfree(inst);
++}
++
++void iris_inst_put(struct iris_inst *inst)
++{
++	kref_put(&inst->kref, iris_inst_release);
+ }
+ 
+ static void iris_add_session(struct iris_inst *inst)
+@@ -165,6 +181,7 @@
+ 	inst->domain = session_type;
+ 	inst->session_id = hash32_ptr(inst);
+ 	inst->state = IRIS_INST_DEINIT;
++	kref_init(&inst->kref);
+ 
+ 	mutex_init(&inst->lock);
+ 	mutex_init(&inst->ctx_q_lock);
+@@ -288,11 +305,20 @@
+ {
+ 	struct iris_inst *inst = iris_get_inst(filp);
+ 
+-	v4l2_ctrl_handler_free(&inst->ctrl_handler);
+-	v4l2_m2m_ctx_release(inst->m2m_ctx);
+-	v4l2_m2m_release(inst->m2m_dev);
++	/* Stop both queues while firmware callbacks can still use m2m_ctx.
++	 * Releasing the context before SESSION_CLOSE frees queues which late
++	 * buffer completions still access.
++	 */
++	mutex_lock(&inst->ctx_q_lock);
++	vb2_streamoff(v4l2_m2m_get_dst_vq(inst->m2m_ctx),
++		      V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE);
++	vb2_streamoff(v4l2_m2m_get_src_vq(inst->m2m_ctx),
++		      V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE);
++	mutex_unlock(&inst->ctx_q_lock);
++
+ 	mutex_lock(&inst->lock);
+ 	iris_session_close(inst);
++	inst->closed = true;
+ 	iris_inst_change_state(inst, IRIS_INST_DEINIT);
+ 	iris_v4l2_fh_deinit(inst, filp);
+ 	iris_destroy_all_internal_buffers(inst, V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE);
+@@ -301,11 +327,10 @@
+ 	iris_check_num_queued_internal_buffers(inst, V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE);
+ 	iris_remove_session(inst);
+ 	mutex_unlock(&inst->lock);
+-	mutex_destroy(&inst->ctx_q_lock);
+-	mutex_destroy(&inst->lock);
+-	kfree(inst->fmt_src);
+-	kfree(inst->fmt_dst);
+-	kfree(inst);
++	v4l2_m2m_ctx_release(inst->m2m_ctx);
++	v4l2_m2m_release(inst->m2m_dev);
++	v4l2_ctrl_handler_free(&inst->ctrl_handler);
++	iris_inst_put(inst);
+ 
+ 	return 0;
+ }

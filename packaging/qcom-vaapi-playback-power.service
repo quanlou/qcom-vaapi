@@ -1,0 +1,17 @@
+[Unit]
+Description=GPU headroom for Iris video playback on Snapdragon X Elite
+ConditionPathExists=/sys/class/devfreq/3d00000.gpu/min_freq
+After=graphical.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/libexec/qcom-vaapi/playback-power-profile.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=5
+NoNewPrivileges=yes
+ProtectHome=yes
+ProtectSystem=strict
+
+[Install]
+WantedBy=graphical.target

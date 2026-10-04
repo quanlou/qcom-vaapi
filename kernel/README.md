@@ -216,3 +216,31 @@ Deployment artifacts and rollback instructions are maintained in
 `/home/mq/.cache/libva-v4l2-qualification/resume-20261002/deployment/qrtr-resume-r2/INSTALL.txt`,
 not in Chromium Snap storage. Original distro modules and root rollback backup
 remain intact.
+
+### Experimental 4K60 and session-lifetime candidates
+
+`0007-iris-budget-low-delay-vp9-playback.patch` votes interconnect bandwidth
+using the measured input rate and raises the frequency estimate for explicitly
+requested decode-order VP9. It changes the host clock budget, not firmware pipe
+configuration. It requires 0004's display-delay controls. The isolated actual-C
+model checks codec/control scope and resolution/rate scaling:
+
+```sh
+python3 tools/verify-iris-playback-clock.py /path/to/baseline-iris /path/to/patched-iris
+```
+
+`0008-iris-retain-session-through-firmware-close.patch` pins an instance across
+firmware response handling and retains its queues through the close exchange.
+The actual-C AddressSanitizer model reproduces two baseline lifetime failures
+and checks the candidate ordering:
+
+```sh
+python3 tools/verify-iris-session-lifetime.py /path/to/baseline-iris /path/to/patched-iris
+```
+
+These model checks do not qualify hardware behavior. A short combined clock
+trial approached 60fps, but warm reopen still failed, and a later lifetime
+candidate trial recorded kernel memory corruption. Neither patch is installed
+by the RC8 user-space package. The user-run ownership traces used the original
+EL2 module; their matching addresses do not qualify these candidates. See the
+[ownership checkpoint](../docs/4k60-ownership-status-20261004.md).

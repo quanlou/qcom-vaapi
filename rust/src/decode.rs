@@ -248,6 +248,8 @@ pub(crate) unsafe extern "C" fn end_picture(
     ctx: VADriverContextP,
     context: VAContextID,
 ) -> VAStatus {
+    let timing = std::env::var_os("V4L2_VA_DEBUG").is_some();
+    let started = std::time::Instant::now();
     let Some(state) = (unsafe { state_from_ctx(ctx) }) else {
         return err(VA_STATUS_ERROR_INVALID_DISPLAY);
     };
@@ -367,6 +369,7 @@ pub(crate) unsafe extern "C" fn end_picture(
         };
         guard.surfaces[surf_idx].as_mut().unwrap().backing = Some(backing);
     }
+    let prepared = started.elapsed();
     let target = if can_direct {
         match guard.surfaces[surf_idx]
             .as_ref()
@@ -385,6 +388,7 @@ pub(crate) unsafe extern "C" fn end_picture(
     } else {
         None
     };
+    let target_ready = started.elapsed();
     let direct_copy = guard.surfaces[surf_idx]
         .as_ref()
         .unwrap()
@@ -471,12 +475,29 @@ pub(crate) unsafe extern "C" fn end_picture(
         surface.exported
     };
     drop(guard);
+    let submitted = started.elapsed();
     if sync_submission {
         // Iris does not install a completion fence in the surface's dma_resv.
         // Finish pre-exported targets before a client can sample them. Other
         // clients wait through SyncSurface/export; CAPTURE rebinds after each
         // completion in decode order. Release the driver lock while waiting.
-        return unsafe { sync_surface(ctx, render_target) };
+        let status = unsafe { sync_surface(ctx, render_target) };
+        if timing {
+            eprintln!(
+                "msm_drv_video_rs: decode_timing surface={} prepare_us={} target_us={} submit_us={} sync_us={} total_us={} epoch_us={}",
+                render_target,
+                prepared.as_micros(),
+                target_ready.saturating_sub(prepared).as_micros(),
+                submitted.saturating_sub(target_ready).as_micros(),
+                started.elapsed().saturating_sub(submitted).as_micros(),
+                started.elapsed().as_micros(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_micros(),
+            );
+        }
+        return status;
     }
     ok()
 }

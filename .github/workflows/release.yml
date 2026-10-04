@@ -91,7 +91,7 @@ jobs:
               if (error.status !== 404) throw error;
               release = (await github.rest.repos.createRelease({
                 ...params, tag_name: tag, target_commitish: context.sha,
-                name: `qcom-vaapi ${manifest.version} — experimental AV1`,
+                name: `qcom-vaapi ${manifest.version}`,
                 body: fs.readFileSync(manifest.notes, 'utf8'),
                 draft: true, prerelease: true, make_latest: 'false'
               })).data;
