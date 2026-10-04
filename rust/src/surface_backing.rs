@@ -538,11 +538,28 @@ impl SurfaceBacking {
     }
 
     pub(crate) fn can_download(&self) -> bool {
-        !self.poisoned && self.imported.is_none()
+        !self.poisoned
     }
 
     pub(crate) fn is_imported(&self) -> bool {
         self.imported.is_some()
+    }
+
+    pub(crate) fn supports_direct_decode(&self) -> bool {
+        if self.poisoned {
+            return false;
+        }
+        let Some(imported) = self.imported else {
+            return true;
+        };
+        let Ok(required) = checked_layout(imported.width, imported.height, imported.format) else {
+            return false;
+        };
+        // A single-plane Iris CAPTURE cannot describe independent pitches,
+        // prefixes or chroma gaps. Accept only its complete padded layout.
+        imported.pitches == [required.stride; 2]
+            && imported.offsets == [0, required.uv_offset]
+            && imported.size >= required.size
     }
 
     pub(crate) fn mark_predecode_export(&mut self) {
@@ -550,17 +567,14 @@ impl SurfaceBacking {
     }
 
     pub(crate) fn requires_submission_sync(&self) -> bool {
-        self.predecode_export
+        self.predecode_export || self.imported.is_some()
     }
 
     pub(crate) fn decode_target(&self) -> io::Result<Option<DecodeTarget>> {
         if self.poisoned {
             return Err(io::ErrorKind::InvalidData.into());
         }
-        if self.imported.is_some() {
-            // Caller layouts may have independent pitches, offsets and gaps.
-            // Keep their existing validated copy path until CAPTURE layout
-            // compatibility has been established for those descriptors.
+        if !self.supports_direct_decode() {
             return Ok(None);
         }
         (self.wait)(self.fd.as_raw_fd())?;
@@ -576,15 +590,40 @@ impl SurfaceBacking {
         if !self.can_download() {
             return Err(io::ErrorKind::InvalidData.into());
         }
+        let normalized = self
+            .imported
+            .map(|imported| checked_layout(imported.width, imported.height, imported.format))
+            .transpose()?;
+        // Allocate before CPU access starts. Imported planes are normalized
+        // only for a CPU image request, never for ordinary display publication.
+        let mut bytes = normalized.map(|layout| vec![0; layout.size as usize]);
         (self.wait)(self.fd.as_raw_fd())?;
         (self.sync)(self.fd.as_raw_fd(), 1)?; // DMA_BUF_SYNC_READ
-        let bytes = unsafe { std::slice::from_raw_parts(self.addr, self.size()) }.to_vec();
+        let source = unsafe { std::slice::from_raw_parts(self.addr, self.size()) };
+        let layout = normalized.unwrap_or(self.layout);
+        let bytes = if let Some(imported) = self.imported {
+            let dest = bytes.as_mut().unwrap();
+            let rows = [imported.height, imported.height.div_ceil(2)];
+            let widths = [imported.width, imported.width.div_ceil(2) * 2];
+            let offsets = [0, layout.uv_offset];
+            for plane in 0..2 {
+                let width = (widths[plane] * imported.format.bytes_per_sample()) as usize;
+                for row in 0..rows[plane] {
+                    let src = (imported.offsets[plane] + row * imported.pitches[plane]) as usize;
+                    let dst = (offsets[plane] + row * layout.stride) as usize;
+                    dest[dst..dst + width].copy_from_slice(&source[src..src + width]);
+                }
+            }
+            bytes.take().unwrap()
+        } else {
+            source.to_vec()
+        };
         (self.sync)(self.fd.as_raw_fd(), 1 | DMA_BUF_SYNC_END)?;
         Ok(SurfaceFrame {
             data: std::sync::Arc::new(bytes),
-            stride: self.layout.stride,
-            height: self.layout.uv_offset / self.layout.stride,
-            format: self.layout.format,
+            stride: layout.stride,
+            height: layout.uv_offset / layout.stride,
+            format: layout.format,
         })
     }
 

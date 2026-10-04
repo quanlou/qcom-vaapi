@@ -22,12 +22,14 @@ Chrome; those historical results do not qualify the new binary.
 CPU image access and DRM PRIME export are supported. Exported surfaces retain
 their own backing storage. Current source decodes H.264, HEVC and VP9 directly
 into driver-owned surface DMA-BUFs on Iris with decode-order controls; browser
-export does not copy decoded pixels. The RC8 development source adds optional
-decode timing diagnostics and is newer than the tagged RC6 binary. Its package
+export does not copy decoded pixels. The RC9 development source removes the
+intermediate display snapshot for imported surfaces and accepts direct imports
+whose complete storage layout matches Iris. It also retains optional decode
+timing diagnostics and is newer than the tagged RC6 binary. Its package
 also ships a disabled GPU power helper and experimental kernel patches as
 documentation. The patches are not activated by installation; warm reopen and
 kernel memory corruption remain unresolved in candidate testing. See the
-[RC8 development notes](docs/releases/0.1.1-rc.8.md). Firefox 4K60, 10-bit AV1, other chips and broad
+[RC9 development notes](docs/releases/0.1.1-rc.9.md). Firefox 4K60, 10-bit AV1, other chips and broad
 suspend/resume reliability remain unqualified.
 
 ## Install
@@ -165,8 +167,19 @@ post-decode exporters and CPU clients synchronize when reading the surface.
 VP9 hidden references are exposed using a standard `show_existing_frame`
 command without altering the original frame bitstream.
 
-AV1, caller-imported layouts and kernels without decode-order controls retain
-the compatibility copy path. CPU image downloads also copy by definition.
+Caller imports can take this direct path only with matching pitches, luma and
+chroma offsets, and enough allocation space for Iris's complete padded layout.
+Direct imported targets finish during EndPicture before the caller can sample
+them. A declared incompatible import keeps its context on the compatibility
+path. Display publication can copy once into the retained caller allocation
+without first making a frame snapshot; CPU image requests normalize its planes
+on demand. Full-width planes use bulk copies, preserving prefixes, gaps and
+tail bytes. Hidden-frame aliases can still require a retained snapshot.
+
+AV1 and kernels without decode-order controls retain the compatibility path.
+CPU image downloads also copy by definition. RC9's CPU improvement and direct
+caller imports require new hardware measurements; host tests alone do not
+qualify them.
 See [the direct-buffer validation report](direct-buffer-validation-20261003.md)
 for measured results and browser limitations.
 

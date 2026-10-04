@@ -89,6 +89,14 @@ impl ImportLayout {
         ];
         let source = [0, stride as usize * height as usize];
         for i in 0..2 {
+            if stride as usize == bytes[i] && self.pitches[i] as usize == bytes[i] {
+                // Full-width planes need two bulk transfers rather than a
+                // memcpy call for every row. Preserve gaps and tail bytes.
+                let length = bytes[i] * rows[i];
+                let dst = self.offsets[i] as usize;
+                dest[dst..dst + length].copy_from_slice(&data[source[i]..source[i] + length]);
+                continue;
+            }
             for row in 0..rows[i] {
                 let src = source[i] + row * stride as usize;
                 let dst = self.offsets[i] as usize + row * self.pitches[i] as usize;
@@ -330,6 +338,17 @@ fn create_with(
             Ok(b) => b,
             Err(_) => return err(VA_STATUS_ERROR_OPERATION_FAILED),
         };
+        if std::env::var_os("V4L2_VA_DEBUG").is_some() {
+            eprintln!(
+                "msm_drv_video_rs: PRIME import width={} height={} pitches={:?} offsets={:?} size={} direct_layout={}",
+                spec.layout.width,
+                spec.layout.height,
+                spec.layout.pitches,
+                spec.layout.offsets,
+                spec.layout.size,
+                backing.supports_direct_decode()
+            );
+        }
         imported.push(Surface {
             width: spec.layout.width as i32,
             height: spec.layout.height as i32,
@@ -588,6 +607,104 @@ mod tests {
         );
         assert_eq!(count(&caller), 1);
         assert!(caller.metadata().is_ok());
+    }
+
+    #[test]
+    fn imported_bulk_publication_preserves_guards_and_download_normalizes_planes() {
+        for format in [DecodedFormat::Nv12, DecodedFormat::P010] {
+            let l = ImportLayout {
+                width: 128 / format.bytes_per_sample(),
+                height: 17,
+                format,
+                size: 4096,
+                pitches: [128; 2],
+                offsets: [32, 2304],
+            }
+            .validate()
+            .unwrap();
+            let caller = file(l.size);
+            let mut backing =
+                SurfaceBacking::import_for_test(caller.try_clone().unwrap().into(), l).unwrap();
+            assert!(backing.can_download());
+            assert!(!backing.supports_direct_decode());
+            assert!(backing.decode_target().unwrap().is_none());
+            let src = frame(format);
+            backing.copy_frame(&src).unwrap();
+            let mut expected = vec![0xa5; l.size as usize];
+            expected[32..32 + 128 * 17].copy_from_slice(&src.data[..128 * 17]);
+            expected[2304..2304 + 128 * 9].copy_from_slice(&src.data[4096..4096 + 128 * 9]);
+            assert_eq!(read(&caller), expected);
+            let snapshot = backing.download().unwrap();
+            assert_eq!(
+                (snapshot.stride, snapshot.height),
+                (128 * format.bytes_per_sample(), 32)
+            );
+            let mut normalized = vec![0; snapshot.data.len()];
+            for (plane, rows) in [17, 9].into_iter().enumerate() {
+                for row in 0..rows {
+                    let src_offset = plane * 4096 + row * 128;
+                    let dst_offset =
+                        plane * snapshot.stride as usize * 32 + row * snapshot.stride as usize;
+                    normalized[dst_offset..dst_offset + 128]
+                        .copy_from_slice(&src.data[src_offset..src_offset + 128]);
+                }
+            }
+            assert_eq!(snapshot.data.as_slice(), normalized.as_slice());
+            assert_eq!(
+                read(&caller),
+                expected,
+                "CPU reads must preserve caller guards"
+            );
+        }
+    }
+
+    #[test]
+    fn only_complete_iris_layouts_can_be_direct_import_targets() {
+        for format in [DecodedFormat::Nv12, DecodedFormat::P010] {
+            let allocated = SurfaceBacking::allocate_for_test(128, 64, format).unwrap();
+            let descriptor = allocated.descriptor(DrmPrimeLayout::Composed).unwrap();
+            let caller = unsafe { File::from_raw_fd(descriptor.objects[0].fd) };
+            let base = ImportLayout {
+                width: 128,
+                height: 64,
+                format,
+                size: descriptor.objects[0].size,
+                pitches: [descriptor.layers[0].pitch[0]; 2],
+                offsets: [0, descriptor.layers[0].offset[1]],
+            };
+            let backing =
+                SurfaceBacking::import_for_test(caller.try_clone().unwrap().into(), base).unwrap();
+            assert!(backing.supports_direct_decode());
+            assert!(backing.requires_submission_sync());
+            let target = backing.decode_target().unwrap().unwrap();
+            assert_eq!(
+                File::from(target.fd).metadata().unwrap().ino(),
+                caller.metadata().unwrap().ino()
+            );
+            for l in [
+                ImportLayout {
+                    offsets: [16, base.offsets[1]],
+                    ..base
+                },
+                ImportLayout {
+                    offsets: [0, base.offsets[1] - 128],
+                    ..base
+                },
+                ImportLayout {
+                    pitches: [base.pitches[0], base.pitches[1] + 128],
+                    ..base
+                },
+                ImportLayout {
+                    size: base.size - 1,
+                    ..base
+                },
+            ] {
+                let backing =
+                    SurfaceBacking::import_for_test(caller.try_clone().unwrap().into(), l).unwrap();
+                assert!(!backing.supports_direct_decode());
+                assert!(backing.decode_target().unwrap().is_none());
+            }
+        }
     }
 
     #[test]

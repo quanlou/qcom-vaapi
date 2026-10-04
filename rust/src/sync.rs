@@ -432,6 +432,127 @@ mod tests {
     }
 
     #[test]
+    fn imported_publication_omits_snapshot_and_late_images_survive_capture_reuse() {
+        use crate::pixel_format::DecodedFormat;
+        use crate::surface_backing::SurfaceBacking;
+        use crate::surface_import::ImportLayout;
+        use std::fs::File;
+        use std::os::fd::FromRawFd;
+        use std::os::unix::fs::FileExt;
+        unsafe extern "C" {
+            fn memfd_create(name: *const std::ffi::c_char, flags: u32) -> std::ffi::c_int;
+        }
+        for format in [DecodedFormat::Nv12, DecodedFormat::P010] {
+            let driver = pending_sync_driver(false);
+            let pixels: Vec<u8> = (0..128 * 32 * 3 / 2)
+                .map(|i| (i as u8).wrapping_add((i / 128) as u8))
+                .collect();
+            let fd = unsafe { memfd_create(c"imported-publication-test".as_ptr(), 1) };
+            assert!(fd >= 0);
+            let caller = unsafe { File::from_raw_fd(fd) };
+            caller.set_len(4096).unwrap();
+            caller.write_all_at(&vec![0xa5; 4096], 0).unwrap();
+            let layout = ImportLayout {
+                width: 17,
+                height: 17,
+                format,
+                size: 4096,
+                pitches: [128, 64],
+                offsets: [32, 2304],
+            };
+            let backing =
+                SurfaceBacking::import_for_test(caller.try_clone().unwrap().into(), layout)
+                    .unwrap();
+            assert!(
+                backing.can_download(),
+                "imported display storage can retain pixels without a frame snapshot"
+            );
+            let mut guard = driver.lock.lock().unwrap();
+            guard.contexts[0].as_mut().unwrap().v4l2 = Some(
+                crate::v4l2::V4l2Session::publishing_test_session(&pixels, 128, 32, format),
+            );
+            let surface = guard.surfaces[0].as_mut().unwrap();
+            surface.width = 17;
+            surface.height = 17;
+            surface.format = format;
+            surface.backing = Some(backing);
+            apply_ready_captures(
+                &mut guard,
+                DRV_ID_BASE_CONTEXT,
+                vec![ReadyCapture {
+                    surface: DRV_ID_BASE_SURFACE,
+                    failed: false,
+                    direct: false,
+                    cap_idx: Some(0),
+                    frame: None,
+                }],
+            );
+            let surface = guard.surfaces[0].as_ref().unwrap();
+            assert_eq!(surface.state, SurfaceState::Ready);
+            assert!(
+                surface.frame.is_none(),
+                "display publication must not allocate a snapshot"
+            );
+            let mut expected = vec![0xa5; 4096];
+            for (plane, rows) in [17, 9].into_iter().enumerate() {
+                let width = if plane == 0 { 17 } else { 18 } * format.bytes_per_sample() as usize;
+                for row in 0..rows {
+                    let src = plane * 4096 + row * 128;
+                    let dst = layout.offsets[plane] as usize + row * layout.pitches[plane] as usize;
+                    expected[dst..dst + width].copy_from_slice(&pixels[src..src + width]);
+                }
+            }
+            let mut actual = vec![0; 4096];
+            caller.read_exact_at(&mut actual, 0).unwrap();
+            assert_eq!(
+                actual, expected,
+                "publication must preserve prefixes, gaps, padding and tail bytes"
+            );
+            assert!(
+                !guard.contexts[0]
+                    .as_ref()
+                    .unwrap()
+                    .v4l2
+                    .as_ref()
+                    .unwrap()
+                    .capture_is_publishing(0)
+            );
+            guard.contexts[0].as_mut().unwrap().v4l2 =
+                Some(crate::v4l2::V4l2Session::publishing_test_session(
+                    &vec![0xee; pixels.len()],
+                    128,
+                    32,
+                    format,
+                ));
+            drop(guard);
+            let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
+            ctx.pDriverData = (&*driver as *const DriverBox).cast_mut().cast();
+            let mut image: VAImage = unsafe { std::mem::zeroed() };
+            assert_eq!(
+                unsafe { crate::image::derive_image(&mut ctx, DRV_ID_BASE_SURFACE, &mut image) },
+                ok()
+            );
+            let guard = driver.lock.lock().unwrap();
+            let data = &guard.buffers[crate::state::buffer_index(image.buf).unwrap()]
+                .as_ref()
+                .unwrap()
+                .data;
+            for (plane, rows) in [17, 9].into_iter().enumerate() {
+                let width = if plane == 0 { 17 } else { 18 } * format.bytes_per_sample() as usize;
+                for row in 0..rows {
+                    let src = plane * 4096 + row * 128;
+                    let dst = image.offsets[plane] as usize + row * image.pitches[plane] as usize;
+                    assert_eq!(
+                        &data[dst..dst + width],
+                        &pixels[src..src + width],
+                        "late images must read caller storage, not the recycled capture buffer"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn sync_does_not_stop_input_still_owned_by_firmware() {
         let driver = pending_sync_driver(true);
         let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };

@@ -317,8 +317,8 @@ pub(crate) unsafe extern "C" fn end_picture(
             c.profile,
             VAProfile::VAProfileAV1Profile0 | VAProfile::VAProfileAV1Profile1
         );
-    // A context with any declared caller-imported target keeps the copy path
-    // for all pictures. CAPTURE mode cannot change after streaming begins.
+    // All declared targets must fit the same direct layout before streaming.
+    // One incompatible caller import keeps this whole context in copy mode.
     let can_direct = can_direct
         && !guard.contexts[ctx_idx]
             .as_ref()
@@ -326,7 +326,11 @@ pub(crate) unsafe extern "C" fn end_picture(
             .render_targets
             .iter()
             .filter_map(|&id| surface_index(id).and_then(|idx| guard.surfaces[idx].as_ref()))
-            .any(|s| s.backing.as_ref().is_some_and(|b| b.is_imported()));
+            .any(|s| {
+                s.backing
+                    .as_ref()
+                    .is_some_and(|b| b.is_imported() && !b.supports_direct_decode())
+            });
     if can_direct && guard.surfaces[surf_idx].as_ref().unwrap().backing.is_none() {
         let surface = guard.surfaces[surf_idx].as_ref().unwrap();
         let required = match crate::surface_backing::SurfaceBacking::allocation_size(
