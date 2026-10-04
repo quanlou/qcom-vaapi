@@ -2,7 +2,8 @@
 
 At the time of the ownership traces, the installed userspace library was RC7, SHA256
 `bd734b985e73d74b209b200cea071728ced2096b9916244d75ea92579f90ef7f`.
-The ordinary Chrome path exports GPU surfaces and decodes directly into them.
+The driver supports direct decoding into driver-owned exported GPU surfaces;
+caller-imported layouts retain the compatibility copy path.
 The local RC8 userspace build adds debug timing. This checkpoint records the
 pre-installation evidence; see the [RC8 development notes](releases/0.1.1-rc.8.md)
 for the subsequent verified user-space installation.
@@ -128,3 +129,27 @@ zero. No candidate driver was installed, and the reopen/corruption problem
 remains unresolved. The next investigation concerns mapping/firmware ownership
 across completion, STOP/CLOSE and teardown, rather than an unsupported change
 to refresh an already matching cached address.
+
+## Installed RC8: live Chrome CPU profile
+
+After installation, a user-provided media-internals report selected
+VaapiVideoDecoder for VP9 Profile 0 at 3840x2160. The Chrome GPU process mapped
+the installed RC8 library inode. A 20-second CPU-clock profile of that GPU
+process and the YouTube renderer recorded 2,966 samples without sample loss.
+50.20% of the combined profile was in `__memcpy_oryon1`: 45.14 percentage points
+through `capture_copy` / `Vec::spec_extend`, and 4.92 through
+`SurfaceBacking::copy_decoded`. Another 10.11% was in the kernel data-abort
+handler, with the dominant call chain again originating in snapshot memcpy.
+Thus this playback performs real decoded-pixel CPU copying despite hardware
+decoding; direct capture is not in use for those copied completions.
+
+Source explicitly excludes contexts with declared caller-imported surfaces
+from direct CAPTURE and excludes imported backings from deferred single-copy
+publication. This can require a working-buffer snapshot followed by a copy
+into caller storage. The current video's imported descriptor/geometry was not
+inspected, so the exact mode-selection trigger is still unverified. The earlier
+direct-buffer observations must not be generalized to every Chrome video.
+The profile changed no driver or clock settings, and the current boot journal
+remained free of the checked fault signatures. Fixing this CPU cost requires
+addressing compatibility publication or imported-layout support; RC8's timing
+diagnostics and kernel clock votes do not remove it.
