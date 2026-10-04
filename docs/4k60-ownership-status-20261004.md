@@ -4,7 +4,8 @@ At the time of the ownership traces, the installed userspace library was RC7, SH
 `bd734b985e73d74b209b200cea071728ced2096b9916244d75ea92579f90ef7f`.
 The ordinary Chrome path exports GPU surfaces and decodes directly into them.
 The local RC8 userspace build adds debug timing. This checkpoint records the
-pre-installation evidence; see the RC8 development notes for subsequent status.
+pre-installation evidence; see the [RC8 development notes](releases/0.1.1-rc.8.md)
+for the subsequent verified user-space installation.
 
 The currently booted EL2 Iris module is the original adapted module, build ID
 `caccaef16827d57b71ae27ae7d3c00dff4877bad`. Temporary candidates do not survive a
