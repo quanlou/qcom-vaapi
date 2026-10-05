@@ -312,6 +312,7 @@ pub(crate) unsafe extern "C" fn end_picture(
         );
     }
     let surf_idx = surface_index(render_target).unwrap();
+    let gpu_publication = cfg!(feature = "gpu-copy") && c.v4l2.is_some();
     let can_direct = c.v4l2.is_some()
         && !matches!(
             c.profile,
@@ -331,7 +332,10 @@ pub(crate) unsafe extern "C" fn end_picture(
                     .as_ref()
                     .is_some_and(|b| b.is_imported() && !b.supports_direct_decode())
             });
-    if can_direct && guard.surfaces[surf_idx].as_ref().unwrap().backing.is_none() {
+    // GPU publication gives AV1/hidden aliases independent lifetime storage
+    // without enabling unqualified direct AV1 CAPTURE ownership.
+    let needs_backing = can_direct || gpu_publication;
+    if needs_backing && guard.surfaces[surf_idx].as_ref().unwrap().backing.is_none() {
         let surface = guard.surfaces[surf_idx].as_ref().unwrap();
         let required = match crate::surface_backing::SurfaceBacking::allocation_size(
             surface.width as u32,

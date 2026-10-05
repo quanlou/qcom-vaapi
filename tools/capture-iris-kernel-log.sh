@@ -40,14 +40,14 @@
 set -u
 set -o pipefail
 
-IRIS_RE='qcom-iris|session error|system error|video hw is power|vb2_start_streaming|videobuf2-core.c|iris|UBSAN:|KASAN:|BUG:|WARNING:|Unhandled context fault|arm-smmu.*fault'
+IRIS_RE='qcom-iris|session error|system error|video hw is power|vb2_start_streaming|videobuf2-core.c|iris|UBSAN:|KASAN:|BUG:|WARNING:|Internal error:|Oops:|Kernel panic|Unhandled context fault|arm-smmu.*fault'
 NOISE_RE='Modules linked in|snd_|pinctrl_|phy_|qcom_glink|videobuf2_dma|drm_|x[0-9]+ :|Call trace|Hardware name|pstate:|Tainted|CPU:|sp :|pc :|lr :'
 
 filter_messages() {
   # WARNING headers include CPU:, which is otherwise stack-trace noise.
   # Keep fault headers before dropping noise so a warning cannot disappear.
   awk -v message_re="$IRIS_RE" -v noise="$NOISE_RE" '
-    /UBSAN:|KASAN:|BUG:|WARNING:/ { print; next }
+    /UBSAN:|KASAN:|BUG:|WARNING:|Internal error:|Oops:|Kernel panic/ { print; next }
     $0 ~ message_re && $0 !~ noise { print }
   '
 }
@@ -63,7 +63,7 @@ classify() {
     /received system error/  { sys_other++;  print "  [SYSTEM-ERR  ] " $0; next }
     /video hw is power on/   { power++; print "  [POWER-CYCLE ] " $0; next }
     /WARNING: .*vb2_start_streaming|videobuf2-core.c:.* vb2_start_streaming/ { warn++; print "  [VB2-WARN    ] " $0; next }
-    /UBSAN:|KASAN:|BUG:|WARNING:/ { bugs++; print "  [KERNEL-BUG  ] " $0; next }
+    /UBSAN:|KASAN:|BUG:|WARNING:|Internal error:|Oops:|Kernel panic/ { bugs++; print "  [KERNEL-BUG  ] " $0; next }
     /Unhandled context fault|arm-smmu.*fault/ { bugs++; print "  [IOMMU-FAULT ] " $0; next }
     { print "  [.............] " $0 }
     END {

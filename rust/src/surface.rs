@@ -14,8 +14,8 @@ pub(crate) use status::{query_surface_error, query_surface_status};
 use crate::bindings::*;
 use crate::pixel_format::DecodedFormat;
 use crate::state::{
-    DRV_ID_BASE_SURFACE, DRV_MAX_ATTRIBUTE_LIST, DRV_MAX_DIM, DRV_MAX_SURFACES, DRV_MIN_DIM,
-    DriverBox, DriverState, Surface, SurfaceState, context_index, surface_index,
+    DRV_ID_BASE_SURFACE, DRV_MAX_ATTRIBUTE_LIST, DRV_MAX_SURFACES, DriverBox, DriverState, Surface,
+    SurfaceState, context_index, surface_index,
 };
 use crate::surface_export::release_export_fds;
 use crate::{err, ok, state_from_ctx, va_debug_enabled};
@@ -33,9 +33,7 @@ fn create_surfaces_common(
     if surfaces.is_null() || num_surfaces == 0 {
         return err(VA_STATUS_ERROR_INVALID_PARAMETER);
     }
-    if !(DRV_MIN_DIM..=DRV_MAX_DIM).contains(&width)
-        || !(DRV_MIN_DIM..=DRV_MAX_DIM).contains(&height)
-    {
+    if !crate::geometry::valid_dimensions(width as u32, height as u32) {
         return err(VA_STATUS_ERROR_INVALID_PARAMETER);
     }
     if num_surfaces > DRV_MAX_SURFACES {
@@ -208,9 +206,7 @@ pub(crate) unsafe extern "C" fn create_surfaces2(
     if num_surfaces as usize > DRV_MAX_SURFACES {
         return err(VA_STATUS_ERROR_MAX_NUM_EXCEEDED);
     }
-    if !(DRV_MIN_DIM as u32..=DRV_MAX_DIM as u32).contains(&width)
-        || !(DRV_MIN_DIM as u32..=DRV_MAX_DIM as u32).contains(&height)
-    {
+    if !crate::geometry::valid_dimensions(width, height) {
         return err(VA_STATUS_ERROR_INVALID_PARAMETER);
     }
     match unsafe {

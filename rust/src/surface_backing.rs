@@ -11,7 +11,7 @@ use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 
 use crate::image::copy_semiplanar_region;
 use crate::pixel_format::DecodedFormat;
-use crate::state::{DRV_MAX_DIM, DRV_MIN_DIM, SurfaceFrame};
+use crate::state::SurfaceFrame;
 use crate::v4l2::CaptureExport;
 use crate::va_drm::{DrmPrimeDescriptor, DrmPrimeLayout};
 
@@ -88,8 +88,7 @@ unsafe extern "C" {
 }
 
 fn checked_layout(width: u32, height: u32, format: DecodedFormat) -> io::Result<CaptureExport> {
-    let range = DRV_MIN_DIM as u32..=DRV_MAX_DIM as u32;
-    if !range.contains(&width) || !range.contains(&height) {
+    if !crate::geometry::valid_dimensions(width, height) {
         return Err(io::ErrorKind::InvalidInput.into());
     }
     // Iris linear CAPTURE geometry: 128 pixels per row, 32 luma rows and
@@ -541,6 +540,80 @@ impl SurfaceBacking {
         !self.poisoned
     }
 
+    /// Transfer a completed external CAPTURE directly on the GPU. `false`
+    /// means no writes were issued and the existing CPU fallback is safe.
+    pub(crate) fn copy_dma_buf(
+        &mut self,
+        drm_fd: Option<RawFd>,
+        source_fd: RawFd,
+        source_size: u32,
+        source_stride: u32,
+        source_height: u32,
+        format: DecodedFormat,
+    ) -> io::Result<bool> {
+        if self.poisoned || format != self.layout.format {
+            return Err(io::ErrorKind::InvalidData.into());
+        }
+        if !cfg!(feature = "gpu-copy") {
+            return Ok(false);
+        }
+        let destination = if let Some(imported) = self.imported {
+            crate::gpu_copy::Layout {
+                size: imported.size,
+                width: imported.width,
+                height: imported.height,
+                format,
+                pitches: imported.pitches,
+                offsets: imported.offsets,
+                owned_storage: None,
+            }
+        } else {
+            crate::gpu_copy::Layout {
+                size: self.layout.size,
+                width: self.layout.width,
+                height: self.layout.height,
+                format,
+                pitches: [self.layout.stride; 2],
+                offsets: [0, self.layout.uv_offset],
+                owned_storage: Some((
+                    self.layout.stride,
+                    self.layout.uv_offset / self.layout.stride * 3 / 2,
+                )),
+            }
+        };
+        let source = crate::gpu_copy::Layout {
+            size: source_size,
+            width: source_stride / format.bytes_per_sample(),
+            height: source_height,
+            format,
+            pitches: [source_stride; 2],
+            offsets: [
+                0,
+                source_stride
+                    .checked_mul(source_height)
+                    .ok_or(io::ErrorKind::InvalidData)?,
+            ],
+            owned_storage: None,
+        };
+        (self.wait)(self.fd.as_raw_fd())?;
+        match crate::gpu_copy::copy(drm_fd, source_fd, source, self.fd.as_raw_fd(), destination) {
+            crate::gpu_copy::Outcome::Completed => {
+                if std::env::var_os("V4L2_VA_DEBUG").is_some() {
+                    eprintln!(
+                        "msm_drv_video_rs: GPU publication width={} height={} cpu_copy_bytes=0",
+                        destination.width, destination.height
+                    );
+                }
+                Ok(true)
+            }
+            crate::gpu_copy::Outcome::Unavailable => Ok(false),
+            crate::gpu_copy::Outcome::Failed => {
+                self.poisoned = true;
+                Err(io::ErrorKind::InvalidData.into())
+            }
+        }
+    }
+
     pub(crate) fn is_imported(&self) -> bool {
         self.imported.is_some()
     }
@@ -657,6 +730,22 @@ impl SurfaceBacking {
     #[cfg(test)]
     pub(crate) fn set_sync_for_test(&mut self, sync: fn(RawFd, u64) -> io::Result<()>) {
         self.sync = sync;
+    }
+
+    #[cfg(all(test, feature = "gpu-copy"))]
+    pub(crate) fn fill_storage_for_gpu_test(&mut self, byte: u8) -> io::Result<()> {
+        let access = CpuWrite::begin(self.fd.as_raw_fd(), self.wait, self.sync)?;
+        self.bytes_mut().fill(byte);
+        access.finish()
+    }
+
+    #[cfg(all(test, feature = "gpu-copy"))]
+    pub(crate) fn storage_for_gpu_test(&self) -> io::Result<Vec<u8>> {
+        (self.wait)(self.fd.as_raw_fd())?;
+        (self.sync)(self.fd.as_raw_fd(), 1)?;
+        let data = unsafe { std::slice::from_raw_parts(self.addr, self.size()) }.to_vec();
+        (self.sync)(self.fd.as_raw_fd(), 1 | DMA_BUF_SYNC_END)?;
+        Ok(data)
     }
 
     #[cfg(test)]
@@ -812,8 +901,9 @@ mod tests {
                 (0, 16),
                 (15, 16),
                 (16, 15),
-                (4097, 16),
-                (16, 4097),
+                (crate::geometry::MAX_DIM as u32 + 1, 16),
+                (16, crate::geometry::MAX_DIM as u32 + 1),
+                (8192, 8192),
                 (u32::MAX, u32::MAX),
             ] {
                 assert!(SurfaceBacking::allocation_size(width, height, format).is_err());
@@ -828,6 +918,25 @@ mod tests {
                 SurfaceBacking::allocation_size(16, 16, format).unwrap(),
                 checked_layout(16, 16, format).unwrap().size as usize
             );
+        }
+    }
+
+    #[test]
+    fn eight_k_storage_matches_iris_padding_without_allocating_pixels() {
+        for format in [DecodedFormat::Nv12, DecodedFormat::P010] {
+            for (width, height) in [(7680, 4320), (8192, 4352), (4352, 8192)] {
+                let layout = checked_layout(width, height, format);
+                if !cfg!(feature = "experimental-8k") {
+                    assert!(layout.is_err());
+                    continue;
+                }
+                let layout = layout.unwrap();
+                assert_eq!(layout.stride, width * format.bytes_per_sample());
+                assert_eq!(layout.uv_offset, layout.stride * height);
+                assert_eq!(layout.size, layout.stride * height * 3 / 2);
+                assert!(layout.size <= MAX_ALLOCATION);
+                assert_eq!((layout.width, layout.height), (width, height));
+            }
         }
     }
 

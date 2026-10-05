@@ -162,6 +162,10 @@ impl V4l2Session {
             ready.push(r);
         }
         self.finish_discarded_drain(&mut ready);
+        // Hidden owners discovered during dequeue must travel with their
+        // displayed frame. Otherwise publication could release CAPTURE in
+        // this batch before an alias arrives on the following pump.
+        ready.append(&mut self.ready);
         ready
     }
 
@@ -204,6 +208,14 @@ impl V4l2Session {
     }
 
     pub(crate) fn requeue_capture(&mut self, idx: usize) {
+        if self.abandoned
+            || self
+                .ready
+                .iter()
+                .any(|r| r.cap_idx == Some(idx) && !r.direct && !r.failed && r.frame.is_none())
+        {
+            return;
+        }
         if self.direct_capture_mode() {
             // Old surfaces can still name slot zero after another picture
             // has rebound it. Only bind_decode_target may replenish it.
@@ -313,8 +325,32 @@ impl V4l2Session {
         idx: usize,
         backing: &mut crate::surface_backing::SurfaceBacking,
     ) -> Result<(), ()> {
-        if !self.capture_is_publishing(idx) {
+        if self.abandoned || !self.capture_is_publishing(idx) {
             return Err(());
+        }
+        let source = self.capture_publication_fd(idx)?;
+        let (buffer, _, height, stride) = self.resolve_cap(idx).ok_or(())?;
+        let format =
+            crate::pixel_format::DecodedFormat::from_v4l2_fourcc(self.capture_fourcc).ok_or(())?;
+        if let Some(fd) = source.as_ref() {
+            let copied = backing.copy_dma_buf(
+                self.capture_drm_fd
+                    .as_ref()
+                    .map(std::os::fd::AsRawFd::as_raw_fd),
+                std::os::fd::AsRawFd::as_raw_fd(fd),
+                u32::try_from(buffer.len[0]).map_err(|_| ())?,
+                stride,
+                height,
+                format,
+            );
+            match copied {
+                Ok(true) => return Ok(()),
+                Ok(false) => {}
+                Err(_) => {
+                    self.abandoned = true;
+                    return Err(());
+                }
+            }
         }
         if idx >= self.legacy_len() {
             self.map_buffer(false, idx - self.legacy_len())?;
@@ -335,7 +371,87 @@ impl V4l2Session {
         result
     }
 
+    fn capture_publication_fd(&mut self, idx: usize) -> Result<Option<std::os::fd::OwnedFd>, ()> {
+        let fd = self.fd;
+        let type_ = self.cap.type_;
+        self.capture_publication_fd_with(idx, |live_idx| {
+            let mut exp: v4l2_exportbuffer = zeroed();
+            exp.type_ = type_;
+            exp.index = u32::try_from(live_idx).map_err(|_| ())?;
+            exp.flags = O_CLOEXEC;
+            xioctl(
+                fd,
+                VIDIOC_EXPBUF,
+                (&mut exp as *mut v4l2_exportbuffer).cast(),
+            )?;
+            if exp.fd < 0 {
+                return Err(());
+            }
+            use std::os::fd::FromRawFd;
+            Ok(unsafe { std::os::fd::OwnedFd::from_raw_fd(exp.fd) })
+        })
+    }
+
+    fn capture_publication_fd_with(
+        &mut self,
+        idx: usize,
+        export: impl FnOnce(usize) -> Result<std::os::fd::OwnedFd, ()>,
+    ) -> Result<Option<std::os::fd::OwnedFd>, ()> {
+        if self.abandoned || !self.capture_is_publishing(idx) {
+            return Err(());
+        }
+        let base = self.legacy_len();
+        if idx < base {
+            // Never EXPBUF an old index against the replacement device.
+            return self
+                .resolve_cap(idx)
+                .ok_or(())?
+                .0
+                .cpu_sync_fd()
+                .map_or(Ok(None), |fd| {
+                    use std::os::fd::BorrowedFd;
+                    unsafe { BorrowedFd::borrow_raw(fd) }
+                        .try_clone_to_owned()
+                        .map(Some)
+                        .map_err(|_| ())
+                });
+        }
+        let b = self.cap.buffers.get_mut(idx - base).ok_or(())?;
+        if b.import_fd.is_none() && b.sync_fd.is_none() {
+            if !cfg!(feature = "gpu-copy") {
+                return Ok(None);
+            }
+            // A failed export precedes all GPU writes, so the ordinary CPU
+            // fallback remains safe. Internal handles do not reserve a slot
+            // or increment client export_refs; Publishing holds the pixels.
+            let Ok(fd) = export(idx - base) else {
+                return Ok(None);
+            };
+            b.sync_fd = Some(fd);
+            if debug_enabled() {
+                eprintln!(
+                    "msm_drv_video_rs: GPU source export cap_idx={idx} kernel_allocated=true"
+                );
+            }
+        }
+        b.import_fd
+            .as_ref()
+            .or(b.sync_fd.as_ref())
+            .map(|fd| fd.try_clone().map_err(|_| ()))
+            .transpose()
+    }
+
     pub(crate) fn finish_capture_publication(&mut self, idx: usize) {
+        // An uncertain GPU completion must keep this allocation pinned. The
+        // session cannot publish other aliases or admit more decode work.
+        if self.abandoned
+            || self
+                .ready
+                .iter()
+                .any(|r| r.cap_idx == Some(idx) && !r.direct && !r.failed && r.frame.is_none())
+        {
+            return;
+        }
         let base = self.legacy_len();
         if idx < base {
             return; // A legacy pool has no firmware queue left to replenish.
@@ -638,8 +754,96 @@ impl V4l2Session {
         false
     }
 
+    fn handle_empty_capture(&mut self, idx: usize, flags: u32) {
+        // Empty CAPTURE buffers are either a drain marker, a source-change
+        // marker, an AV1 hidden-reference completion, or a firmware-abort
+        // signature. A marker immediately after SOURCE_CHANGE is normal for
+        // this stateful decoder: native keeps CAPTURE streaming and simply
+        // requeues the buffer. Treat only an empty buffer outside known
+        // marker/no-output cases, with pending work, as a fatal session
+        // abort.
+        let pending = self.fifo.len() + self.out_queued();
+        if self.draining && flags & V4L2_BUF_FLAG_LAST != 0 {
+            // Teardown's scratch slot exists only to receive the final marker.
+            // Do not submit it again after firmware finished this drain.
+            self.drain_last_seen = true;
+            return;
+        }
+        if take_prior_drain_marker(&mut self.drain_empty_grace, self.draining) {
+            // START can precede dequeue of STOP's final empty buffer.
+            // This buffer has no picture owner. Treat exactly one as the
+            // prior drain marker, independently of the paired EOS event.
+            if debug_enabled() {
+                eprintln!(
+                    "msm_drv_video_rs: empty CAPTURE paired with prior drain (pending={}); requeueing",
+                    pending
+                );
+            }
+        } else if source_change_marker_is_expected(self.source_change_flush, self.draining) {
+            self.source_change_empty_seen = true;
+            if debug_enabled() {
+                eprintln!(
+                    "msm_drv_video_rs: empty CAPTURE paired with source change (pending={}); requeueing",
+                    pending
+                );
+            }
+            self.maybe_resume_source_change();
+        } else if self
+            .fifo
+            .first()
+            .is_some_and(|pending| !pending.expects_output)
+        {
+            let hidden = self.fifo.remove(0);
+            let _ = self.qbuf_capture(idx);
+            self.no_output_waiting.push(hidden.surface);
+            if debug_enabled() {
+                eprintln!(
+                    "msm_drv_video_rs: empty CAPTURE retired no-output surface={} ts={} (pending={}); waiting for next displayable capture",
+                    hidden.surface, hidden.timestamp, pending
+                );
+            }
+            return;
+        } else if !self.draining && flags & V4L2_BUF_FLAG_ERROR != 0 {
+            // An unexpected empty ERROR is a failed decode, not a reason to
+            // STOP, requeue its allocation, or rebuild a reference chain.
+            // Known source-change/drain/hidden markers were handled above.
+            eprintln!(
+                "msm_drv_video_rs: terminal empty CAPTURE index={idx} flags=0x{flags:x} coded_fourcc=0x{:08x} pending={pending}; no drain/requeue/rebuild",
+                self.coded_fourcc
+            );
+            self.aborted = true;
+            self.abandoned = true;
+            for surface in self
+                .fifo
+                .drain(..)
+                .map(|pending| pending.surface)
+                .chain(self.no_output_waiting.drain(..))
+            {
+                self.ready.push(ReadyCapture {
+                    surface,
+                    failed: true,
+                    direct: false,
+                    cap_idx: None,
+                    frame: None,
+                });
+            }
+            return;
+        } else if !self.draining && pending > 0 && self.out_queued() == 0 {
+            self.maybe_start_sync_drain();
+        } else if !self.draining && pending > 0 {
+            self.aborted = true;
+            if debug_enabled() {
+                eprintln!(
+                    "msm_drv_video_rs: empty CAPTURE without drain (pending={}); recovery armed",
+                    pending
+                );
+            }
+        }
+        let _ = self.qbuf_capture(idx);
+    }
+
     fn dequeue_capture(&mut self) -> Option<ReadyCapture> {
-        if self.cap.buffers.is_empty() {
+        if self.cap.buffers.is_empty() || (self.abandoned && self.aborted) {
             return None;
         }
         let mut planes: [v4l2_plane; VIDEO_MAX_PLANES_USIZE] = [zeroed(); VIDEO_MAX_PLANES_USIZE];
@@ -686,60 +890,7 @@ impl V4l2Session {
             self.drain_last_seen = true;
         }
         if bytesused == 0 {
-            // Empty CAPTURE buffers are either a drain marker, a source-change
-            // marker, an AV1 hidden-reference completion, or a firmware-abort
-            // signature. A marker immediately after SOURCE_CHANGE is normal for
-            // this stateful decoder: native keeps CAPTURE streaming and simply
-            // requeues the buffer. Treat only an empty buffer outside known
-            // marker/no-output cases, with pending work, as a fatal session
-            // abort.
-            let pending = self.fifo.len() + self.out_queued();
-            if take_prior_drain_marker(&mut self.drain_empty_grace, self.draining) {
-                // START can precede dequeue of STOP's final empty buffer.
-                // This buffer has no picture owner. Treat exactly one as the
-                // prior drain marker, independently of the paired EOS event.
-                if debug_enabled() {
-                    eprintln!(
-                        "msm_drv_video_rs: empty CAPTURE paired with prior drain (pending={}); requeueing",
-                        pending
-                    );
-                }
-            } else if source_change_marker_is_expected(self.source_change_flush, self.draining) {
-                self.source_change_empty_seen = true;
-                if debug_enabled() {
-                    eprintln!(
-                        "msm_drv_video_rs: empty CAPTURE paired with source change (pending={}); requeueing",
-                        pending
-                    );
-                }
-                self.maybe_resume_source_change();
-            } else if self
-                .fifo
-                .first()
-                .is_some_and(|pending| !pending.expects_output)
-            {
-                let hidden = self.fifo.remove(0);
-                let _ = self.qbuf_capture(idx);
-                self.no_output_waiting.push(hidden.surface);
-                if debug_enabled() {
-                    eprintln!(
-                        "msm_drv_video_rs: empty CAPTURE retired no-output surface={} ts={} (pending={}); waiting for next displayable capture",
-                        hidden.surface, hidden.timestamp, pending
-                    );
-                }
-                return None;
-            } else if !self.draining && pending > 0 && self.out_queued() == 0 {
-                self.maybe_start_sync_drain();
-            } else if !self.draining && pending > 0 {
-                self.aborted = true;
-                if debug_enabled() {
-                    eprintln!(
-                        "msm_drv_video_rs: empty CAPTURE without drain (pending={}); recovery armed",
-                        pending
-                    );
-                }
-            }
-            let _ = self.qbuf_capture(idx);
+            self.handle_empty_capture(idx, buf.flags);
             return None;
         }
         // A real capture after START ends the window for a delayed marker,
@@ -825,7 +976,8 @@ impl V4l2Session {
         let direct_copy = !zero_copy
             && pending.direct_copy
             && !self.stable_capture
-            && self.no_output_waiting.iter().all(|&owner| owner == surface);
+            && (cfg!(feature = "gpu-copy")
+                || self.no_output_waiting.iter().all(|&owner| owner == surface));
         if direct_copy && debug_enabled() {
             eprintln!("msm_drv_video_rs: deferring snapshot surface={surface} cap_idx={cap_idx}");
         }
@@ -909,6 +1061,168 @@ mod tests {
     use std::collections::VecDeque;
     use std::ffi::CString;
 
+    #[test]
+    #[cfg(feature = "gpu-copy")]
+    fn publication_export_is_cached_without_mapping_or_client_reservation() {
+        use std::os::fd::AsRawFd;
+        let mut session = super::super::submit::tests::streaming_session_with_pending_fifo(-1);
+        session.out.streaming = false;
+        session.fifo.clear();
+        let mut slot = V4l2Buffer::new();
+        slot.state = BufferState::Publishing;
+        slot.num_planes = 1;
+        slot.len[0] = 8192;
+        session.cap.buffers = vec![slot];
+        let fd = session
+            .capture_publication_fd_with(0, |idx| {
+                assert_eq!(idx, 0);
+                Ok(std::fs::File::open("/dev/null").unwrap().into())
+            })
+            .unwrap()
+            .unwrap();
+        let cached = session.cap.buffers[0].sync_fd.as_ref().unwrap().as_raw_fd();
+        assert_ne!(cached, fd.as_raw_fd());
+        drop(fd);
+        let second = session
+            .capture_publication_fd_with(0, |_| panic!("must not export twice"))
+            .unwrap()
+            .unwrap();
+        let b = &session.cap.buffers[0];
+        assert_eq!(b.export_refs, 0);
+        assert!(b.reserved_for.is_none());
+        assert!(b.addr[0].is_null());
+        assert!(b.import_fd.is_none());
+        assert!(b.state == BufferState::Publishing);
+        session.finish_capture_publication(0);
+        assert!(session.cap.buffers[0].state == BufferState::Free);
+        assert!(
+            session
+                .capture_publication_fd_with(0, |_| panic!())
+                .is_err()
+        );
+        // The cache and its duplicate retain their own lifetime after recycle.
+        assert!(second.try_clone().is_ok());
+    }
+
+    #[test]
+    fn publication_fd_rejects_unowned_slots_and_keeps_failed_export_pinned() {
+        let mut session = super::super::submit::tests::streaming_session_with_pending_fifo(-1);
+        session.out.streaming = false;
+        session.fifo.clear();
+        let mut slot = V4l2Buffer::new();
+        slot.num_planes = 1;
+        slot.len[0] = 8192;
+        session.cap.buffers = vec![slot];
+        for state in [
+            BufferState::Free,
+            BufferState::Queued,
+            BufferState::Reserved,
+        ] {
+            session.cap.buffers[0].state = state;
+            assert!(
+                session
+                    .capture_publication_fd_with(0, |_| panic!())
+                    .is_err()
+            );
+        }
+        session.cap.buffers[0].state = BufferState::Publishing;
+        assert!(
+            session
+                .capture_publication_fd_with(0, |_| Err(()))
+                .unwrap()
+                .is_none()
+        );
+        let b = &session.cap.buffers[0];
+        assert!(b.state == BufferState::Publishing);
+        assert!(b.sync_fd.is_none());
+        assert!(b.addr[0].is_null());
+        assert_eq!(b.export_refs, 0);
+        session.abandoned = true;
+        assert!(
+            session
+                .capture_publication_fd_with(0, |_| panic!())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn publication_fd_never_exports_a_legacy_index_on_the_new_device() {
+        use std::os::fd::AsRawFd;
+        let mut session = super::super::submit::tests::streaming_session_with_pending_fifo(-1);
+        session.out.streaming = false;
+        session.fifo.clear();
+        let mut slot = V4l2Buffer::new();
+        slot.state = BufferState::Publishing;
+        slot.sync_fd = Some(std::fs::File::open("/dev/null").unwrap().into());
+        let original = slot.sync_fd.as_ref().unwrap().as_raw_fd();
+        session.legacy.push(LegacyPool {
+            buffers: vec![slot],
+            width: 128,
+            height: 32,
+            stride: 128,
+        });
+        let duplicate = session
+            .capture_publication_fd_with(0, |_| panic!())
+            .unwrap()
+            .unwrap();
+        assert_ne!(duplicate.as_raw_fd(), original);
+        assert_eq!(session.legacy[0].buffers[0].export_refs, 0);
+    }
+
+    #[test]
+    fn abandoned_gpu_publication_keeps_capture_pinned_and_refuses_alias_reads() {
+        use crate::pixel_format::DecodedFormat;
+        use crate::surface_backing::SurfaceBacking;
+        let mut session = V4l2Session::publishing_test_session(
+            &vec![0x55; 128 * 32 * 3 / 2],
+            128,
+            32,
+            DecodedFormat::Nv12,
+        );
+        session.abandoned = true;
+        let mut backing = SurfaceBacking::allocate_for_test(17, 17, DecodedFormat::Nv12).unwrap();
+        assert!(session.publish_capture_into(0, &mut backing).is_err());
+        session.finish_capture_publication(0);
+        session.requeue_capture(0);
+        assert!(session.capture_is_publishing(0));
+        assert!(
+            backing
+                .download()
+                .unwrap()
+                .data
+                .iter()
+                .all(|&byte| byte == 0)
+        );
+    }
+
+    #[test]
+    fn deferred_hidden_alias_keeps_capture_pinned_until_delivery() {
+        use crate::pixel_format::DecodedFormat;
+        let mut session = V4l2Session::publishing_test_session(
+            &vec![0x55; 128 * 32 * 3 / 2],
+            128,
+            32,
+            DecodedFormat::Nv12,
+        );
+        session.ready.push(ReadyCapture {
+            surface: 42,
+            failed: false,
+            direct: false,
+            cap_idx: Some(0),
+            frame: None,
+        });
+        session.finish_capture_publication(0);
+        session.requeue_capture(0);
+        assert!(
+            session.capture_is_publishing(0),
+            "an undelivered hidden owner still needs these pixels"
+        );
+        let ready = std::mem::take(&mut session.ready);
+        assert_eq!(ready[0].surface, 42);
+        session.finish_capture_publication(0);
+        assert!(!session.capture_is_publishing(0));
+    }
+
     // A pipe with no reader produces a real libc POLLERR without a decoder
     // device or a mock of the production pump. All queue addresses are empty;
     // teardown ioctls on the pipe are harmless ENOTTY failures.
@@ -940,6 +1254,76 @@ mod tests {
         });
         session.no_output_waiting.push(10);
         session
+    }
+
+    #[test]
+    fn unexpected_empty_error_retires_owners_without_drain_requeue_or_rebuild() {
+        for queued_input in [false, true] {
+            let mut session = session_on_error_pipe();
+            session.cap.buffers[0].state = BufferState::Free;
+            if !queued_input {
+                session.out.buffers[0].state = BufferState::Free;
+            }
+            session.handle_empty_capture(0, V4L2_BUF_FLAG_ERROR);
+            assert!(session.failed());
+            assert!(session.aborted && session.abandoned);
+            assert!(!session.draining);
+            assert_eq!(session.recoveries, 0);
+            assert!(session.fifo.is_empty());
+            assert!(session.no_output_waiting.is_empty());
+            assert_eq!(
+                session.ready.iter().map(|r| r.surface).collect::<Vec<_>>(),
+                [9, 10]
+            );
+            assert!(
+                session
+                    .ready
+                    .iter()
+                    .all(|r| r.failed && r.frame.is_none() && r.cap_idx.is_none())
+            );
+            assert!(session.cap.buffers[0].state == BufferState::Free);
+            assert_eq!(session.out_queued(), usize::from(queued_input));
+            assert!(session.qbuf_capture(0).is_err());
+            assert!(session.recover().is_err());
+            assert_eq!(session.recoveries, 0);
+            session.flush_for_teardown();
+            assert!(!session.draining);
+            assert_eq!(session.out_queued(), usize::from(queued_input));
+            assert_eq!(session.ready.len(), 2);
+        }
+    }
+
+    #[test]
+    fn last_drain_marker_is_retained_without_requeuing_its_scratch_slot() {
+        let mut session = session_on_error_pipe();
+        session.cap.buffers[0].state = BufferState::Free;
+        session.draining = true;
+        session.handle_empty_capture(0, V4L2_BUF_FLAG_LAST | V4L2_BUF_FLAG_ERROR);
+        assert!(session.drain_last_seen);
+        assert!(!session.failed());
+        assert_eq!(session.fifo[0].surface, 9);
+        assert!(session.ready.is_empty());
+        assert!(session.cap.buffers[0].state == BufferState::Free);
+    }
+
+    #[test]
+    fn known_empty_error_markers_preserve_drain_and_hidden_frame_ownership() {
+        let mut draining = session_on_error_pipe();
+        draining.cap.buffers[0].state = BufferState::Free;
+        draining.draining = true;
+        draining.handle_empty_capture(0, V4L2_BUF_FLAG_ERROR);
+        assert!(!draining.failed());
+        assert_eq!(draining.fifo[0].surface, 9);
+        assert!(draining.ready.is_empty());
+
+        let mut hidden = session_on_error_pipe();
+        hidden.cap.buffers[0].state = BufferState::Free;
+        hidden.fifo[0].expects_output = false;
+        hidden.handle_empty_capture(0, V4L2_BUF_FLAG_ERROR);
+        assert!(!hidden.failed());
+        assert!(hidden.fifo.is_empty());
+        assert_eq!(hidden.no_output_waiting, [10, 9]);
+        assert!(hidden.ready.is_empty());
     }
 
     #[test]

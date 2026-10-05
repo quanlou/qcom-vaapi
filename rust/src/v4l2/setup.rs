@@ -140,6 +140,16 @@ impl V4l2Session {
     }
 
     fn configure_decode_order(&mut self) -> Result<(), ()> {
+        // Keep VP9's native output mode in GPU builds. The selected-surface
+        // mode can fail after its first picture/session even after a complete
+        // STOP handshake. GPU publication keeps retained pixels independent.
+        if cfg!(feature = "gpu-copy") && self.coded_fourcc == super::V4L2_PIX_FMT_VP9 {
+            self.decode_order = false;
+            if debug_enabled() {
+                eprintln!("msm_drv_video_rs: VP9 default output mode with GPU publication");
+            }
+            return Ok(());
+        }
         // VA synchronizes in decode order. Stateful display-order output can
         // withhold a reference picture until the client submits its B frames,
         // while that same client waits for the picture before submitting.
@@ -227,6 +237,16 @@ impl V4l2Session {
                 }
                 if !self.capture_metadata_ready {
                     if std::time::Instant::now() >= deadline {
+                        if debug_enabled() {
+                            eprintln!(
+                                "msm_drv_video_rs: initial SOURCE_CHANGE timed out {}",
+                                self.debug_snapshot()
+                            );
+                        }
+                        // The submitted header is still owned by firmware.
+                        // Do not let the client keep submitting into this
+                        // partially started session after reporting failure.
+                        self.abandoned = true;
                         return Err(());
                     }
                     std::thread::sleep(std::time::Duration::from_millis(2));
@@ -355,15 +375,17 @@ impl V4l2Session {
 
     pub(super) fn capture_pool_setup(&mut self) -> Result<(), ()> {
         let want = self.capture_pool_target()?;
+        self.check_kernel_capture_budget(want as usize)?;
         let count = self.reqbufs(self.cap.type_, want)?;
+        self.check_kernel_capture_budget(count as usize)?;
         // Never retry with an arbitrarily smaller allocation after a failure.
         if count < want || count > CAP_NUM_BUFFERS_MAX {
             return Err(());
         }
         if debug_enabled() {
             eprintln!(
-                "msm_drv_video_rs: CAPTURE REQBUFS requested={} count={}",
-                want, count
+                "msm_drv_video_rs: CAPTURE REQBUFS requested={} count={} memory={}",
+                want, count, self.cap.memory
             );
         }
         self.cap.buffers = (0..count).map(|_| V4l2Buffer::new()).collect();
@@ -376,6 +398,7 @@ impl V4l2Session {
         if count == 0 {
             return Err(());
         }
+        self.check_kernel_capture_budget(start.checked_add(count as usize).ok_or(())?)?;
         let mut create: v4l2_create_buffers = zeroed();
         create.count = count;
         create.memory = self.cap.memory;
@@ -407,7 +430,26 @@ impl V4l2Session {
         Ok(())
     }
 
+    fn check_kernel_capture_budget(&self, count: usize) -> Result<(), ()> {
+        if self.cap.memory != v4l2_memory::V4L2_MEMORY_MMAP as u32 {
+            return Ok(());
+        }
+        let pix = unsafe { self.cap.fmt.fmt.pix_mp };
+        let size = super::import::capture_size(&pix)?;
+        if count == 0
+            || size
+                .checked_mul(count)
+                .is_none_or(|bytes| bytes > super::import::MAX_CAPTURE_POOL_BYTES)
+        {
+            return Err(());
+        }
+        Ok(())
+    }
+
     pub(super) fn qbuf_capture(&mut self, idx: usize) -> Result<(), ()> {
+        if self.abandoned && self.aborted {
+            return Err(());
+        }
         let b = self.cap.buffers.get_mut(idx).ok_or(())?;
         if matches!(
             b.state,
@@ -478,6 +520,71 @@ fn supports_decoder_queues(cap: &v4l2_capability) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn kernel_eight_k_capture_budget_rejects_before_allocation_ioctls() {
+        let mut session = super::super::submit::tests::streaming_session_with_pending_fifo(-1);
+        session.out.streaming = false;
+        session.fifo.clear();
+        session.cap.memory = v4l2_memory::V4L2_MEMORY_MMAP as u32;
+        let mut pix: v4l2_pix_format_mplane = zeroed();
+        pix.width = 7680;
+        pix.height = 4320;
+        pix.num_planes = 1;
+        pix.pixelformat = super::super::V4L2_PIX_FMT_P010;
+        pix.plane_fmt[0].bytesperline = 15360;
+        pix.plane_fmt[0].sizeimage = 99_532_800;
+        session.cap.fmt.fmt.pix_mp = pix;
+        assert!(session.check_kernel_capture_budget(10).is_ok());
+        assert!(session.check_kernel_capture_budget(11).is_err());
+        assert!(session.check_kernel_capture_budget(usize::MAX).is_err());
+        struct NoAllocationIoctl;
+        impl Drop for NoAllocationIoctl {
+            fn drop(&mut self) {
+                super::super::abi::TEST_IOCTL.with(|hook| hook.set(None));
+            }
+        }
+        fn unexpected_ioctl(
+            _: i32,
+            _: std::ffi::c_ulong,
+            _: *mut std::ffi::c_void,
+        ) -> Result<(), ()> {
+            panic!("over-budget kernel pool must fail before any allocation ioctl")
+        }
+        super::super::abi::TEST_IOCTL
+            .with(|hook| assert!(hook.replace(Some(unexpected_ioctl)).is_none()));
+        let no_allocation = NoAllocationIoctl;
+        // The budget must reject before any ioctl, retaining existing slots.
+        let previous = session.cap.buffers.len();
+        assert!(session.capture_pool_setup().is_err());
+        assert_eq!(session.cap.buffers.len(), previous);
+        session.cap.buffers = (0..10).map(|_| V4l2Buffer::new()).collect();
+        assert!(session.grow_capture_pool().is_err());
+        assert_eq!(session.cap.buffers.len(), 10);
+        drop(no_allocation);
+        session.cap.memory = v4l2_memory::V4L2_MEMORY_DMABUF as u32;
+        // Direct imports allocate one selected buffer, not this full slot count.
+        assert!(session.check_kernel_capture_budget(32).is_ok());
+    }
+    #[cfg(feature = "gpu-copy")]
+    #[test]
+    fn vp9_gpu_mode_preserves_native_controls_without_touching_other_codecs() {
+        let mut session = super::super::submit::tests::streaming_session_with_pending_fifo(-1);
+        session.out.streaming = false;
+        session.fifo.clear();
+        session.coded_fourcc = super::super::V4L2_PIX_FMT_VP9;
+        session.decode_order = true;
+        session.configure_decode_order().unwrap();
+        assert!(!session.decode_order);
+        assert!(!session.direct_capture_mode());
+        for codec in [
+            super::super::V4L2_PIX_FMT_H264,
+            super::super::V4L2_PIX_FMT_HEVC,
+            super::super::V4L2_PIX_FMT_AV1,
+        ] {
+            session.coded_fourcc = codec;
+            assert!(session.configure_decode_order().is_err());
+        }
+    }
     use super::*;
 
     #[test]

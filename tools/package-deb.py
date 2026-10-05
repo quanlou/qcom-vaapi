@@ -31,7 +31,8 @@ def main():
         data = library.read_bytes()
         if data[:6] != b'\x7fELF\x02\x01' or struct.unpack_from('<H', data, 18)[0] != 183:
             parser.error(f'{library}: expected a little-endian ARM64 ELF library')
-    if f'qcom-vaapi {version}:'.encode() not in driver.read_bytes():
+    driver_data = driver.read_bytes()
+    if f'qcom-vaapi {version}:'.encode() not in driver_data:
         parser.error('driver label does not match Cargo version')
     if subprocess.check_output(['dpkg', '--print-architecture'], text=True).strip() != 'arm64':
         parser.error('build this package on ARM64 so dependency detection uses the target libraries')
@@ -95,6 +96,11 @@ def main():
         match = re.search(r'libva2 \(>= ([^)]+)\)', dependencies)
         if match and subprocess.run(['dpkg', '--compare-versions', match[1], 'lt', '2.24']).returncode == 0:
             dependencies = dependencies.replace(match[0], 'libva2 (>= 2.24)')
+        # GPU variants load these at runtime, so shlibdeps cannot discover them.
+        # Keep normal packages unchanged; the built vendor label identifies the
+        # optional backend without relying on the packager's build environment.
+        if b'; GPU frame transfers' in driver_data:
+            dependencies += ', libegl1, libgles2, libgbm1'
         (metadata / 'control').write_text(
             f'Package: qcom-vaapi\nVersion: {deb_version}\nArchitecture: arm64\n'
             'Maintainer: qcom-vaapi contributors\nSection: video\nPriority: optional\n'

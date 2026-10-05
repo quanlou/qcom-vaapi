@@ -247,7 +247,7 @@ impl V4l2Session {
             capture_metadata_ready: false,
         };
 
-        this.cap.memory = v4l2_memory::V4L2_MEMORY_DMABUF as u32;
+        this.cap.memory = capture_memory(coded_fourcc);
 
         if this.query_cap().is_err()
             || this.subscribe_events().is_err()
@@ -465,6 +465,17 @@ impl V4l2Session {
     }
 }
 
+fn capture_memory(coded_fourcc: u32) -> u32 {
+    // VP9's compatibility pool can stay in the kernel allocator. Export its
+    // completed storage to the GPU instead of importing a GEM allocation
+    // into Iris. Surface backings remain independent and stable for clients.
+    if cfg!(feature = "gpu-copy") && coded_fourcc == V4L2_PIX_FMT_VP9 {
+        v4l2_memory::V4L2_MEMORY_MMAP as u32
+    } else {
+        v4l2_memory::V4L2_MEMORY_DMABUF as u32
+    }
+}
+
 fn debug_enabled() -> bool {
     std::env::var_os("V4L2_VA_DEBUG").is_some()
 }
@@ -545,6 +556,22 @@ pub(crate) fn enumerate_capture_fourccs() -> Vec<u32> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_experimental_vp9_uses_kernel_capture_storage() {
+        use super::*;
+        let imported = v4l2_memory::V4L2_MEMORY_DMABUF as u32;
+        for coded in [V4L2_PIX_FMT_H264, V4L2_PIX_FMT_HEVC, V4L2_PIX_FMT_AV1] {
+            assert_eq!(capture_memory(coded), imported);
+        }
+        assert_eq!(
+            capture_memory(V4L2_PIX_FMT_VP9),
+            if cfg!(feature = "gpu-copy") {
+                v4l2_memory::V4L2_MEMORY_MMAP as u32
+            } else {
+                imported
+            }
+        );
+    }
     use super::*;
 
     const MAP_PRIVATE: c_int = 0x02;
@@ -756,6 +783,67 @@ mod tests {
     }
 
     struct MockIoctlGuard;
+
+    thread_local! {
+        static TEARDOWN_EVENTS: std::cell::RefCell<Vec<(std::ffi::c_ulong, u32, usize)>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    fn mock_teardown_ioctl(
+        _fd: c_int,
+        request: std::ffi::c_ulong,
+        arg: *mut c_void,
+    ) -> Result<(), ()> {
+        let type_ = if request == VIDIOC_STREAMOFF {
+            unsafe { *arg.cast::<c_int>() as u32 }
+        } else {
+            assert_eq!(request, VIDIOC_REQBUFS);
+            let req = unsafe { &*arg.cast::<v4l2_requestbuffers>() };
+            assert_eq!(req.count, 0);
+            req.type_
+        };
+        let unmapped = UNMAPPED_PLANES.with(std::cell::Cell::get);
+        TEARDOWN_EVENTS.with(|events| events.borrow_mut().push((request, type_, unmapped)));
+        // Even if input stop fails, output stop must precede all releases.
+        if request == VIDIOC_STREAMOFF
+            && type_ == v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE as u32
+        {
+            Err(())
+        } else {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn session_close_stops_both_ports_before_releasing_pixels_even_if_input_stop_fails() {
+        use std::os::fd::IntoRawFd;
+        let file = std::fs::File::open("/dev/null").unwrap();
+        let mut session = session_with_mapped_planes(file.into_raw_fd());
+        session.out.streaming = true;
+        session.cap.streaming = true;
+        session.fifo.clear();
+        session.draining = true;
+        session.drain_last_seen = true;
+        for b in &mut session.out.buffers {
+            b.state = BufferState::Free;
+        }
+        let before = UNMAPPED_PLANES.with(std::cell::Cell::get);
+        TEARDOWN_EVENTS.with(|events| events.borrow_mut().clear());
+        abi::TEST_IOCTL.with(|hook| assert!(hook.replace(Some(mock_teardown_ioctl)).is_none()));
+        let _guard = MockIoctlGuard;
+        drop(session);
+        let out = v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE as u32;
+        let cap = v4l2_buf_type::V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE as u32;
+        let events = TEARDOWN_EVENTS.with(|events| events.borrow().clone());
+        assert_eq!(
+            events,
+            vec![
+                (VIDIOC_STREAMOFF, out, before),
+                (VIDIOC_STREAMOFF, cap, before),
+                (VIDIOC_REQBUFS, cap, before + 2),
+                (VIDIOC_REQBUFS, out, before + 5),
+            ]
+        );
+    }
 
     impl Drop for MockIoctlGuard {
         fn drop(&mut self) {

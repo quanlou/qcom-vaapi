@@ -94,6 +94,17 @@ impl V4l2Session {
         if self.aborted {
             self.recover()?;
         }
+        // VP9 has no B-picture reordering: input for a different owner may
+        // wait until completion selects its target. Its hidden/show_existing
+        // pair uses the same owner and remains asynchronous. H264/HEVC need
+        // following access units to complete reordered pictures; serializing
+        // those codecs here would block their own required input.
+        if self.coded_fourcc == super::V4L2_PIX_FMT_VP9 {
+            self.wait_for_direct_target(
+                surface,
+                std::time::Instant::now() + OUTPUT_PACING_TIMEOUT,
+            )?;
+        }
         // An IDR can discard withheld pictures from the previous GOP. Finish
         // those owners first, including a seek's partially submitted GOP,
         // instead of treating the firmware's discarded-picture completions
@@ -135,10 +146,9 @@ impl V4l2Session {
         }
         let output_deadline = std::time::Instant::now() + OUTPUT_PACING_TIMEOUT;
         // A VP9 packet can contain hidden input, its reference export, and a
-        // visible picture. The old two-input pacing waits for hidden decode
-        // inside avcodec_send_packet and triggers Firefox's slow-frame gate.
-        // Chosen CAPTURE targets still advance one at a time; use the existing
-        // four bounded OUTPUT slots to enqueue this packet asynchronously.
+        // visible picture. Use the existing four bounded OUTPUT slots for
+        // the same VP9 owner's hidden input and synthetic reference export;
+        // other codecs retain their asynchronous reordered-input pipeline.
         let inflight_limit = if self.direct_capture_mode() {
             super::OUT_NUM_BUFFERS as usize
         } else {
@@ -527,7 +537,7 @@ impl V4l2Session {
     }
 
     pub(crate) fn maybe_start_drain(&mut self) -> bool {
-        if self.draining || self.fifo.is_empty() || self.out_queued() != 0 || !self.out.streaming {
+        if self.draining || self.out_queued() != 0 || !self.out.streaming {
             return false;
         }
         let mut cmd: v4l2_decoder_cmd = zeroed();

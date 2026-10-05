@@ -179,7 +179,7 @@ verify_framemd5() {
     if [[ "$mode" == "optional" ]]; then
         local rust_status=0
         run_kernel_checked "$rust_log" timeout -k 5s 120s env LIBVA_DRIVERS_PATH="$driver_dir" \
-            ffmpeg -nostdin -hide_banner -v warning \
+            ffmpeg -nostdin -hide_banner -v warning -xerror \
             -hwaccel vaapi -hwaccel_device "$drm_device" "${hw_frame_args[@]}" \
             -i "$input" -map 0:v:0 "${frame_args[@]}" "${download_args[@]}" -f framemd5 "$rust_md5" \
             || rust_status=$?
@@ -195,7 +195,7 @@ verify_framemd5() {
         fi
     else
         run_kernel_checked "$rust_log" timeout -k 5s 120s env LIBVA_DRIVERS_PATH="$driver_dir" \
-            ffmpeg -nostdin -hide_banner -v warning \
+            ffmpeg -nostdin -hide_banner -v warning -xerror \
             -hwaccel vaapi -hwaccel_device "$drm_device" "${hw_frame_args[@]}" \
             -i "$input" -map 0:v:0 "${frame_args[@]}" "${download_args[@]}" -f framemd5 "$rust_md5" || return $?
 

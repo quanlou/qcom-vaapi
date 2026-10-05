@@ -2,6 +2,18 @@
 # Source after setting repo_root. Every hardware session needs its own window:
 # an outer observer cannot stop a later open inside the same verifier.
 require_live_iris() {
+    # Explicit diagnostic authorization may acknowledge an exact set of prior
+    # recovered session errors. Default qualification remains unchanged; the
+    # diagnostic guard rejects any new error or system/memory/GPU fault and
+    # pins the boot and all loaded module identities before each new session.
+    if [[ -n "${V4L2_VA_ACKNOWLEDGED_SESSION_BASELINE:-}" ]]; then
+        if ! python3 "$repo_root/tools/check-gpu-copy-session-baseline.py" \
+            "$V4L2_VA_ACKNOWLEDGED_SESSION_BASELINE"; then
+            echo "hardware_session=fail reason=acknowledged_session_baseline_changed"
+            exit 1
+        fi
+        return
+    fi
     local iris_state kernel_messages fault_pattern
     iris_state="$(awk '$1 == "qcom_iris" {print $5}' /proc/modules)" || {
         echo "hardware_session=fail reason=module_state_unavailable"
@@ -21,7 +33,7 @@ require_live_iris() {
         echo "hardware_session=fail reason=boot_kernel_log_empty"
         exit 1
     fi
-    fault_pattern='session error received|received system error|video hw is power on|Unhandled context fault|UBSAN:|KASAN:|BUG:|WARNING:|blocked for more than|watchdog:.*lockup'
+    fault_pattern='session error received|received system error|video hw is power on|Unhandled context fault|UBSAN:|KASAN:|BUG:|WARNING:|Internal error:|Oops:|Kernel panic|blocked for more than|watchdog:.*lockup'
     if [[ "$kernel_messages" =~ $fault_pattern ]]; then
         echo "hardware_session=fail reason=prior_boot_kernel_or_firmware_fault"
         exit 1

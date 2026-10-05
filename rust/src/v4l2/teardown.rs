@@ -17,7 +17,13 @@ impl V4l2Session {
     pub(super) fn stream_off_fd(fd: c_int, q: &mut V4l2Queue) {
         if fd >= 0 && q.streaming {
             let mut type_ = q.type_ as c_int;
-            let _ = xioctl(fd, VIDIOC_STREAMOFF, &mut type_ as *mut _ as *mut c_void);
+            let result = xioctl(fd, VIDIOC_STREAMOFF, &mut type_ as *mut _ as *mut c_void);
+            if debug_enabled() || result.is_err() {
+                eprintln!(
+                    "msm_drv_video_rs: STREAMOFF type={} result={:?}",
+                    q.type_, result
+                );
+            }
             q.streaming = false;
         }
     }
@@ -40,18 +46,33 @@ impl V4l2Session {
             req.type_ = q.type_;
             req.memory = q.memory;
             req.count = 0;
-            let _ = xioctl(fd, VIDIOC_REQBUFS, &mut req as *mut _ as *mut c_void);
+            let result = xioctl(fd, VIDIOC_REQBUFS, &mut req as *mut _ as *mut c_void);
+            if debug_enabled() || result.is_err() {
+                eprintln!(
+                    "msm_drv_video_rs: release REQBUFS type={} memory={} result={:?}",
+                    q.type_, q.memory, result
+                );
+            }
         }
     }
 
     /// Best-effort flush before teardown. A session closed while OUTPUT
     /// buffers are still in flight can wedge the next CAPTURE STREAMON, so
     /// drain it within a bounded interval before releasing queue resources.
+    fn teardown_drain_pending(&self) -> bool {
+        !self.fifo.is_empty() || self.out_queued() > 0 || (self.draining && !self.drain_last_seen)
+    }
+
     pub(super) fn flush_for_teardown(&mut self) {
-        if !self.out.streaming {
+        // A terminal decoder error must go straight to ordinary queue
+        // release. Flush pumping would submit STOP/requeue after the failure.
+        if !self.out.streaming || (self.abandoned && self.aborted) {
             return;
         }
-        if self.out_queued() == 0 && self.fifo.is_empty() {
+        if self.out_queued() == 0
+            && self.fifo.is_empty()
+            && (!self.cap.streaming || (self.draining && self.drain_last_seen))
+        {
             return;
         }
         let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
@@ -59,21 +80,45 @@ impl V4l2Session {
             let ready = self.pump(10);
             self.ready.extend(ready);
         }
-        if self.out_queued() == 0 && !self.fifo.is_empty() {
+        if self.out_queued() == 0 {
             self.maybe_start_drain();
         }
-        while ((!self.fifo.is_empty() || self.out_queued() > 0) && !self.eos)
-            && std::time::Instant::now() < deadline
-        {
+        let mut scratch_queued = false;
+        while self.teardown_drain_pending() && std::time::Instant::now() < deadline {
+            if self.abandoned && self.aborted {
+                break;
+            }
+            if !scratch_queued
+                && self.draining
+                && !self.drain_last_seen
+                && self.direct_capture_mode()
+                && self.fifo.is_empty()
+                && self.out_queued() == 0
+                && !self
+                    .cap
+                    .buffers
+                    .iter()
+                    .any(|b| b.state == BufferState::Queued)
+            {
+                match self
+                    .prepare_drain_capture()
+                    .and_then(|idx| self.qbuf_capture(idx))
+                {
+                    Ok(()) => scratch_queued = true,
+                    Err(()) => break,
+                }
+            }
             let ready = self.pump(10);
             self.ready.extend(ready);
         }
         if debug_enabled() {
             eprintln!(
-                "msm_drv_video_rs: teardown flush done pending={} out_queued={} eos={}",
+                "msm_drv_video_rs: teardown flush done pending={} out_queued={} eos={} last={} scratch={}",
                 self.fifo.len(),
                 self.out_queued(),
-                self.eos
+                self.eos,
+                self.drain_last_seen,
+                scratch_queued
             );
         }
     }
@@ -85,8 +130,12 @@ impl Drop for V4l2Session {
         // away and a fresh device open here would just have to be closed.
         self.abandoned = true;
         self.flush_for_teardown();
-        // Stream off CAPTURE before OUTPUT so decoded buffers still holding
-        // hardware references are not discarded out of order.
+        // Stop compressed input first, then decoded output, retaining both
+        // pools through both stop requests. Releasing CAPTURE before stopping
+        // OUTPUT leaves an active input port alongside freed output storage.
+        // This also matches native FFmpeg's V4L2 session-close ordering.
+        Self::stream_off_fd(self.fd, &mut self.out);
+        Self::stream_off_fd(self.fd, &mut self.cap);
         Self::release_queue_fd(self.fd, &mut self.cap);
         // Legacy mappings remain readable for published surfaces and must be
         // dropped only after the active queue has been released.
@@ -112,5 +161,29 @@ fn release_legacy_pool(pool: &mut LegacyPool) {
             }
         }
         b.state = BufferState::Free;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn completed_picture_and_eos_do_not_finish_an_incomplete_stop_drain() {
+        let mut session = super::super::submit::tests::streaming_session_with_pending_fifo(-1);
+        session.out.streaming = false;
+        session.fifo.clear();
+        session.out.buffers.clear();
+        session.draining = true;
+        session.eos = true;
+        assert!(session.teardown_drain_pending());
+        session.drain_last_seen = true;
+        assert!(!session.teardown_drain_pending());
+        let mut output = super::super::V4l2Buffer::new();
+        output.state = BufferState::Queued;
+        session.out.buffers.push(output);
+        assert!(session.teardown_drain_pending());
+        session.out.buffers[0].state = BufferState::Free;
+        assert!(!session.teardown_drain_pending());
     }
 }

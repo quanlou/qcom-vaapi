@@ -3,6 +3,52 @@ use crate::state::{Buffer, DRV_ID_BASE_BUFFER, DriverBox, Image};
 use std::ffi::c_void;
 
 #[test]
+fn eight_k_images_keep_full_plane_sizes_and_reject_excess_area() {
+    let raw = Box::into_raw(Box::new(DriverBox::new()));
+    let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };
+    ctx.pDriverData = raw.cast::<c_void>();
+    for format in [DecodedFormat::Nv12, DecodedFormat::P010] {
+        let mut fmt = image_format(format);
+        let mut image: VAImage = unsafe { std::mem::zeroed() };
+        assert_eq!(
+            unsafe { create_image(&mut ctx, &mut fmt, 8192, 8192, &mut image) },
+            err(VA_STATUS_ERROR_INVALID_PARAMETER)
+        );
+        let status = unsafe { create_image(&mut ctx, &mut fmt, 7680, 4320, &mut image) };
+        if cfg!(feature = "experimental-8k") {
+            assert_eq!(status, ok());
+            assert_eq!((image.width, image.height), (7680, 4320));
+            let sample = format.bytes_per_sample();
+            assert_eq!(image.pitches[0], 7680 * sample);
+            assert_eq!(image.offsets[1], 7680 * 4320 * sample);
+            assert_eq!(image.data_size, 49_766_400 * sample);
+            {
+                let guard = unsafe { &*raw }.lock.lock().unwrap();
+                let bytes = &guard.buffers[buffer_index(image.buf).unwrap()]
+                    .as_ref()
+                    .unwrap()
+                    .data;
+                assert_eq!(bytes.len(), image.data_size as usize);
+                assert_eq!(bytes[bytes.len() - 1], 0);
+            }
+            assert_eq!(unsafe { destroy_image(&mut ctx, image.image_id) }, ok());
+        } else {
+            assert_eq!(status, err(VA_STATUS_ERROR_INVALID_PARAMETER));
+        }
+    }
+    assert!(
+        unsafe { &*raw }
+            .lock
+            .lock()
+            .unwrap()
+            .buffers
+            .iter()
+            .all(Option::is_none)
+    );
+    unsafe { drop(Box::from_raw(raw)) };
+}
+
+#[test]
 fn image_destroy_waits_for_mapped_backing_buffer() {
     let raw = Box::into_raw(Box::new(DriverBox::new()));
     let mut ctx: VADriverContext = unsafe { std::mem::zeroed() };

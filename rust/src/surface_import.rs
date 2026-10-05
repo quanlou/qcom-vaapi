@@ -3,9 +3,7 @@
 
 use crate::bindings::*;
 use crate::pixel_format::DecodedFormat;
-use crate::state::{
-    DRV_ID_BASE_SURFACE, DRV_MAX_DIM, DRV_MIN_DIM, DriverBox, Surface, SurfaceState,
-};
+use crate::state::{DRV_ID_BASE_SURFACE, DriverBox, Surface, SurfaceState};
 use crate::surface_backing::SurfaceBacking;
 use crate::surface_export::MAX_EXPORT_BACKING_BYTES;
 use crate::v4l2::CaptureExport;
@@ -32,9 +30,7 @@ pub(crate) struct ImportLayout {
 impl ImportLayout {
     fn validate(self) -> Result<Self, VAStatus> {
         let invalid = || err(VA_STATUS_ERROR_INVALID_PARAMETER);
-        let range = DRV_MIN_DIM as u32..=DRV_MAX_DIM as u32;
-        if !range.contains(&self.width)
-            || !range.contains(&self.height)
+        if !crate::geometry::valid_dimensions(self.width, self.height)
             || self.size == 0
             || self.size > 128 * 1024 * 1024
         {
@@ -404,6 +400,38 @@ mod tests {
         }
         .validate()
         .unwrap()
+    }
+
+    #[test]
+    fn eight_k_import_checks_planes_and_frame_envelope_before_retaining_fds() {
+        for format in [DecodedFormat::Nv12, DecodedFormat::P010] {
+            let stride = 7680 * format.bytes_per_sample();
+            let layout = ImportLayout {
+                width: 7680,
+                height: 4320,
+                format,
+                size: stride * 4320 * 3 / 2,
+                pitches: [stride; 2],
+                offsets: [0, stride * 4320],
+            };
+            assert_eq!(layout.validate().is_ok(), cfg!(feature = "experimental-8k"));
+            let short = ImportLayout {
+                size: layout.size - 1,
+                ..layout
+            };
+            assert!(short.validate().is_err());
+            let overlap = ImportLayout {
+                offsets: [0, stride * 4320 - 1],
+                ..layout
+            };
+            assert!(overlap.validate().is_err());
+            let too_many_blocks = ImportLayout {
+                width: 8192,
+                height: 8192,
+                ..layout
+            };
+            assert!(too_many_blocks.validate().is_err());
+        }
     }
     fn frame(format: DecodedFormat) -> SurfaceFrame {
         SurfaceFrame {

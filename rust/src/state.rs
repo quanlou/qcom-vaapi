@@ -28,8 +28,7 @@ pub(crate) const DRV_MAX_ATTRIBUTE_LIST: usize = 64;
 pub(crate) const DRV_MAX_RENDER_BUFFERS: usize = 256;
 pub(crate) const DRV_MAX_SURFACE_EXPORTS: usize = 64;
 pub(crate) const DRV_MAX_SLICES_PER_FRAME: usize = 64;
-pub(crate) const DRV_MIN_DIM: i32 = 16;
-pub(crate) const DRV_MAX_DIM: i32 = 4096;
+pub(crate) use crate::geometry::{MAX_DIM as DRV_MAX_DIM, MIN_DIM as DRV_MIN_DIM};
 
 pub(crate) const SUPPORTED_PROFILES: [VAProfile; 3] = [
     VAProfile::VAProfileH264ConstrainedBaseline,
@@ -37,12 +36,35 @@ pub(crate) const SUPPORTED_PROFILES: [VAProfile; 3] = [
     VAProfile::VAProfileH264High,
 ];
 
-pub(crate) const VENDOR: &[u8] = concat!(
-    "qcom-vaapi ",
-    env!("CARGO_PKG_VERSION"),
-    ": Qualcomm Iris (X1E80100) stateful V4L2 M2M\0"
-)
-.as_bytes();
+pub(crate) const VENDOR: &[u8] = if cfg!(all(feature = "experimental-8k", feature = "gpu-copy")) {
+    concat!(
+        "qcom-vaapi ",
+        env!("CARGO_PKG_VERSION"),
+        ": Qualcomm Iris (X1E80100) stateful V4L2 M2M; GPU frame transfers; experimental 8K\0"
+    )
+    .as_bytes()
+} else if cfg!(feature = "gpu-copy") {
+    concat!(
+        "qcom-vaapi ",
+        env!("CARGO_PKG_VERSION"),
+        ": Qualcomm Iris (X1E80100) stateful V4L2 M2M; GPU frame transfers\0"
+    )
+    .as_bytes()
+} else if cfg!(feature = "experimental-8k") {
+    concat!(
+        "qcom-vaapi ",
+        env!("CARGO_PKG_VERSION"),
+        ": Qualcomm Iris (X1E80100) stateful V4L2 M2M; experimental 8K\0"
+    )
+    .as_bytes()
+} else {
+    concat!(
+        "qcom-vaapi ",
+        env!("CARGO_PKG_VERSION"),
+        ": Qualcomm Iris (X1E80100) stateful V4L2 M2M\0"
+    )
+    .as_bytes()
+};
 
 #[derive(Clone)]
 pub(crate) struct Config {

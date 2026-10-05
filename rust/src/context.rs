@@ -8,8 +8,8 @@
 use crate::bindings::*;
 use crate::codec::{Codec, Decoder};
 use crate::state::{
-    Context, DRV_ID_BASE_CONTEXT, DRV_MAX_DIM, DRV_MAX_SURFACES, DRV_MIN_DIM, SurfaceState,
-    config_index, context_index, surface_index,
+    Context, DRV_ID_BASE_CONTEXT, DRV_MAX_SURFACES, SurfaceState, config_index, context_index,
+    surface_index,
 };
 use crate::surface::release_surface_capture;
 use crate::sync::apply_ready_captures;
@@ -69,9 +69,7 @@ unsafe fn create_context_with_setup(
     {
         return err(VA_STATUS_ERROR_INVALID_PARAMETER);
     }
-    if !(DRV_MIN_DIM..=DRV_MAX_DIM).contains(&picture_width)
-        || !(DRV_MIN_DIM..=DRV_MAX_DIM).contains(&picture_height)
-    {
+    if !crate::geometry::valid_dimensions(picture_width as u32, picture_height as u32) {
         return err(VA_STATUS_ERROR_INVALID_PARAMETER);
     }
     let Some(state) = (unsafe { state_from_ctx(ctx) }) else {
@@ -264,6 +262,110 @@ mod tests {
             format: crate::pixel_format::DecodedFormat::Nv12,
         });
         (raw, ctx)
+    }
+
+    #[test]
+    fn advertised_eight_k_geometry_and_context_creation_agree() {
+        let (raw, mut ctx) = driver_for_context_test();
+        unsafe { &mut *raw }.profiles = vec![VAProfile::VAProfileAV1Profile0];
+        unsafe { &*raw }.lock.lock().unwrap().configs[0]
+            .as_mut()
+            .unwrap()
+            .profile = VAProfile::VAProfileAV1Profile0;
+        let mut attrs = [
+            VAConfigAttrib {
+                type_: VAConfigAttribType::VAConfigAttribMaxPictureWidth,
+                value: 0,
+            },
+            VAConfigAttrib {
+                type_: VAConfigAttribType::VAConfigAttribMaxPictureHeight,
+                value: 0,
+            },
+        ];
+        assert_eq!(
+            unsafe {
+                crate::config::get_config_attributes(
+                    &mut ctx,
+                    VAProfile::VAProfileAV1Profile0,
+                    VAEntrypoint::VAEntrypointVLD,
+                    attrs.as_mut_ptr(),
+                    attrs.len() as i32,
+                )
+            },
+            ok()
+        );
+        assert!(
+            attrs
+                .iter()
+                .all(|a| a.value == crate::geometry::MAX_DIM as u32)
+        );
+        for (width, height, accepted) in [
+            (3840, 2160, true),
+            (7680, 4320, cfg!(feature = "experimental-8k")),
+            (8192, 8192, false),
+            (-1, 2160, false),
+        ] {
+            let mut target = VA_INVALID_ID;
+            let status = unsafe {
+                crate::surface::create_surfaces2(
+                    &mut ctx,
+                    VA_RT_FORMAT_YUV420,
+                    width as u32,
+                    height as u32,
+                    &mut target,
+                    1,
+                    std::ptr::null_mut(),
+                    0,
+                )
+            };
+            assert_eq!(
+                status,
+                if accepted {
+                    ok()
+                } else {
+                    err(VA_STATUS_ERROR_INVALID_PARAMETER)
+                }
+            );
+            let mut context = VA_INVALID_ID;
+            assert_eq!(
+                unsafe {
+                    create_context_with_setup(
+                        &mut ctx,
+                        DRV_ID_BASE_CONFIG,
+                        width,
+                        height,
+                        &mut target,
+                        1,
+                        &mut context,
+                        |w, h, coded, capture, _| {
+                            assert!(accepted, "invalid geometry reached session setup");
+                            assert_eq!((w, h), (width, height));
+                            assert_eq!(coded, crate::v4l2::V4L2_PIX_FMT_AV1);
+                            assert_eq!(
+                                capture,
+                                crate::pixel_format::DecodedFormat::Nv12.v4l2_fourcc()
+                            );
+                            Ok(None)
+                        },
+                    )
+                },
+                if accepted {
+                    ok()
+                } else {
+                    err(VA_STATUS_ERROR_INVALID_PARAMETER)
+                }
+            );
+            if accepted {
+                assert_eq!(unsafe { destroy_context(&mut ctx, context) }, ok());
+                assert_eq!(
+                    unsafe { crate::surface::destroy_surfaces(&mut ctx, &mut target, 1) },
+                    ok()
+                );
+            } else {
+                assert_eq!((context, target), (VA_INVALID_ID, VA_INVALID_ID));
+            }
+        }
+        unsafe { drop(Box::from_raw(raw)) };
     }
 
     #[test]

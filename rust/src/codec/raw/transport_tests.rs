@@ -78,6 +78,17 @@ fn actual_youtube_4k_captures_match_driver_bytes_maps_and_fail_closed() {
     check_actual_captures(&root, &[375]);
 }
 
+#[test]
+#[ignore = "requires generated six-display-frame 8K corpus; run with AV1_8K_HOST_FIXTURES"]
+fn actual_eight_k_captures_match_driver_bytes_maps_and_fail_closed() {
+    let root = std::path::PathBuf::from(
+        std::env::var_os("AV1_8K_HOST_FIXTURES").expect("8K capture directory"),
+    );
+    // The fixed libaom fixture has seven coded generations (two hidden) and
+    // six displayed frames, including one show_existing reference.
+    check_actual_captures(&root, &[7]);
+}
+
 fn check_actual_captures(root: &std::path::Path, expected_counts: &[u64]) {
     let mut total = 0;
     let mut hidden = 0;
@@ -279,4 +290,53 @@ fn youtube_4k_final_tile_has_no_size_prefix() {
 fn exact_user_4k_captures_match_driver_assembly() {
     let root = std::path::PathBuf::from(std::env::var_os("AV1_USER_HOST_FIXTURES").unwrap());
     check_actual_captures(&root, &[510]);
+}
+
+// Private offline audit: original source packets plus VA-shaped parameters.
+// These are not captured live VA callbacks and prove no firmware behavior.
+#[test]
+#[ignore = "requires VP9_SOURCE_PACKET_IVF; opens ordinary files only"]
+fn failing_vp9_first_two_source_packets_survive_collection_byte_exact() {
+    let path = std::env::var_os("VP9_SOURCE_PACKET_IVF").expect("source IVF");
+    let data = std::fs::read(path).unwrap();
+    assert_eq!(&data[..4], b"DKIF");
+    assert_eq!(&data[8..12], b"VP90");
+    assert_eq!(u32::from_le_bytes(data[24..28].try_into().unwrap()), 2);
+    let mut position = 32;
+    let mut decoder = RawDecoder::new(Codec::Vp9);
+    for (sequence, size) in [45669, 12533].into_iter().enumerate() {
+        let length = u32::from_le_bytes(data[position..position + 4].try_into().unwrap()) as usize;
+        assert_eq!(length, size);
+        position += 12;
+        let packet = &data[position..position + length];
+        position += length;
+        assert_eq!(vp9::hidden_reference(packet), Ok(None));
+        let mut pp: VADecPictureParameterBufferVP9 = unsafe { std::mem::zeroed() };
+        unsafe {
+            pp.pic_fields.bits.set_frame_type(sequence as u32);
+        }
+        let mut slice: VASliceParameterBufferVP9 = unsafe { std::mem::zeroed() };
+        slice.slice_data_offset = 13;
+        slice.slice_data_size = length as u32;
+        let mut padded = vec![0xee; 13];
+        padded.extend_from_slice(packet);
+        padded.extend_from_slice(&[0xdd; 17]);
+        decoder.begin_picture();
+        decoder
+            .render_buffer(&buffer(VABufferType::VAPictureParameterBufferType, &[pp]))
+            .unwrap();
+        decoder
+            .render_buffer(&buffer(VABufferType::VASliceParameterBufferType, &[slice]))
+            .unwrap();
+        decoder
+            .render_buffer(&buffer(VABufferType::VASliceDataBufferType, &padded))
+            .unwrap();
+        let frame = decoder.finish_picture(sequence as u64).unwrap();
+        assert_eq!(frame.bytes, packet);
+        assert!(frame.headers.is_empty());
+        assert_eq!(frame.keyframe, sequence == 0);
+        assert!(frame.expects_output);
+        assert_eq!(frame.vp9_show_existing, None);
+    }
+    assert_eq!(position, data.len());
 }

@@ -23,6 +23,10 @@ jobs:
         run: cargo test --locked --manifest-path rust/Cargo.toml 2>&1 | tee rust-tests.log
       - name: Defensive and concurrent stress
         run: ./tools/verify-host-stress.sh 2>&1 | tee host-stress.log
+      - name: Experimental variant tests
+        run: cargo test --locked --manifest-path rust/Cargo.toml --all-features 2>&1 | tee experimental-tests.log
+      - name: GPU transfer ownership
+        run: ./tools/test-gpu-copy-host.sh
       - name: Lints
         run: cargo clippy --locked --manifest-path rust/Cargo.toml --all-targets --all-features -- -D warnings 2>&1 | tee rust-lints.log
       - name: Release build
@@ -37,7 +41,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const log = ['rust-tests.log', 'host-stress.log', 'rust-lints.log', 'release-build.log', 'verifier-tests.log'].filter(name => fs.existsSync(name))
+            const log = ['rust-tests.log', 'experimental-tests.log', 'host-stress.log', 'rust-lints.log', 'release-build.log', 'verifier-tests.log'].filter(name => fs.existsSync(name))
               .map(name => `=== ${name} ===\n${fs.readFileSync(name, 'utf8')}`).join('\n').slice(-50000);
             await github.rest.checks.create({
               owner: context.repo.owner, repo: context.repo.repo, head_sha: context.sha,

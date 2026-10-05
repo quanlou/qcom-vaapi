@@ -39,8 +39,9 @@ impl V4l2Session {
             || !self.direct_targets.is_empty()
         {
             // Never expose two target allocations to the firmware together.
-            // Compressed input can still be submitted asynchronously; the
-            // decode-order CAPTURE timestamp proves which target completed.
+            // Keep the next owner waiting until the preceding completion.
+            // VP9 submit_frame waits for this selection. Reordered codecs
+            // still need their following input before a completion can arrive.
             if self.direct_targets.len() >= crate::state::DRV_MAX_SURFACES
                 || self
                     .direct_targets
@@ -61,6 +62,49 @@ impl V4l2Session {
         }
         self.direct_target = Some((surface, target));
         Ok(true)
+    }
+
+    pub(super) fn wait_for_direct_target(
+        &mut self,
+        surface: u32,
+        deadline: std::time::Instant,
+    ) -> Result<(), ()> {
+        while self
+            .direct_target
+            .as_ref()
+            .is_some_and(|(owner, _)| *owner != surface)
+        {
+            if self.aborted || self.abandoned || std::time::Instant::now() >= deadline {
+                if debug_enabled() {
+                    eprintln!(
+                        "msm_drv_video_rs: direct target wait failed surface={surface} active={:?} {}",
+                        self.direct_target.as_ref().map(|(owner, _)| *owner),
+                        self.debug_snapshot()
+                    );
+                }
+                // bind_decode_target already retained the waiting owner.
+                // After its EndPicture fails, advancing to that dead owner
+                // on a later submission would misassign the next picture.
+                self.abandoned = true;
+                return Err(());
+            }
+            // A completion advances the chosen allocation. Preserve completed
+            // owners for VA publication after submission releases the lock;
+            // OUTPUT writability alone must not trigger a STOP or busy loop.
+            let ready = self.pump(2);
+            self.ready.extend(ready);
+            if self.aborted || self.abandoned {
+                self.abandoned = true;
+                return Err(());
+            }
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            std::thread::sleep(remaining.min(std::time::Duration::from_millis(1)));
+        }
+        if self.aborted || self.abandoned {
+            self.abandoned = true;
+            return Err(());
+        }
+        Ok(())
     }
 
     pub(super) fn initialize_direct_capture(&mut self) -> Result<(), ()> {
@@ -196,6 +240,55 @@ mod tests {
         assert!(!session.direct_capture_mode());
         assert!(session.cap.buffers[0].state == BufferState::Queued);
         assert!(session.cap.buffers[0].import_fd.is_none());
+    }
+
+    #[test]
+    fn waiting_target_cannot_submit_or_replace_the_active_owner_on_timeout() {
+        let first = SurfaceBacking::allocate_for_test(320, 240, DecodedFormat::Nv12).unwrap();
+        let next = SurfaceBacking::allocate_for_test(320, 240, DecodedFormat::Nv12).unwrap();
+        let mut session = session();
+        session
+            .bind_decode_target(7, first.decode_target().unwrap().unwrap())
+            .unwrap();
+        setup_capture(&mut session, &first.decode_target().unwrap().unwrap());
+        session.cap.buffers[0].state = BufferState::Queued;
+        let fd = session.cap.buffers[0]
+            .import_fd
+            .as_ref()
+            .unwrap()
+            .as_raw_fd();
+        session
+            .bind_decode_target(8, next.decode_target().unwrap().unwrap())
+            .unwrap();
+        // The same owner's hidden input and show_existing export remain a
+        // pair; they must not wait for their own not-yet-submitted completion.
+        session
+            .wait_for_direct_target(7, std::time::Instant::now())
+            .unwrap();
+        assert!(
+            session
+                .wait_for_direct_target(8, std::time::Instant::now())
+                .is_err()
+        );
+        assert_eq!(session.direct_target.as_ref().unwrap().0, 7);
+        assert_eq!(session.direct_targets.front().unwrap().0, 8);
+        assert_eq!(
+            session.cap.buffers[0]
+                .import_fd
+                .as_ref()
+                .unwrap()
+                .as_raw_fd(),
+            fd
+        );
+        assert!(session.cap.buffers[0].state == BufferState::Queued);
+        assert_eq!(session.out_queued(), 0);
+        assert!(!session.draining);
+        assert!(session.abandoned);
+        assert!(
+            session
+                .wait_for_direct_target(7, std::time::Instant::now())
+                .is_err()
+        );
     }
 
     #[test]

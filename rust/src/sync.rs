@@ -28,6 +28,7 @@ pub(crate) fn apply_ready_captures(
     let mut session = context_index(owner)
         .and_then(|idx| contexts.get_mut(idx).and_then(Option::as_mut))
         .and_then(|context| context.v4l2.as_mut());
+    let mut publishing = Vec::new();
     for r in ready {
         // The working index can already hold the next chosen target. A direct
         // completion owns stable surface storage, independent of that index.
@@ -85,10 +86,16 @@ pub(crate) fn apply_ready_captures(
                 s.exported = !s.export_fds.is_empty();
             }
         }
-        if direct_copy
-            && let Some(cap_idx) = r.cap_idx
-            && let Some(v) = session.as_mut()
-        {
+        if direct_copy && let Some(cap_idx) = r.cap_idx {
+            // Hidden reference owners can alias one completed CAPTURE. Keep
+            // it pinned until every independent backing is published.
+            if !publishing.contains(&cap_idx) {
+                publishing.push(cap_idx);
+            }
+        }
+    }
+    if let Some(v) = session.as_mut() {
+        for cap_idx in publishing {
             v.finish_capture_publication(cap_idx);
         }
     }
@@ -429,6 +436,110 @@ mod tests {
                 .unwrap()
                 .failed()
         );
+    }
+
+    #[test]
+    fn hidden_aliases_publish_before_capture_reuse_and_keep_independent_pixels() {
+        use crate::pixel_format::DecodedFormat;
+        use crate::surface_backing::SurfaceBacking;
+        for format in [DecodedFormat::Nv12, DecodedFormat::P010] {
+            let driver = pending_sync_driver(false);
+            let stride = 128 * format.bytes_per_sample();
+            let storage_height = 80;
+            let pixels: Vec<u8> = (0..stride * storage_height * 3 / 2)
+                .map(|i| (i as u8).wrapping_add((i / stride) as u8))
+                .collect();
+            let mut guard = driver.lock.lock().unwrap();
+            guard.contexts[0].as_mut().unwrap().v4l2 =
+                Some(crate::v4l2::V4l2Session::publishing_test_session(
+                    &pixels,
+                    stride,
+                    storage_height,
+                    format,
+                ));
+            for i in 0..3 {
+                let mut surface = surface_with(SurfaceState::Pending, None);
+                surface.width = 128;
+                surface.owner = DRV_ID_BASE_CONTEXT;
+                surface.format = format;
+                // A stale alias with no backing must fail without freeing the
+                // CAPTURE before the displayed frame can publish its pixels.
+                if i != 1 {
+                    surface.backing =
+                        Some(SurfaceBacking::allocate_for_test(128, 64, format).unwrap());
+                }
+                guard.surfaces[i] = Some(surface);
+            }
+            apply_ready_captures(
+                &mut guard,
+                DRV_ID_BASE_CONTEXT,
+                (0..3)
+                    .map(|i| ReadyCapture {
+                        surface: DRV_ID_BASE_SURFACE + i,
+                        failed: false,
+                        direct: false,
+                        cap_idx: Some(0),
+                        frame: None,
+                    })
+                    .collect(),
+            );
+            assert_eq!(
+                guard.surfaces[1].as_ref().unwrap().state,
+                SurfaceState::Dead
+            );
+            assert!(
+                !guard.contexts[0]
+                    .as_ref()
+                    .unwrap()
+                    .v4l2
+                    .as_ref()
+                    .unwrap()
+                    .capture_is_publishing(0)
+            );
+            // Replace the decoder's completed bytes before reading either
+            // alias. Each surface must retain an independent allocation.
+            guard.contexts[0].as_mut().unwrap().v4l2 =
+                Some(crate::v4l2::V4l2Session::publishing_test_session(
+                    &vec![0xee; pixels.len()],
+                    stride,
+                    storage_height,
+                    format,
+                ));
+            for i in [0, 2] {
+                let surface = guard.surfaces[i].as_ref().unwrap();
+                assert_eq!(surface.state, SurfaceState::Ready);
+                assert!(surface.frame.is_none());
+                let frame = surface.backing.as_ref().unwrap().download().unwrap();
+                for (plane, rows) in [64, 32].into_iter().enumerate() {
+                    for row in 0..rows {
+                        let src = (plane * storage_height as usize + row) * stride as usize;
+                        let dst = (plane * frame.height as usize + row) * frame.stride as usize;
+                        assert_eq!(
+                            &frame.data[dst..dst + stride as usize],
+                            &pixels[src..src + stride as usize],
+                            "hidden/display alias must survive CAPTURE reuse"
+                        );
+                    }
+                }
+            }
+            guard.surfaces[0]
+                .as_mut()
+                .unwrap()
+                .backing
+                .as_mut()
+                .unwrap()
+                .copy_decoded(&vec![0xff; pixels.len()], stride, storage_height, format)
+                .unwrap();
+            let other = guard.surfaces[2]
+                .as_ref()
+                .unwrap()
+                .backing
+                .as_ref()
+                .unwrap()
+                .download()
+                .unwrap();
+            assert_eq!(&other.data[..stride as usize], &pixels[..stride as usize]);
+        }
     }
 
     #[test]

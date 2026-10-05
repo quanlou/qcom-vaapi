@@ -20,6 +20,143 @@ short and update it whenever a task starts, finishes, or gets blocked.
   before marking it done.
 
 ## Active task
+RC10 WRAP-UP OWNER (user requested finish CPU-copy reduction +8K together):
+Combined source integrated into primary main from frozen GPUe7d93563 +8Kr8,
+with kernel-MMAP pool budget before allocation and visible GPU variant label.
+Both source snapshots preserved at rc10-final-20261005. Otherchat was idle;
+its 8K geometry/budgets retained. Combined318tests +316normal PASS, explicit
+8K7coded/2hidden host fixture PASS, strictClippyboth/release PASS. README and
+RC10 notes condensed with honest pending hardware state; GPU Deb runtime deps.
+Host stress4/4 +parallel320 PASS, Python242 PASS. Preparing development
+source commit +onecombinedDeb. InstalledRC9 unchanged.
+Current8676boot3SYSTEM errors, required matrix/churn/8K/browser pending fresh
+boot. No unqualified release/install; restart reply pending. Root owns wrap-up.
+
+ROOT GPU FRAME TRANSFER OWNER (user requested almost no CPU pixel copies):
+Isolated checkout: /home/mq/.codex/worktrees/gpu-frame-transfer/libva-v4l2.
+Current private candidate e7d93563: optional GPU transfers, retained AV1 owners,
+VP9 kernel CAPTURE with internal EXPBUF, and both ports stopped before either
+pool is released (OUTPUT then CAPTURE, matching native FFmpeg). Keep source
+pinned through all alias publications; internal export cache has no client
+reservation count. Streamoff/release results logged. No CPU mapping when GPU
+publication succeeds; GPU still moves pixels and CPU readback/fallback remains.
+311 GPU/system-av1 tests +309 normal tests PASS; strict Clippy both, format,
+release, C ownership tests,7 guard tests,2 failfast tests PASS. Drop ioctl test
+proves both stops precede pixel unmapping even when input stop fails.
+Frozen sourcepatch/build/logs: gpu-copy-20261005-stop-order-candidate.
+Latest device evidence is PRIOR candidate660c21dc native-pool-r1: recovered-FW
+changedcandidate diagnostic, first requested VP9 output pixelPASS,14GPU
+publications/zeroCPUpublication-copy; next30session stalls afterfirstGPU frame,
+adds TWO new SYSTEM errors. Observer stopped, no lingering processes, lease
+free, Irisrefs0. Boot8676c4c3 now3SYSTEM0x5000003, noBUG/Oopsrecords. Cause
+UNPROVEN; preserve outcome-adjudication.json. No more hardware onthisboot.
+Latest close-order change has NOT run onhardware. Strict matrix/churn preflights
+both rejected currentfaultedboot with0hardwarecommands; required1/30/full,
+probe order and guards preserved. Full matrix/churn/browser pending cleanboot.
+Earlier GPU parity PASS48 NV12/P010 through4K with padding/guards; captured
+AV1 4K replay PASS32pixels/order/32GPUpublications/zeroCPUpublicationcopy.
+Ordinary FFmpeg AV1 assembly failed beforeGPU; full/browserAV1 unqualified.
+Earlier combined09b50e3f matrix passed H2641/30/full,GL300,res780,long3600,
+HEVC/Main10; VP9failed. Stablepool889ffe85 failed/withdrawn. Boot59f67c2a had
+oneSYSTEM +3memoryBUGs (NOT2SYSTEM; fault-adjudication saved), causeunknown.
+Bootbf249140 forcedrestart endedinFPACOops; useraskedignorefreeze. Rootopened
+no decoder/GPU onthatboot. Guards now catch Internalerror/Oops/panic.
+STOP-LAST scratch handshake hardwarePROVEN onclean8676boot5caeec29 firstleg;
+followingVP930stillfailed. CompleteSTOP is insufficient forunderlyingVP9bug.
+Installed RC9 b1047fb4 unchanged. No merge/install/commit/release. Otherchat's
+main RC10/8K files remain reserved; root changed onlythismain coordinationfile.
+
+8K RC10 CANDIDATE OWNER (Inspect Chromium playback CPU):
+Fresh boot59f67c2a r6 required matrix1791126860 passed H2641/30/full,
+GL300/res780/long3600 +HEVC/Main10, failedVP930 at secondframe emptyCAPTURE;
+window clean; churn/8KNOTRUN. Separate stableVP9pool trial system-faulted boot;
+r7 identicalpolicy preflight stopped0opens, nowWITHDRAWN. Later separate
+terminal VP9 trial added3memoryBUGs, wholeboot1systemerror. No morehardware.
+HOST-only r8 nowBUILT db4188b6: frozen r6 GPU/8K plus frozen GPU owner's
+terminal/drain candidate5caeec29 source; preserve8K allocationbudget. Private
+VP9defaultoutputmode hypothesis; H264/HEVC/AV1controls unchanged. 312tests
+bothvariants +fmt/strictlint/release PASS. Originalfirst2VP9 packets byte-exact
+throughRust+softwarepixels PASS (VA-shaped params, NOTlivecallbackcapture).
+Actual8KAV1 callbackfixture7coded/2hidden PASS. Exactsource/tool/artifactpins
+sealed; read-onlypreflight rejectedcurrentboot0decoder/GPUopens. No primary
+GPU/mode/teardown integration or othercheckout edits. r8readiness.json contains
+scope/hashes. Wholematrix/churn/8Kpixels stillrequired beforebrowser/install/
+release; freshbootneeded fornextmanual test. ControllersSTOPPED/leasefree.
+
+Primary main edits reserved: Cargo, Rust shared geometry/context/surface/import/
+image/backing, v4l2/import/direct/submit/setup, raw transport tests, both decode
+verifiers +fail-fast tests, README/RC10 notes. GPU implementation remains
+separately owned; no changes to its checkout or primary GPU files.
+Normal limit4096; experimental-8k side8192 +Iris rounded8K area; CAPTURE pool
+1GiB independent from1GiB surface budget. Primary r4:301hosttests/5ignored in
+both variants, fmt/strictClippy/normal+experimentalrelease PASS. Actual8KAV1
+7coded/2hidden/6display assembly both callback orders +software roundtrip PASS.
+Initial matrix hardware-1791120186 passed H2641/30/full, GL300, res780,
+long3600, HEVC/Main10, thenFAILED VP9. Broad direct wait trial r2FAILED H264
+and was withdrawn. VP9-only r3 passedH264/export/res/long before nativeHEVC
+reference raised5 session-fatal0x4000003; private tree stopped/cleaned.
+Primary r4 adds terminal-on-wait failure and1s source-change fail-closed guard;
+standard verifier1/30/full/probeorder unchanged, -xerror/fail-fast preserves faults.
+User challenged reboot and authorized retry: native-reopen-1791121904 PASS30
+pixels/no newerrors. Reboot NOTneeded for session recovery. Recovered-boot
+single diagnostics preserve exactfive-session-error baseline; not clean matrix.
+Headless8K all7NV12pixels PASS at eight-k-diagnostic-1791122038.
+VP9 direct pacing PASS30display/46coded/zeroCPUcopy at1791122606.
+Unchanged churn PASS7/7 at1791122775; controller's wrongsummary string
+preserved/adjudicated byhost against exit0+allseven records, noHWrerun.
+Chrome visible8K5fps12s PASS59/60RVFC,1startupdrop/zero steady, no newfaults.
+Earlier shortstartupdrop and longonly1RVFC failures retained, no relabeling.
+8K~30fps fixture FAILED:20s wall ->4.99s media,160total/136drops/23RVFC.
+190coded frame median sync106.9ms, noSTOP/replay/allocation errors/newfaults.
+Private timing r5:70coded, CPUbackingmedian43.29ms alone; writewait0.003ms,
+readcache0.007ms, writecache0.001ms. Measurement complete, playbackFAIL.
+Private gpu-eight-k-r6 combines frozen r4 +existing GPU owner's implementation,
+resolved onlyCargo/lib declarations.306hosttests/6ignored, explicitactual8K
+callback fixture, fmt/strictlint/release PASS. No primary GPU integration/install.
+Prepared ONE7coded8K GPU/parity test stopped in PREFLIGHT, zeroGPU/decoder
+opens: nowboot0c7db88c has two additional system-errors0x5000003 fromseparate
+GPU codec matrix. Sourcecause UNPROVEN; olderVP9 admission used inthat matrix.
+Preserve gpu-eight-k-diagnostic-1791124924 andpreflight-adjudication.json.
+All private controllers STOPPED/leasefree; Irisrefs0/suspended. No morehardware
+on this system-fault boot. User restartquestion pending; fresh-boot/pinned-artifact
+pixel controller prepared but NOTlaunched, no automaticwatcher/retry.
+Full required matrix FAILED; combined8K GPU/performance/8K30/60/Firefox8K
+unqualified. InstalledRC9 b1047fb4 unchanged; no modules/clock/reset/install/
+commit/release. Evidence /home/mq/.cache/libva-v4l2-qualification/8k-candidate-20261004
+
+ROOT RC9 4K USER PLAYBACK OBSERVED: boot8cbf80a6, exact b1047fb4 loaded
+in ChromeGPU19190, player5 VP9 3840x2160 VaapiVideoDecoder/platform=true,
+kPlaying and no fallback across17.22s media report. Two sessions;596 CAPTURE
+submissions/558 nonempty completions/38 empty markers, no address mismatch or
+lost events. Memory1228 submissions/no zero bases;1234 queue/release calls
+returned success. Wholeboot and Chrome errors clean. Both observers stopped,
+shared lease released; personal playback remains running. No code/install/
+module changes. Evidence rc9-vp9-traced-ready-n38wropv. Earlier intermittent
+SMMU fault remains UNRESOLVED; no sustained4K60/performance qualification.
+
+ROOT POST-RESTART RC9 TRACE WAITING FOR USER PLAYBACK: new boot8cbf80a6 clean and idle,
+loaded Iris caccaef16, qrtr a3742ff5/qrtr_mhi2a9b093b, RC9 b1047fb4.
+Fresh packet rc9-vp9-traced-once-0wal83mg: ownership type/identity check and
+BPF codegen PASS; both observers attached then stopped cleanly after90s.
+ZERO decoder submissions/completions; user playback did not start in window.
+No hardware qualification/fix claimed. Shared lease released, all observers
+stopped; whole-boot journal remains clean and refcount0. Do not rerun sealed
+packet. Await user-ready signal before a fresh observation window. No module
+replacement/install/automatic decoder retries or browser launches occurred.
+
+ROOT RC9 4K VP9 FAILURE AUDIT / RESTART NEEDED (2026-10-04): preserved player24 report and
+whole-boot evidence; loaded RC9 b1047fb4 inode8651327 verified. First decoder
+errors 15:37:54 precede SMMU NULL-IOVA write fault/system errors 15:37:55;
+player24 VAAPI -> Vpx fallback ~10s. Loaded Iris caccaef16 matches local
+EL2 module ELF; selected on disk 231cb9f3 differs. Fresh tracing prepared
+for both exact ELFs, no attachments; 5 analyzer host tests PASS. Evidence
+/home/mq/.cache/libva-v4l2-qualification/rc9-vp9-player24-ofaovg6m
+No qualified fix/root cause yet. Faulted boot eefdf635: read-only/host
+work only, no decoder opens/retries or installation. Reserve incident report
+only while Inspect Chromium 4K playback CPU reviews overlapping 8K transition
+and kernel teardown. Current 4K VP9 failure must not be explained by the 8K
+dimension limit. Source changes require a separate reservation.
+
 Root Chrome caller-buffer import integrated into main with DMA-BUF CAPTURE; combined282 host tests/4 ignored plus stress/lint/build PASS. Hardware qualification and playback deferred; no root installation/device operations. Frozen integration evidence /home/mq/.cache/libva-v4l2-qualification/resume-20261002/chrome-prime-import-main-integration.i8vblxex.
 
 RELEASE ASSET BRANCH CLEANUP COMPLETE: userrequesteddeleteallholding

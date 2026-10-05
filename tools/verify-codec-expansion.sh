@@ -104,9 +104,9 @@ first_frame_line() { # <framemd5 file>
 leg_status=0
 decode_leg() { # <frames> <out.md5> <log> <file> <download format>
     set +e
-    timeout 120s "$kernel_tool" -- \
+    "$kernel_tool" -- timeout -k 5s 120s \
         env V4L2_VA_DEBUG=1 LIBVA_DRIVERS_PATH="$driver_dir" \
-        ffmpeg -y -nostdin -hide_banner -v error \
+        ffmpeg -y -nostdin -hide_banner -v error -xerror \
         -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device "$drm_device" \
         -i "$4" -map 0:v:0 -frames:v "$1" \
         -vf "hwdownload,format=$5" -f framemd5 "$2" \
@@ -166,6 +166,10 @@ run_codec() { # <name> <profile> <file> <pattern> <reference decoder> <reference
     decode_leg 1 "$ref_md5" "$ref_log" "$file" "${reference_pix_fmt:-nv12}"
     ref_status=$leg_status
     read -r ref_session ref_system <<< "$(kernel_counts "$ref_log")"
+    if [[ "$ref_status" -ne 0 ]]; then
+        echo "codec_$name=fail reason=self_ref_decode_failed status=$ref_status log=$ref_log"
+        return 1
+    fi
 
     # Leg 2: N-frame decode through the driver.
     decode_leg "$codec_frames" "$n_md5" "$n_log" "$file" "${reference_pix_fmt:-nv12}"
@@ -229,6 +233,9 @@ for spec in "${codec_specs[@]}"; do
         skipped=$((skipped + 1))
     elif [[ "$rc" -eq 1 ]]; then
         failed=$((failed + 1))
+        # Preserve the failure and stop opening decoder sessions. A failed
+        # direct-buffer leg is not a reason to submit another codec or retry.
+        break
     else
         verified=$((verified + 1))
     fi

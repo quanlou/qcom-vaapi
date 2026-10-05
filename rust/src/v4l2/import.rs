@@ -5,9 +5,14 @@ use super::{V4l2Session, debug_enabled};
 use crate::bindings::*;
 use std::os::fd::{AsRawFd, OwnedFd};
 
+// CAPTURE storage and standalone exported surfaces have separate owners.
+// Bound the working pool before allocating any of its DMA-BUFs, especially
+// when experimental 8K frames require tens of megabytes per slot.
+pub(super) const MAX_CAPTURE_POOL_BYTES: usize = 1024 * 1024 * 1024;
+
 /// Validate the negotiated storage geometry, not the visible VA dimensions.
 /// In particular, Iris puts chroma after its padded luma storage height.
-fn capture_size(pix: &v4l2_pix_format_mplane) -> Result<usize, ()> {
+pub(super) fn capture_size(pix: &v4l2_pix_format_mplane) -> Result<usize, ()> {
     let format = crate::pixel_format::DecodedFormat::from_v4l2_fourcc(pix.pixelformat).ok_or(())?;
     let stride = pix.plane_fmt[0].bytesperline;
     let size = pix.plane_fmt[0].sizeimage;
@@ -40,12 +45,56 @@ impl V4l2Session {
         })
     }
 
+    pub(super) fn prepare_drain_capture(&mut self) -> Result<usize, ()> {
+        let fd = self.capture_drm_fd.as_ref().ok_or(())?.as_raw_fd();
+        self.prepare_drain_capture_with(|size| {
+            crate::surface_backing::allocate_capture_drm(size, fd).map_err(|_| ())
+        })
+    }
+
+    fn prepare_drain_capture_with(
+        &mut self,
+        allocate: impl FnOnce(usize) -> Result<OwnedFd, ()>,
+    ) -> Result<usize, ()> {
+        // Slot zero belongs to the published direct surface. A separate,
+        // unowned slot receives LAST without risking those retained pixels.
+        let size = capture_size(&unsafe { self.cap.fmt.fmt.pix_mp })?;
+        let idx = self
+            .cap
+            .buffers
+            .iter()
+            .enumerate()
+            .skip(1)
+            .find_map(|(idx, b)| {
+                (b.state == super::BufferState::Free
+                    && b.reserved_for.is_none()
+                    && b.export_refs == 0
+                    && b.num_planes == 0)
+                    .then_some(idx)
+            })
+            .ok_or(())?;
+        let fd = allocate(size)?;
+        let b = &mut self.cap.buffers[idx];
+        b.num_planes = 1;
+        b.len[0] = size;
+        b.planes[0].length = size as u32;
+        b.planes[0].m.fd = fd.as_raw_fd();
+        b.import_fd = Some(fd);
+        Ok(idx)
+    }
+
     fn initialize_imported_capture_with(
         &mut self,
         mut allocate: impl FnMut(usize) -> Result<OwnedFd, ()>,
     ) -> Result<(), ()> {
         let pix = unsafe { self.cap.fmt.fmt.pix_mp };
         let size = capture_size(&pix)?;
+        if size
+            .checked_mul(self.cap.buffers.len())
+            .is_none_or(|bytes| bytes > MAX_CAPTURE_POOL_BYTES)
+        {
+            return Err(());
+        }
         let stride = pix.plane_fmt[0].bytesperline;
         let storage_height = pix.height;
         // Allocate the entire new tail before changing slot metadata. An
@@ -94,6 +143,48 @@ mod tests {
         pix.plane_fmt[0].bytesperline = pix.width * format.bytes_per_sample();
         pix.plane_fmt[0].sizeimage = pix.plane_fmt[0].bytesperline * pix.height * 3 / 2;
         pix
+    }
+
+    #[test]
+    fn drain_scratch_does_not_replace_a_surface_or_a_busy_capture_slot() {
+        use super::super::{BufferState, V4l2Buffer};
+        let mut session = super::super::submit::tests::streaming_session_with_pending_fifo(-1);
+        session.out.streaming = false;
+        session.fifo.clear();
+        session.cap.fmt.fmt.pix_mp = geometry(DecodedFormat::Nv12);
+        session.cap.buffers = (0..4).map(|_| V4l2Buffer::new()).collect();
+        let surface = File::open("/dev/null").unwrap();
+        let surface_fd = surface.as_raw_fd();
+        session.cap.buffers[0].import_fd = Some(surface.into());
+        session.cap.buffers[0].num_planes = 1;
+        session.cap.buffers[0].state = BufferState::DirectComplete;
+        session.cap.buffers[1].reserved_for = Some(9);
+        session.cap.buffers[1].state = BufferState::Reserved;
+        session.cap.buffers[2].state = BufferState::Publishing;
+        assert!(session.prepare_drain_capture_with(|_| Err(())).is_err());
+        assert_eq!(session.cap.buffers[3].num_planes, 0);
+        assert!(session.cap.buffers[3].import_fd.is_none());
+        assert_eq!(
+            session.prepare_drain_capture_with(|size| {
+                assert_eq!(size, 12_533_760);
+                Ok(File::open("/dev/null").unwrap().into())
+            }),
+            Ok(3)
+        );
+        assert_eq!(
+            session.cap.buffers[0]
+                .import_fd
+                .as_ref()
+                .unwrap()
+                .as_raw_fd(),
+            surface_fd
+        );
+        assert!(session.cap.buffers[0].state == BufferState::DirectComplete);
+        assert_eq!(session.cap.buffers[1].reserved_for, Some(9));
+        assert!(session.cap.buffers[2].state == BufferState::Publishing);
+        assert_eq!(session.cap.buffers[3].len[0], 12_533_760);
+        assert!(session.cap.buffers[3].import_fd.is_some());
+        assert!(session.cap.buffers[3].state == BufferState::Free);
     }
 
     #[test]
@@ -206,6 +297,62 @@ mod tests {
                 .buffers
                 .iter()
                 .all(|b| b.addr[0].is_null() && b.len[0] == 12_533_760)
+        );
+    }
+
+    #[test]
+    fn eight_k_pool_budget_is_checked_before_allocating_or_replacing_slots() {
+        let file = File::open("/dev/null").unwrap();
+        let mut session = super::super::submit::tests::streaming_session_with_pending_fifo(
+            file.try_clone().unwrap().into_raw_fd(),
+        );
+        session.fifo.clear();
+        session.out.streaming = false;
+        let mut pix = geometry(DecodedFormat::Nv12);
+        pix.width = 7680;
+        pix.height = 4320;
+        pix.plane_fmt[0].bytesperline = 7680;
+        pix.plane_fmt[0].sizeimage = 7680 * 4320 * 3 / 2;
+        session.cap.fmt.fmt.pix_mp = pix;
+        // 22 frames exceed 1 GiB; no allocation may occur before rejecting it.
+        session.cap.buffers = (0..22).map(|_| super::super::V4l2Buffer::new()).collect();
+        assert!(
+            session
+                .initialize_imported_capture_with(|_| panic!("over budget"))
+                .is_err()
+        );
+        assert!(session.cap.buffers.iter().all(|b| b.import_fd.is_none()));
+        session.cap.buffers.truncate(10);
+        let mut allocations = 0;
+        session
+            .initialize_imported_capture_with(|size| {
+                assert_eq!(size, 49_766_400);
+                allocations += 1;
+                Ok(file.try_clone().unwrap().into())
+            })
+            .unwrap();
+        assert_eq!(allocations, 10);
+        let live_fd = session.cap.buffers[0]
+            .import_fd
+            .as_ref()
+            .unwrap()
+            .as_raw_fd();
+        session
+            .cap
+            .buffers
+            .extend((0..12).map(|_| super::super::V4l2Buffer::new()));
+        assert!(
+            session
+                .initialize_imported_capture_with(|_| panic!("over budget growth"))
+                .is_err()
+        );
+        assert_eq!(
+            session.cap.buffers[0]
+                .import_fd
+                .as_ref()
+                .unwrap()
+                .as_raw_fd(),
+            live_fd
         );
     }
 

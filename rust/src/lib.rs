@@ -11,6 +11,8 @@ mod codec;
 mod config;
 mod context;
 mod decode;
+mod geometry;
+mod gpu_copy;
 mod h264;
 mod h265;
 mod image;

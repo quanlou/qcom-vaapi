@@ -15,8 +15,8 @@ pub(crate) use layout::{
 use crate::bindings::*;
 use crate::pixel_format::DecodedFormat;
 use crate::state::{
-    Buffer, DRV_ID_BASE_BUFFER, DRV_ID_BASE_IMAGE, DRV_MAX_DIM, DRV_MIN_DIM, DriverState, Image,
-    SurfaceState, buffer_index, image_index, surface_index,
+    Buffer, DRV_ID_BASE_BUFFER, DRV_ID_BASE_IMAGE, DriverState, Image, SurfaceState, buffer_index,
+    image_index, surface_index,
 };
 use crate::sync::sync_surface;
 use crate::{err, ok, state_from_ctx};
@@ -62,9 +62,7 @@ pub(crate) unsafe extern "C" fn create_image(
     let Some(decoded_format) = decoded_format_from_image(&fmt) else {
         return err(VA_STATUS_ERROR_INVALID_IMAGE_FORMAT);
     };
-    if !(DRV_MIN_DIM..=DRV_MAX_DIM).contains(&width)
-        || !(DRV_MIN_DIM..=DRV_MAX_DIM).contains(&height)
-    {
+    if !crate::geometry::valid_dimensions(width as u32, height as u32) {
         return err(VA_STATUS_ERROR_INVALID_PARAMETER);
     }
     let Some(state) = (unsafe { state_from_ctx(ctx) }) else {
