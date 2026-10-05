@@ -1,0 +1,14 @@
+{
+  "tag": "v0.1.1-rc.10",
+  "version": "0.1.1-rc.10",
+  "asset_commit": "d3eaf6dd64cd44c4598a496e0a118822059b83ea",
+  "notes": "packaging/releases/v0.1.1-rc.10.md",
+  "source_archive": "qcom-vaapi_0.1.1-rc.10-source.tar.xz",
+  "assets": {
+    "ffmpeg-companion-build-inputs.tar.xz": "94b3282424ee151525c1e587e59105f4755ea0e1b06a84228973d49eefadc138",
+    "ffmpeg-companion-source.tar.xz": "58d038fccfec3634127eb04cb8e2dd78792ad52995b9f58c8917929f6e056ade",
+    "qcom-vaapi_0.1.1-rc.10-driver-source.tar.xz": "df7fdfe364d2097c8f477ffc2e8433a21e51e82af3ae8e89ec273386ccf5cf63",
+    "qcom-vaapi_0.1.1.rc.10_arm64.deb": "4917688855e6ed296bcd6ace9dd10590f0ea999270e13fb3bab6431c4cda68ca",
+    "qualification.json": "5545516a528ac8cd9a0b9fd9381ba3d30824de2a86f6a884682f72edf87b2b16"
+  }
+}

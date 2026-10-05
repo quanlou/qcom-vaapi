@@ -20,6 +20,12 @@ short and update it whenever a task starts, finishes, or gets blocked.
   before marking it done.
 
 ## Active task
+RC10 PUBLICATION OWNER: user explicitly requested the missing GitHub build.
+Publishing installed RC10 as a development prerelease, keeping hardware=false.
+Exact Deb/source/companion assets pinned for existing release workflow; temporary
+asset upload branch will be removed after successful publication. No hardware
+tests or binary changes; README/download notes will point to RC10.
+
 RC10 WRAP-UP OWNER (user requested CPU-copy reduction +8K together):
 Combined source committed/pushed to main as a30f4abff4147ae86445f25466e2cc50ed36b595.
 GitHub Driver checks PASS: https://github.com/quanlou/qcom-vaapi/actions/runs/37270686447

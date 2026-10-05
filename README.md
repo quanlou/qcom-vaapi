@@ -19,13 +19,14 @@ can still fail. [Copy paths](docs/gpu-copy.md).
 
 ## Current status
 
-**RC10 is a development build**, not yet released.
+**RC10 is a development prerelease.**
 Full codec / buffer-reuse checks remain pending. VP9 session reuse and Iris
 faults remain unresolved. Sustained 4K60 / 8K30, 8K60, Firefox 8K and
 suspend/resume reliability are unverified. [RC10 details](docs/releases/0.1.1-rc.10.md).
 
-The published package is **[RC6](https://github.com/quanlou/qcom-vaapi/releases/tag/v0.1.1-rc.6)**;
-RC10's GPU transfers and experimental 8K require building from `main`.
+Download **[RC10](https://github.com/quanlou/qcom-vaapi/releases/tag/v0.1.1-rc.10)**
+for GPU transfers and experimental 8K. [RC6](https://github.com/quanlou/qcom-vaapi/releases/tag/v0.1.1-rc.6)
+remains available.
 
 ## Install
 
@@ -33,15 +34,15 @@ Requires ARM64 / X1E80100, compatible Iris kernel and firmware,
 `libc6 >= 2.44` and `libva2 >= 2.24`. Tested on Ubuntu 26.10 development with
 patched `7.3.0-15-qcom-x1e`; other chips are untested.
 
-Download the RC6 `.deb` from the release above, then:
+Download the RC10 ARM64 `.deb` from the release above, then:
 
 ```sh
-sudo apt install ./qcom-vaapi_0.1.1.rc.6_arm64.deb
+sudo apt install ./qcom-vaapi_0.1.1.rc.10_arm64.deb
 vainfo
 ```
 
 Restart video apps after installation. The package installs userspace libraries;
-kernel / firmware setup is separate. [Setup details](docs/releases/0.1.1-rc.6.md).
+kernel / firmware setup is separate. [Setup details](docs/releases/0.1.1-rc.10.md).
 Remove with `sudo apt remove qcom-vaapi`.
 
 ## Build RC10
