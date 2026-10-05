@@ -20,12 +20,6 @@ short and update it whenever a task starts, finishes, or gets blocked.
   before marking it done.
 
 ## Active task
-RC10 PUBLICATION OWNER: user explicitly requested the missing GitHub build.
-Publishing installed RC10 as a development prerelease, keeping hardware=false.
-Exact Deb/source/companion assets pinned for existing release workflow; temporary
-asset upload branch will be removed after successful publication. No hardware
-tests or binary changes; README/download notes will point to RC10.
-
 RC10 WRAP-UP OWNER (user requested CPU-copy reduction +8K together):
 Combined source committed/pushed to main as a30f4abff4147ae86445f25466e2cc50ed36b595.
 GitHub Driver checks PASS: https://github.com/quanlou/qcom-vaapi/actions/runs/37270686447
@@ -46,7 +40,12 @@ system-wide at 2026-10-05T08:44:27Z. Driver f14d8f9d/unchanged companion hashes
 match, dpkg verification clean, label includes GPU transfers +experimental8K.
 Install opened0decoder/GPU; modules unchanged, power helper disabled/inactive.
 Receipt and RC9 rollback at ~/.local/share/qcom-vaapi/releases/0.1.1-rc.10.
-No RC10 tag/release; playback qualification pending. VP9 session reuse,
+RC10 development prerelease published at
+https://github.com/quanlou/qcom-vaapi/releases/tag/v0.1.1-rc.10
+(tag source5e147b5, immutable asset commitd3eaf6dd). Public7asset inventory/digests,
+Deb and checksum downloads, tagged source tree VERIFIED. Release workflow
+37336415951 +main/tag Driver checks PASS. Temporary upload branch removed;
+only main remains. Playback qualification still pending. VP9 session reuse,
 current8K pixels and sustained8K30 remain unresolved/unqualified. Root owns wrap-up.
 
 ## Prior task evidence (historical; current status above supersedes reservations)
@@ -2148,6 +2147,12 @@ physical-memory claims. Preserve all user changes/failures. All runners exited,
 refcnt0; stay quiet while operator pending unless meaningful new progress.
 
 ## Completed recently
+
+- RC10 GitHub publication: tag v0.1.1-rc.10 points to5e147b5;7assets include
+  the exact installed Deb4917688855e6ed29, corresponding sources, checksums and
+  hardware=false qualification. Public downloads and tagged archive tree PASS.
+  README now links RC10 and installs its version. Temporary asset branch deleted;
+  publication receipt rc10-final-20261005/publication/published.json.
 
 - README capabilities-first rewrite: about half the words; decoding, zero-copy
   layout limits, GPU transfers, apps and experimental8K before setup. Full
