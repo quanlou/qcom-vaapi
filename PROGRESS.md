@@ -2143,6 +2143,12 @@ refcnt0; stay quiet while operator pending unless meaningful new progress.
 
 ## Completed recently
 
+- README capabilities-first rewrite: about half the words; decoding, zero-copy
+  layout limits, GPU transfers, apps and experimental8K before setup. Full
+  build/package/testing instructions moved to docs/build.md; feature selection
+  stays enabled through verification. Documentation only, local links/anchors,
+  shell examples and git diff --check PASS. User requested main commit/push.
+
 - Root human-requested source integration of32fcf95 into mainf0ec362: combined
   cargo test --locked --offline --all-features --lib282 PASS/4 ignored,
   verify-host-stress4/286 PASS/4 ignored, fmt/diff/strictClippy/release PASS.
