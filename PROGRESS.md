@@ -35,7 +35,12 @@ publication witness. Full-boot/module/source/artifact pins, exclusive lease,
 private processes, one attempt seal, no automatic retry or module mutation.
 Read-only --check rejected current8676c4c3 boot with3SYSTEM faults,0GPU/decoder
 opens. Hardware tests have NOT run on this combined source. Restart reply
-pending. InstalledRC9 unchanged; no RC10 tag/release/install. VP9 session reuse,
+pending. User then explicitly requested installation: RC10 installed and verified
+system-wide at 2026-10-05T08:44:27Z. Driver f14d8f9d/unchanged companion hashes
+match, dpkg verification clean, label includes GPU transfers +experimental8K.
+Install opened0decoder/GPU; modules unchanged, power helper disabled/inactive.
+Receipt and RC9 rollback at ~/.local/share/qcom-vaapi/releases/0.1.1-rc.10.
+No RC10 tag/release; playback qualification pending. VP9 session reuse,
 current8K pixels and sustained8K30 remain unresolved/unqualified. Root owns wrap-up.
 
 ## Prior task evidence (historical; current status above supersedes reservations)
