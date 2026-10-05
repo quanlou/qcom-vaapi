@@ -20,17 +20,25 @@ short and update it whenever a task starts, finishes, or gets blocked.
   before marking it done.
 
 ## Active task
-RC10 WRAP-UP OWNER (user requested finish CPU-copy reduction +8K together):
-Combined source integrated into primary main from frozen GPUe7d93563 +8Kr8,
-with kernel-MMAP pool budget before allocation and visible GPU variant label.
-Both source snapshots preserved at rc10-final-20261005. Otherchat was idle;
-its 8K geometry/budgets retained. Combined318tests +316normal PASS, explicit
-8K7coded/2hidden host fixture PASS, strictClippyboth/release PASS. README and
-RC10 notes condensed with honest pending hardware state; GPU Deb runtime deps.
-Host stress4/4 +parallel320 PASS, Python242 PASS. Preparing development
-source commit +onecombinedDeb. InstalledRC9 unchanged.
-Current8676boot3SYSTEM errors, required matrix/churn/8K/browser pending fresh
-boot. No unqualified release/install; restart reply pending. Root owns wrap-up.
+RC10 WRAP-UP OWNER (user requested CPU-copy reduction +8K together):
+Combined source committed/pushed to main as a30f4abff4147ae86445f25466e2cc50ed36b595.
+GitHub Driver checks PASS: https://github.com/quanlou/qcom-vaapi/actions/runs/37270686447
+Binary f14d8f9d; Deb 4917688855e6ed29 built, extracted/verified and apt simulation
+PASS. Full receipt/assets/source snapshots: ~/.cache/libva-v4l2-qualification/rc10-final-20261005.
+318 combined /316 normal Rust tests, explicit8K7coded/2hidden fixture, strict
+Clippy both, host stress4+parallel320, Python242, C ownership and formatting PASS.
+README/RC10 notes condensed; GPU runtime dependencies included in Deb. All
+FFmpeg source/license archives hash-match published companion assets.
+Single final sequence prepared/frozen: required1/30/full matrix, churn7/7,
+GPU48transfer parity,7coded8K pixels, private Chrome8K30 with zero CPU
+publication witness. Full-boot/module/source/artifact pins, exclusive lease,
+private processes, one attempt seal, no automatic retry or module mutation.
+Read-only --check rejected current8676c4c3 boot with3SYSTEM faults,0GPU/decoder
+opens. Hardware tests have NOT run on this combined source. Restart reply
+pending. InstalledRC9 unchanged; no RC10 tag/release/install. VP9 session reuse,
+current8K pixels and sustained8K30 remain unresolved/unqualified. Root owns wrap-up.
+
+## Prior task evidence (historical; current status above supersedes reservations)
 
 ROOT GPU FRAME TRANSFER OWNER (user requested almost no CPU pixel copies):
 Isolated checkout: /home/mq/.codex/worktrees/gpu-frame-transfer/libva-v4l2.
